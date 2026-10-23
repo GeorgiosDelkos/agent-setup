@@ -1,0 +1,3 @@
+anyhow-bad/Cargo.toml:10: [ERR-ANYHOW] (rust-style ERR-3) `anyhow` in a published library's dependencies: its users would build it too; make it optional behind a `cli` feature, or a dev-/build-dependency
+anyhow-bad/Cargo.toml:17: [ERR-ANYHOW] (rust-style ERR-3) `color-eyre` in a published library's dependencies: its users would build it too; make it optional behind a `cli` feature, or a dev-/build-dependency
+anyhow-bad/Cargo.toml:28: [ERR-ANYHOW] (rust-style ERR-3) `color-eyre` in a published library's dependencies: its users would build it too; make it optional behind a `cli` feature, or a dev-/build-dependency

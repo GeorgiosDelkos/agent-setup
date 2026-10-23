@@ -1,0 +1,2 @@
+bin-crate/src/doc_compile_fail_bad.rs:1: [DOC-COMPILE-FAIL] (rust-style DOC-3) compile_fail doctest without an error code: write ```compile_fail,E0XXX so it fails for the intended reason only
+bin-crate/src/doc_compile_fail_bad.rs:5: [DOC-COMPILE-FAIL] (rust-style DOC-3) compile_fail doctest without an error code: write ```compile_fail,E0XXX so it fails for the intended reason only

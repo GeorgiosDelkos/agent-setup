@@ -1,0 +1,32 @@
+[package]
+name = "anyhow-bad"
+version = "0.1.0"
+publish = ["crates-io"]
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"
+serde = "1"
+
+[dev-dependencies]
+eyre = { version = "0.6" }
+
+[target.'cfg(unix)'.dependencies]
+my-err = { package = "color-eyre", version = "0.6" }
+
+[build-dependencies.anyhow]
+version = "1"
+
+[workspace.dependencies]
+"eyre" = "0.6"
+
+[target.'cfg(windows)'.dev-dependencies]
+anyhow.workspace = true
+
+[dependencies."color-eyre"]
+version = "0.6"
+
+[target.'cfg(unix)'.dependencies]
+anyhow = { version = "1", optional = true }

@@ -1,0 +1,154 @@
+# Copy to .github/workflows/safety.yml. Derived from jonhoo/rust-ci-conf @ de512da1e85b with house
+# additions from Tokio and bytes (strict provenance, TSan, loom flags, panic=abort). Keep it in
+# any crate with `unsafe` code (even one block) or lock-free code; delete it otherwise. Delete the
+# loom jobs if the crate has no loom models, and the tsan step if it has no lock-free code.
+# Runs:
+# - address sanitizer - detects memory errors
+# - leak sanitizer - detects memory leaks; known false positives go in lsan-suppressions.txt
+# - thread sanitizer - detects data races in lock-free code
+# - miri - detects undefined behavior and memory leaks
+# - loom - Permutation testing for concurrent code https://crates.io/crates/loom
+# - panic=abort - catches code and tests that assume panics unwind
+# See check.yml for information about how the concurrency cancellation and workflow triggering works
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: safety
+jobs:
+  sanitizers:
+    name: ubuntu / nightly / sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: nightly
+          # rust-src: tsan needs -Zbuild-std so std itself is instrumented
+          components: rust-src
+      - run: |
+            # to get the symbolizer for debug symbol resolution
+            sudo apt install llvm
+            # to fix buggy leak analyzer:
+            # https://github.com/japaric/rust-san#unrealiable-leaksanitizer
+            # ensure there's a profile.dev section (brackets escaped: rust-ci-conf's unescaped
+            # pattern is a character class that matches almost any line)
+            if ! grep -qE '^[ \t]*\[profile\.dev\]' Cargo.toml; then
+                echo >> Cargo.toml
+                echo '[profile.dev]' >> Cargo.toml
+            fi
+            # remove pre-existing opt-levels in profile.dev
+            sed -i '/^\s*\[profile.dev\]/,/^\s*\[/ {/^\s*opt-level/d}' Cargo.toml
+            # now set opt-level to 1
+            sed -i '/^\s*\[profile.dev\]/a opt-level = 1' Cargo.toml
+            cat Cargo.toml
+        name: Enable debug symbols
+      - name: cargo test -Zsanitizer=address
+        # only --lib --tests b/c of https://github.com/rust-lang/rust/issues/53945
+        run: cargo test --lib --tests --all-features --target x86_64-unknown-linux-gnu
+        env:
+          ASAN_OPTIONS: "detect_odr_violation=0:detect_leaks=0"
+          RUSTFLAGS: "-Z sanitizer=address"
+      - name: cargo test -Zsanitizer=leak
+        if: always()
+        run: cargo test --all-features --target x86_64-unknown-linux-gnu
+        env:
+          LSAN_OPTIONS: "suppressions=lsan-suppressions.txt"
+          RUSTFLAGS: "-Z sanitizer=leak"
+      - name: cargo test -Zsanitizer=thread
+        if: always()
+        # std must be rebuilt with tsan, or every std atomic and lock is a false positive (bytes)
+        run: cargo test -Zbuild-std --lib --tests --all-features --target x86_64-unknown-linux-gnu
+        env:
+          RUSTFLAGS: "-Z sanitizer=thread"
+  miri:
+    name: ubuntu / nightly / miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - run: |
+          echo "NIGHTLY=nightly-$(curl -sSf https://rust-lang.github.io/rustup-components-history/x86_64-unknown-linux-gnu/miri)" >> "$GITHUB_ENV"
+      - name: Install ${{ env.NIGHTLY }}
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: ${{ env.NIGHTLY }}
+          components: miri
+      # Without a target filter, cargo miri test runs lib, integration, and doc tests (Tokio runs
+      # all three). Tests Miri cannot run get `#[cfg_attr(miri, ignore)] // <reason>`.
+      - name: cargo miri test
+        run: cargo miri test --all-features
+        env:
+          # Strict provenance rejects int-to-pointer casts that lose provenance (Tokio, bytes).
+          # Add -Zmiri-disable-isolation if tests read the clock or the filesystem.
+          MIRIFLAGS: "-Zmiri-strict-provenance"
+  loom-build:
+    # Compiles the loom models on every PR so they cannot rot, even though they only run on main.
+    name: ubuntu / stable / loom build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - name: cargo test --no-run
+        run: cargo test --locked --release --lib --no-run
+        env:
+          RUSTFLAGS: "--cfg loom"
+  loom:
+    # Exhaustive permutation runs are slow, so they run on pushes to main only (Tokio). For a
+    # crate whose models finish in a few minutes, drop the `if` and run them on every PR (Jon).
+    if: github.event_name == 'push'
+    name: ubuntu / stable / loom
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      # Models live in `#[cfg(all(test, loom))]` modules beside the code they test, behind the
+      # crate's loom shim (Tokio). If yours live in tests/loom.rs (Jon), use `--test loom`.
+      - name: cargo test --lib (loom)
+        run: cargo test --locked --release --lib
+        env:
+          # debug_assertions keep the crate's invariant checks on in the release build.
+          RUSTFLAGS: "--cfg loom -C debug_assertions"
+          # Bounds the search; 2 preemptions finds most bugs in reasonable time (Tokio, Jon).
+          LOOM_MAX_PREEMPTIONS: 2
+  panic-abort:
+    name: ubuntu / nightly / panic=abort
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: nightly
+      # Tests that need unwinding (should_panic, catch_unwind) are gated with
+      # `#[cfg(panic = "unwind")]` (Tokio).
+      - name: cargo test -C panic=abort
+        run: cargo test --locked --all-features --tests
+        env:
+          RUSTFLAGS: "-C panic=abort -Zpanic-abort-tests"

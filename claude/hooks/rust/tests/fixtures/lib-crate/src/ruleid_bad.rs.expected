@@ -1,0 +1,1 @@
+lib-crate/src/ruleid_bad.rs:3: [DOC-RULEID] (rust-style DOC-11) rule ID ERR-3 in a comment: state the reason itself; rule IDs belong in reviews and commit messages

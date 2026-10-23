@@ -1,0 +1,7 @@
+lib-crate/src/boxdyn_bad.rs:3: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it
+lib-crate/src/boxdyn_bad.rs:7: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it
+lib-crate/src/boxdyn_bad.rs:12: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it
+lib-crate/src/boxdyn_bad.rs:16: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it
+lib-crate/src/boxdyn_bad.rs:20: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it
+lib-crate/src/boxdyn_bad.rs:23: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it
+lib-crate/src/boxdyn_bad.rs:29: [ERR-BOXDYN] (rust-style ERR-2) Box<dyn Error> in a public library signature: return a concrete error type (an enum or an opaque struct) so callers can match on it

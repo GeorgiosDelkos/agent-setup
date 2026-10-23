@@ -1,0 +1,2 @@
+bin-crate/src/pan_unreachable_bad.rs:4: [PAN-UNREACHABLE] (rust-style PAN-6) bare unreachable!(): state the invariant, unreachable!("<why this cannot happen>")
+bin-crate/src/pan_unreachable_bad.rs:9: [PAN-UNREACHABLE] (rust-style PAN-6) bare unreachable!(): state the invariant, unreachable!("<why this cannot happen>")

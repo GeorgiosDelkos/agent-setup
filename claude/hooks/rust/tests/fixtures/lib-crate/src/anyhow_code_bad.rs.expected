@@ -1,0 +1,3 @@
+lib-crate/src/anyhow_code_bad.rs:1: [ERR-ANYHOW] (rust-style ERR-3) `anyhow` in library code: define a concrete error type (enum or opaque struct) and use `?` with From impls
+lib-crate/src/anyhow_code_bad.rs:3: [ERR-ANYHOW] (rust-style ERR-3) `eyre` in library code: define a concrete error type (enum or opaque struct) and use `?` with From impls
+lib-crate/src/anyhow_code_bad.rs:8: [ERR-ANYHOW] (rust-style ERR-3) `color_eyre` in library code: define a concrete error type (enum or opaque struct) and use `?` with From impls

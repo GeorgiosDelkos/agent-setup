@@ -1,0 +1,3 @@
+bin-crate/src/api_mustuse_bad.rs:1: [API-MUSTUSE] (rust-style API-8) bare #[must_use] on a type: give the reason, #[must_use = "<what is lost if this is dropped>"]
+bin-crate/src/api_mustuse_bad.rs:4: [API-MUSTUSE] (rust-style API-8) bare #[must_use] on a type: give the reason, #[must_use = "<what is lost if this is dropped>"]
+bin-crate/src/api_mustuse_bad.rs:9: [API-MUSTUSE] (rust-style API-8) bare #[must_use] on a type: give the reason, #[must_use = "<what is lost if this is dropped>"]

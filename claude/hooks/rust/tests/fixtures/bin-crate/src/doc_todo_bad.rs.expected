@@ -1,0 +1,5 @@
+bin-crate/src/doc_todo_bad.rs:1: [DOC-TODO] (rust-style DOC-10) TODO needs a tracker: TODO(#N), TODO(<url>), or TODO(MSRV 1.xx)
+bin-crate/src/doc_todo_bad.rs:2: [DOC-TODO] (rust-style DOC-10) FIXME needs a tracker: FIXME(#N), FIXME(<url>), or FIXME(MSRV 1.xx)
+bin-crate/src/doc_todo_bad.rs:3: [DOC-TODO] (rust-style DOC-10) XXX needs a tracker: XXX(#N), XXX(<url>), or XXX(MSRV 1.xx)
+bin-crate/src/doc_todo_bad.rs:4: [DOC-TODO] (rust-style DOC-10) HACK needs a tracker: HACK(#N), HACK(<url>), or HACK(MSRV 1.xx)
+bin-crate/src/doc_todo_bad.rs:5: [DOC-TODO] (rust-style DOC-10) FIXME needs a tracker: FIXME(#N), FIXME(<url>), or FIXME(MSRV 1.xx)

@@ -1,0 +1,4 @@
+lib-crate/src/cancel_bad.rs:4: [DOC-CANCEL] (rust-style ASY-1) public async fn (or fn returning impl Future) without a `# Cancel safety` doc section: say what is lost if the future is dropped before it completes
+lib-crate/src/cancel_bad.rs:6: [DOC-CANCEL] (rust-style ASY-1) public async fn (or fn returning impl Future) without a `# Cancel safety` doc section: say what is lost if the future is dropped before it completes
+lib-crate/src/cancel_bad.rs:11: [DOC-CANCEL] (rust-style ASY-1) public async fn (or fn returning impl Future) without a `# Cancel safety` doc section: say what is lost if the future is dropped before it completes
+lib-crate/src/cancel_bad.rs:22: [DOC-CANCEL] (rust-style ASY-1) public async fn (or fn returning impl Future) without a `# Cancel safety` doc section: say what is lost if the future is dropped before it completes

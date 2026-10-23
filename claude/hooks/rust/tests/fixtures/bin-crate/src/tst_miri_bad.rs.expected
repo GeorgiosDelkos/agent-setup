@@ -1,0 +1,2 @@
+bin-crate/src/tst_miri_bad.rs:4: [TST-MIRI] (rust-style topics/testing.md) say why Miri cannot run this test: #[cfg_attr(miri, ignore)] // <reason>
+bin-crate/src/tst_miri_bad.rs:8: [TST-MIRI] (rust-style topics/testing.md) say why Miri cannot run this test: #[cfg_attr(miri, ignore)] // <reason>

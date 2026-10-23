@@ -1,0 +1,14 @@
+# The only lints the Stop hook adds to a repo's own [lints] tables, in every repo: soundness
+# documentation and leftovers that must never reach a commit. Anything more would make the hook
+# disagree with `cargo clippy` and CI; house rules arrive by committing the template
+# (rust-style topics/repo.md REPO-1). The repo's own [lints] win where they set the same lint,
+# and findings count only on changed lines.
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+dbg_macro = "warn"
+todo = "warn"
+unimplemented = "warn"

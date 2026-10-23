@@ -1,0 +1,16 @@
+[package]
+name = "anyhow-good"
+version = "0.1.0"
+description = "uses thiserror, not anyhow"
+
+# anyhow = "1"
+[dependencies]
+thiserror = "2"
+
+[features]
+anyhow = []
+
+[dev-dependencies]
+anyhow-free = "1"
+# house-check: allow(ERR-ANYHOW): example of the escape hatch in a manifest
+anyhow = "1"

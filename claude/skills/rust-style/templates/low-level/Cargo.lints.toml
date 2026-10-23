@@ -1,0 +1,19 @@
+# Low-level profile additions (topics/low-level.md). Merge these into the crate's lint tables
+# on top of ../Cargo.lints.toml: they replace the entries of the same name there. Taken from
+# example/reference-crate.
+
+[lints.rust]
+# LLV-1: no unsafe in a zero-dependency crate unless the design doc argues for it.
+unsafe_code = "forbid"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+
+[lints.clippy]
+# LLV-2: library code never panics. Tests may, through clippy.toml.
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+panic_in_result_fn = "deny"
+exit = "deny"
+# LLV-4: pure getters carry #[must_use]; the base template relaxes this lint.
+must_use_candidate = "warn"

@@ -1,0 +1,2 @@
+bin-crate/src/lay_super_bad.rs:1: [LAY-SUPER] (rust-style LAY-4) super::super:: path: use an absolute crate:: path
+bin-crate/src/lay_super_bad.rs:4: [LAY-SUPER] (rust-style LAY-4) super::super:: path: use an absolute crate:: path

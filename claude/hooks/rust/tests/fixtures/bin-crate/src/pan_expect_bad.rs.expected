@@ -1,0 +1,3 @@
+bin-crate/src/pan_expect_bad.rs:2: [PAN-EXPECT] (rust-style PAN-6) expect message "" says nothing: name the invariant that makes this infallible, .expect("<invariant>")
+bin-crate/src/pan_expect_bad.rs:3: [PAN-EXPECT] (rust-style PAN-6) expect message "ok" says nothing: name the invariant that makes this infallible, .expect("<invariant>")
+bin-crate/src/pan_expect_bad.rs:4: [PAN-EXPECT] (rust-style PAN-6) expect message "bad" says nothing: name the invariant that makes this infallible, .expect("<invariant>")

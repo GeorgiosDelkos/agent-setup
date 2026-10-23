@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# Stop (main agent only): when this session changed enough Rust, block the stop once and
+# ask for a rust-style-reviewer run. The reviewer covers what no tool checks: design
+# principles, data structures, API shape, error design, docs.
+#
+# Only repos this session changed count (changes.sh `session_caused`), so a Q&A session in
+# a dirty checkout passes. Changed files come from git since the session's baseline (so
+# commits made before stopping still count) plus the paths any agent of the session
+# recorded. Per file, the changed lines are the smaller of:
+#   - lines changed since the session's baseline, and
+#   - lines changed since the snapshot review-done.sh took when the reviewer last finished.
+# The first keeps an old review (whose snapshot predates other people's commits) from
+# counting their work; the second keeps fixes for a fresh review from demanding another.
+set -euo pipefail
+
+# shellcheck source-path=SCRIPTDIR source=common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+read_hook_input
+need_tools block-stop jq git shasum
+# shellcheck source-path=SCRIPTDIR source=changes.sh
+source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
+
+# Below this many changed lines (added + removed) a review costs more than it finds: clippy
+# and house-check already cover a small edit, and a typo fix should not trigger a full
+# design review.
+MIN_REVIEW_LINES=20
+
+# `count<TAB>file` for the files $3... under root $1: lines added plus removed since base $2
+# from one `git diff --numstat`; an untracked file, or any file outside git, counts every
+# line, since all of it is new.
+lines_since_base() {
+  local root="$1" base="$2"
+  shift 2
+  {
+    if is_git_root "$root"; then
+      git -C "$root" -c core.quotepath=off diff --numstat "$base" -- "$@" | sed 's/^/S\t/'
+      git -C "$root" -c core.quotepath=off ls-files --others --exclude-standard -- "$@" |
+        sed 's/^/U\t/'
+    else
+      printf 'N\n'
+    fi
+    printf 'F\t%s\n' "$@"
+  } | awk -F '\t' -v root="$root/" '
+    $1 == "N" { nongit = 1; next }
+    $1 == "S" { changed[root $4] = ($2 == "-" ? 0 : $2) + ($3 == "-" ? 0 : $3); next }
+    $1 == "U" { untracked[root $2] = 1; next }
+    $1 == "F" {
+      file = $2
+      n = 0
+      if (file in changed) n = changed[file]
+      else if (nongit || file in untracked) {
+        while ((getline line < file) > 0) n++
+        close(file)
+      }
+      printf "%d\t%s\n", n, file
+    }'
+}
+
+if is_subagent || stop_is_exempt; then
+  exit 0
+fi
+
+lists=()
+while IFS= read -r list; do
+  lists+=("$list")
+done < <(session_touched_lists)
+
+# Diff base of root $1: the session baseline logic for a git root, nothing otherwise.
+base_of() {
+  if is_git_root "$1"; then
+    diff_base "$1"
+  fi
+}
+
+# `root<TAB>file` for every changed .rs file of the roots this session changed, each file
+# under its deepest root only.
+claimed="$(stop_roots ${lists[@]+"${lists[@]}"} | while IFS= read -r root; do
+  if session_caused "$root" ${lists[@]+"${lists[@]}"}; then
+    changed_files "$root" "$(base_of "$root")" ${lists[@]+"${lists[@]}"} |
+      { grep '\.rs$' || true; } | awk -v root="$root" '{ print root "\t" $0 }'
+  fi
+done | deepest_root)"
+
+total=0
+files=""
+reviewed=""
+while IFS= read -r root; do
+  base="$(base_of "$root")"
+  root_files=()
+  while IFS= read -r file; do
+    root_files+=("$file")
+  done < <(awk -F '\t' -v root="$root" '$1 == root { print $2 }' <<<"$claimed")
+  # Snapshot lookups only when this repo has a review at all.
+  snapshots=""
+  if [[ -d "$(review_dir "$root")" ]]; then
+    snapshots="$(printf '%s\n' "${root_files[@]}" | review_snapshots "$root")"
+  fi
+  while IFS=$'\t' read -r count file snapshot; do
+    if [[ -n "$snapshot" && -f "$snapshot" ]]; then
+      reviewed=1
+      current="$file"
+      if [[ ! -f "$current" ]]; then
+        current=/dev/null
+      fi
+      since_review="$(diff "$snapshot" "$current" | grep -c '^[<>]' || true)"
+      if ((since_review < count)); then
+        count="$since_review"
+      fi
+    fi
+    # A recorded file that was deleted outside git has nothing left to review.
+    if ((count == 0)); then
+      continue
+    fi
+    total=$((total + count))
+    files+="$file"$'\n'
+  done < <(lines_since_base "$root" "$base" "${root_files[@]}" |
+    SNAPSHOTS="$snapshots" awk -F '\t' '
+      BEGIN {
+        n = split(ENVIRON["SNAPSHOTS"], row, "\n")
+        for (i = 1; i <= n; i++) if (split(row[i], f, "\t") == 2) snap[f[1]] = f[2]
+      }
+      { printf "%s\t%s\t%s\n", $1, $2, snap[$2] }')
+done < <(cut -f 1 <<<"$claimed" | { grep -v '^$' || true; } | sort -u)
+
+if ((total < MIN_REVIEW_LINES)); then
+  exit 0
+fi
+
+# Once per state of the changed files: a later stop with no further Rust change (a question
+# answered, a background task reported) passes instead of asking again every turn.
+blocked="$(agent_file review-blocked)"
+file_list=()
+while IFS= read -r file; do
+  if [[ -n "$file" ]]; then
+    file_list+=("$file")
+  fi
+done <<<"$files"
+state="$(fingerprint "${file_list[@]}")"
+if [[ -f "$blocked" && "$(cat "$blocked")" == "$state" ]]; then
+  exit 0
+fi
+printf '%s' "$state" >"$blocked"
+since="since this session started"
+if [[ -n "$reviewed" ]]; then
+  since="since the last review"
+fi
+echo "This session changed $total lines of Rust $since. Run the rust-style-reviewer agent" \
+  "on these files, then fix every blocker and major finding (or state why not); apply a" \
+  "minor one only when it makes the code smaller or clearer:" >&2
+# Thousands of files would bury the message; the first few name the area.
+head -n 50 <<<"$files" | sed 's/^/  /' >&2
+listed="$(grep -c . <<<"$files" || true)"
+if ((listed > 50)); then
+  echo "  ... and $((listed - 50)) more" >&2
+fi
+exit 2

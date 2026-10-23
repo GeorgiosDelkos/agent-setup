@@ -1,0 +1,5 @@
+# Low-level profile (LLV-2): add to the crate's clippy.toml next to the base template's
+# allow-unwrap-in-tests and allow-expect-in-tests. Without it, the panic deny pushes tests
+# toward `match` arms that assert and return, which pass when the bug returns exactly the
+# asserted value.
+allow-panic-in-tests = true

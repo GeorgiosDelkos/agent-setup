@@ -1,0 +1,42 @@
+# Copy to .github/workflows/deny.yml, with deny.toml at the repo root. Keep it in every repo.
+# Runs `cargo deny check` (advisories, licenses, bans, sources) whenever a change touches the
+# dependency graph or the policy, and daily so a new advisory surfaces without a PR. House
+# addition: rust-ci-conf has no cargo-deny; the trigger pattern is Tokio's and Wasmtime's.
+# Blocking: never continue-on-error.
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/deny.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/deny.yml"
+  schedule:
+    - cron: '0 2 * * *'
+# See check.yml for information about how the concurrency cancellation and workflow triggering works
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: deny
+jobs:
+  deny:
+    runs-on: ubuntu-latest
+    name: cargo deny
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo install cargo-deny
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # tag=v2.85.4
+        with:
+          tool: cargo-deny
+      - name: cargo deny check
+        run: cargo deny --locked check

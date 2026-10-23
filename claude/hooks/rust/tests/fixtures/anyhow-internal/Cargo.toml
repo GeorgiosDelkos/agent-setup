@@ -1,0 +1,9 @@
+[package]
+name = "anyhow-internal"
+version = "0.1.0"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+anyhow = "1"

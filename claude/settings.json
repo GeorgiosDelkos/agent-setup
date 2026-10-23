@@ -1,0 +1,232 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "cleanupPeriodDays": 365,
+  "env": {
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "DISABLE_ERROR_REPORTING": "1",
+    "DISABLE_TELEMETRY": "1",
+    "MCP_TIMEOUT": "120000"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(sudo *)",
+      "Bash(mkfs *)",
+      "Bash(dd *)",
+      "Bash(curl *|bash*)",
+      "Bash(wget *|bash*)",
+      "Bash(git push --force*)",
+      "Bash(git push *--force*)",
+      "Bash(git reset --hard*)",
+      "Edit(~/.bashrc)",
+      "Edit(~/.zshrc)",
+      "Edit(~/.ssh/**)",
+      "Read(~/.ssh/**)",
+      "Read(~/.gnupg/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.azure/**)",
+      "Read(~/.config/gh/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/.docker/config.json)",
+      "Read(~/.kube/**)",
+      "Read(~/.npmrc)",
+      "Read(~/.npm/**)",
+      "Read(~/.pypirc)",
+      "Read(~/.gem/credentials)",
+      "Read(~/Library/Keychains/**)",
+      "Read(~/Library/Application Support/**/metamask*/**)",
+      "Read(~/Library/Application Support/**/electrum*/**)",
+      "Read(~/Library/Application Support/**/exodus*/**)",
+      "Read(~/Library/Application Support/**/phantom*/**)",
+      "Read(~/Library/Application Support/**/solflare*/**)"
+    ],
+    "defaultMode": "bypassPermissions"
+  },
+  "model": "opus",
+  "enableAllProjectMcpServers": false,
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "afplay /System/Library/Sounds/Glass.aiff &"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/guards/bash-guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|search_replace|write|hashline_edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/style-gate.sh"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "afplay /System/Library/Sounds/Hero.aiff &"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/check-on-stop.sh",
+            "timeout": 600
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/review-gate.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill|Read|read_file|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/style-loaded.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|search_replace|write|hashline_edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/fmt-on-edit.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/check-on-stop.sh",
+            "timeout": 600
+          }
+        ]
+      },
+      {
+        "matcher": "rust-style-reviewer",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/review-done.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/session-baseline.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline.sh"
+  },
+  "enabledPlugins": {
+    "arscontexta@agenticnotetaking": false,
+    "ask-questions-if-underspecified@trailofbits": true,
+    "audit-context-building@trailofbits": false,
+    "building-secure-contracts@trailofbits": false,
+    "burpsuite-project-parser@trailofbits": false,
+    "code-review@claude-plugins-official": true,
+    "constant-time-analysis@trailofbits": false,
+    "culture-index@trailofbits": false,
+    "differential-review@trailofbits": true,
+    "dwarf-expert@trailofbits": false,
+    "entry-point-analyzer@trailofbits": false,
+    "firebase-apk-scanner@trailofbits": false,
+    "fix-review@trailofbits": true,
+    "frontend-design@claude-plugins-official": false,
+    "modern-python@trailofbits": true,
+    "property-based-testing@trailofbits": true,
+    "rust-analyzer-lsp@claude-plugins-official": true,
+    "rust-review@trailofbits": true,
+    "security-guidance@claude-plugins-official": true,
+    "semgrep-rule-creator@trailofbits": false,
+    "semgrep-rule-variant-creator@trailofbits": false,
+    "sharp-edges@trailofbits": true,
+    "spec-to-code-compliance@trailofbits": false,
+    "static-analysis@trailofbits": true,
+    "swift-lsp@claude-plugins-official": false,
+    "testing-handbook-skills@trailofbits": false,
+    "variant-analysis@trailofbits": false,
+    "warp@claude-code-warp": true,
+    "typesafe@typesafe-ai": true,
+    "superpowers@claude-plugins-official": false,
+    "cloudflare@cloudflare": false
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-warp": {
+      "source": {
+        "source": "github",
+        "repo": "warpdotdev/claude-code-warp"
+      }
+    },
+    "trailofbits": {
+      "source": {
+        "source": "github",
+        "repo": "trailofbits/skills"
+      }
+    },
+    "typesafe-ai": {
+      "source": {
+        "source": "github",
+        "repo": "typesafe-ai/skills"
+      }
+    }
+  },
+  "alwaysThinkingEnabled": true,
+  "promptSuggestionEnabled": false,
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark",
+  "voiceEnabled": true
+}

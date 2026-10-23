@@ -1,0 +1,19 @@
+# Copy to the repo root and run `prek install`. Runs the two blocking CI lints locally on every
+# commit, so a push does not fail on them. The same flags as check.yml; the lint set itself
+# comes from the crate's [lints] table and clippy.toml.
+repos:
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt --check
+        entry: cargo fmt --all --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy -D warnings
+        entry: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        language: system
+        # Manifest and lint-config changes can introduce warnings without touching a .rs file.
+        files: '(\.rs|Cargo\.toml|Cargo\.lock|clippy\.toml)$'
+        pass_filenames: false

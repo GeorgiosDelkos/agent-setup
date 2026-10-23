@@ -1,0 +1,152 @@
+# Copy to .github/workflows/check.yml. Derived from jonhoo/rust-ci-conf @ de512da1e85b with
+# house additions (rust-style SYNTHESIS.md section 5.3). Runs whenever a PR is opened or updated,
+# or a commit is pushed to main:
+# - fmt: checks that the code is formatted according to rustfmt
+# - clippy: no warnings on stable (blocking); beta is non-blocking early warning of new lints
+# - semver: no accidental breaking change. Libraries published on crates.io only; delete the
+#   job for applications and for crates not yet published.
+# - doc: docs build as on docs.rs, public and private items, with warnings denied
+# - hack: check combinations of feature flags
+# - msrv: check that `rust-version` in Cargo.toml is correct. Libraries only; applications pin
+#   the latest stable in rust-toolchain.toml and delete the job.
+permissions:
+  contents: read
+# This configuration allows maintainers of this repo to create a branch and pull request based on
+# the new branch. Restricting the push trigger to the main branch ensures that the PR only gets
+# built once.
+on:
+  push:
+    branches: [main]
+  pull_request:
+# If new code is pushed to a PR branch, then cancel in progress workflows for that PR. Ensures that
+# we don't waste CI time, and returns results quicker https://github.com/jonhoo/rust-ci-conf/pull/5
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: check
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    name: stable / fmt
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --check
+  clippy:
+    runs-on: ubuntu-latest
+    name: ${{ matrix.toolchain }} / clippy
+    # Stable blocks the PR. Beta gives early warning of new lints, which are regularly introduced
+    # in beta channels, without failing the PR.
+    continue-on-error: ${{ matrix.toolchain == 'beta' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        toolchain: [stable, beta]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets --all-features
+        env:
+          # Fails the build on any warning without touching RUSTFLAGS, so the build cache stays
+          # shared with other cargo invocations.
+          CARGO_BUILD_WARNINGS: deny
+  semver:
+    runs-on: ubuntu-latest
+    name: semver
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: cargo-semver-checks
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # tag=v2.9
+  doc:
+    # run docs generation on nightly rather than stable. This enables features like
+    # https://doc.rust-lang.org/beta/unstable-book/language-features/doc-cfg.html which allows an
+    # API be documented as only available in some specific platforms.
+    runs-on: ubuntu-latest
+    name: nightly / doc
+    env:
+      RUSTDOCFLAGS: --cfg docsrs -D warnings
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: nightly
+      - name: Install cargo-docs-rs
+        uses: dtolnay/install@982daea0f5d846abc3c83e01a6a1d73c040047c1 # branch=cargo-docs-rs
+      # Builds with the crate's [package.metadata.docs.rs], exactly as docs.rs will.
+      - name: cargo docs-rs
+        run: cargo docs-rs
+      # Internal docs are read by maintainers and agents; broken links there fail too.
+      - name: cargo doc --document-private-items
+        run: cargo doc --locked --no-deps --all-features --document-private-items
+  hack:
+    # cargo-hack checks combinations of feature flags to ensure that features are all additive
+    # which is required for feature unification
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / features
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # tag=v2.85.4
+        with:
+          tool: cargo-hack
+      # intentionally no target specifier; see https://github.com/jonhoo/rust-ci-conf/pull/4
+      # --feature-powerset runs for every combination of features; --depth 2 bounds it to pairs
+      # of features, so the job stays fast once a crate has many features (Tokio).
+      - name: cargo hack
+        run: cargo hack --feature-powerset --depth 2 check
+  msrv:
+    # check that we can build using the minimal rust version that is specified by this crate.
+    # cargo hack reads `rust-version` from Cargo.toml and installs that toolchain, so CI cannot
+    # drift from the manifest. `check`, not `test`: tests may need newer Rust (Tokio, bytes).
+    runs-on: ubuntu-latest
+    name: ubuntu / msrv
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          submodules: true
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # tag=v2.85.4
+        with:
+          tool: cargo-hack
+      - name: cargo hack check --rust-version
+        run: cargo hack check --rust-version --workspace --all-features --ignore-private

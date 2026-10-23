@@ -1,0 +1,6 @@
+bin-crate/src/uns_spell_bad.rs:3: [UNS-SPELL] (rust-style topics/unsafe.md) safety comment must be spelled exactly `// SAFETY: <reason>` (found `// Safety: p is valid`)
+bin-crate/src/uns_spell_bad.rs:7: [UNS-SPELL] (rust-style topics/unsafe.md) unsafe without a safety comment: put `// SAFETY: <why this is sound>` above it or above its statement
+bin-crate/src/uns_spell_bad.rs:12: [UNS-SPELL] (rust-style topics/unsafe.md) safety comment must be spelled exactly `// SAFETY: <reason>` (found `// SAFETY:`)
+bin-crate/src/uns_spell_bad.rs:17: [UNS-SPELL] (rust-style topics/unsafe.md) safety comment must be spelled exactly `// SAFETY: <reason>` (found `//SAFETY S holds no references`)
+bin-crate/src/uns_spell_bad.rs:20: [UNS-SPELL] (rust-style topics/unsafe.md) unsafe without a safety comment: put `// SAFETY: <why this is sound>` above it or above its statement
+bin-crate/src/uns_spell_bad.rs:26: [UNS-SPELL] (rust-style topics/unsafe.md) unsafe without a safety comment: put `// SAFETY: <why this is sound>` above it or above its statement

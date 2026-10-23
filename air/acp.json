@@ -1,0 +1,20 @@
+{
+  "agent_servers": {
+    "Grok": {
+      "command": "@GROK@",
+      "args": [
+        "agent",
+        "--always-approve",
+        "stdio"
+      ],
+      "env": {}
+    },
+    "Claude Code": {
+      "command": "@NODE@",
+      "args": [
+        "@CLAUDE_ACP@"
+      ],
+      "env": {}
+    }
+  }
+}

@@ -1,0 +1,5 @@
+bin-crate/src/allow_bad.rs:2: [HC-ALLOW] house-check allow without a reason: write `house-check: allow(PAN-EXPECT): <why the rule is wrong here>`
+bin-crate/src/allow_bad.rs:6: [HC-ALLOW] house-check allow without a reason: write `house-check: allow(PAN-EXPECT): <why the rule is wrong here>`
+bin-crate/src/allow_bad.rs:3: [PAN-EXPECT] (rust-style PAN-6) expect message "ok" says nothing: name the invariant that makes this infallible, .expect("<invariant>")
+bin-crate/src/allow_bad.rs:5: [PAN-EXPECT] (rust-style PAN-6) expect message "id" says nothing: name the invariant that makes this infallible, .expect("<invariant>")
+bin-crate/src/allow_bad.rs:6: [PAN-EXPECT] (rust-style PAN-6) expect message "no" says nothing: name the invariant that makes this infallible, .expect("<invariant>")
