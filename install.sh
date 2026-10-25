@@ -116,6 +116,12 @@ setup_air() {
   # default outranks the review order in AGENTS.md.
   link "$SETUP_DIR/air/review-prompt.md" "$air_dir/review/review-prompt.md"
 
+  # The editor theme with loud comments (AGENTS.md, Comments), selected in settings.json. The
+  # folder is linked, not the file: if Air's theme editor saves by replacing the file, a file
+  # link would break, while a folder link holds either way.
+  link "$SETUP_DIR/air/themes" "$air_dir/themes"
+  merge_json "$(cat "$SETUP_DIR/air/settings.json")" "$air_dir/settings.json"
+
   if ! command -v npm >/dev/null; then
     echo "skip    Air ACP agents (npm not found)"
     return 0
