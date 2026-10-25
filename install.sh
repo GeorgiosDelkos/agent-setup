@@ -158,18 +158,30 @@ setup_git() {
     echo "skip    git history (the .git file expects ~/Synced-Storage/AgentSetup)"
     return 0
   fi
-  if [[ -d "$git_dir" ]]; then
-    echo "ok      $git_dir"
-    return 0
-  fi
   if ! command -v git >/dev/null; then
     echo "skip    git history (git not found)"
     return 0
   fi
 
-  mkdir -p "$(dirname "$git_dir")"
-  if ! git clone -q --bare "$remote" "$git_dir"; then
-    echo "skip    git history (cannot clone $remote: check \`gh auth status\`)"
+  if [[ ! -d "$git_dir" ]]; then
+    mkdir -p "$(dirname "$git_dir")"
+    if ! git clone -q --bare "$remote" "$git_dir"; then
+      echo "skip    git history (cannot clone $remote: check \`gh auth status\`)"
+      return 0
+    fi
+  fi
+
+  # Sync sync does not carry the .git file to other machines, so it is written here,
+  # once the git directory it points to exists.
+  if [[ ! -e "$SETUP_DIR/.git" ]]; then
+    printf 'gitdir: ../../.local/share/agent-setup.git\n' >"$SETUP_DIR/.git"
+    echo "wrote   $SETUP_DIR/.git"
+  fi
+
+  # The index is the last thing written below, so it marks a finished setup. A run that
+  # stopped after the clone resumes from here.
+  if [[ -f "$git_dir/index" ]]; then
+    echo "ok      $git_dir"
     return 0
   fi
   git --git-dir="$git_dir" config core.bare false
