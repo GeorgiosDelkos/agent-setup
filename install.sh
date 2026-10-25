@@ -36,25 +36,27 @@ link() {
   echo "linked  $target -> $source"
 }
 
-# Shared settings win key by key; local-only keys (and the whole file, on a fresh
-# machine) are kept. Arrays such as hook lists are taken from the shared copy.
-merge_settings() {
-  local shared="$SETUP_DIR/claude/settings.json" local_file="$HOME/.claude/settings.json"
-  local merged
+# Merge the shared JSON text $1 into the file $2. Shared keys win key by key; local-only keys
+# (and the whole file, on a fresh machine) are kept. Arrays such as hook lists are taken from
+# the shared copy. The previous file goes to the backup dir, at its path relative to $HOME.
+merge_json() {
+  local shared="$1" local_file="$2" merged relative
   if [[ ! -f "$local_file" ]]; then
-    cp "$shared" "$local_file"
+    mkdir -p "$(dirname "$local_file")"
+    printf '%s\n' "$shared" >"$local_file"
     echo "copied  $local_file"
     return 0
   fi
 
-  merged="$(jq -s '.[0] * .[1]' "$local_file" "$shared")"
+  merged="$(jq -s '.[0] * .[1]' "$local_file" <(printf '%s\n' "$shared"))"
   if [[ "$merged" == "$(jq . "$local_file")" ]]; then
     echo "ok      $local_file"
     return 0
   fi
 
-  mkdir -p "$BACKUP_DIR/.claude"
-  cp "$local_file" "$BACKUP_DIR/.claude/settings.json"
+  relative="${local_file#"$HOME"/}"
+  mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
+  cp "$local_file" "$BACKUP_DIR/$relative"
   printf '%s\n' "$merged" >"$local_file"
   echo "merged  $local_file (previous copy in $BACKUP_DIR)"
 }
@@ -104,7 +106,7 @@ register_Sync_mem() {
 setup_air() {
   local air_dir="$HOME/Library/Application Support/JetBrains/Air"
   local acp_version="0.94.0" pkg="@agentclientprotocol/claude-agent-acp"
-  local installed grok node script shared merged local_file="$air_dir/acp.json"
+  local installed grok node script shared
   if [[ ! -d "$air_dir" ]]; then
     echo "skip    Air ACP agents (JetBrains Air not installed)"
     return 0
@@ -135,22 +137,7 @@ setup_air() {
     '.agent_servers["Grok"].command = $grok
       | .agent_servers["Claude Code"].command = $node
       | .agent_servers["Claude Code"].args = [$script]' "$SETUP_DIR/air/acp.json")"
-  if [[ ! -f "$local_file" ]]; then
-    printf '%s\n' "$shared" >"$local_file"
-    echo "copied  $local_file"
-    return 0
-  fi
-
-  merged="$(jq -s '.[0] * .[1]' "$local_file" <(printf '%s\n' "$shared"))"
-  if [[ "$merged" == "$(jq . "$local_file")" ]]; then
-    echo "ok      $local_file"
-    return 0
-  fi
-
-  mkdir -p "$BACKUP_DIR/Air"
-  cp "$local_file" "$BACKUP_DIR/Air/acp.json"
-  printf '%s\n' "$merged" >"$local_file"
-  echo "merged  $local_file (previous copy in $BACKUP_DIR)"
+  merge_json "$shared" "$air_dir/acp.json"
 }
 
 # History lives in GitHub. The git directory stays outside this synced folder, because a .git
@@ -237,7 +224,7 @@ main() {
     echo "ok      $HOME/.claude/CLAUDE.md"
   fi
 
-  merge_settings
+  merge_json "$(cat "$SETUP_DIR/claude/settings.json")" "$HOME/.claude/settings.json"
   register_Sync_mem
   setup_air
   setup_git
