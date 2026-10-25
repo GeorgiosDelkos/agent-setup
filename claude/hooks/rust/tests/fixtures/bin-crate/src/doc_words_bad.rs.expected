@@ -1,0 +1,3 @@
+bin-crate/src/doc_words_bad.rs:1: [DOC-WORDS] (rust-style DOC-15) "Obviously" in a comment: the reader is here because it was not obvious to them; give the reason instead
+bin-crate/src/doc_words_bad.rs:2: [DOC-WORDS] (rust-style DOC-15) "trivially" in a comment: the reader is here because it was not obvious to them; give the reason instead
+bin-crate/src/doc_words_bad.rs:3: [DOC-WORDS] (rust-style DOC-15) "of course" in a comment: the reader is here because it was not obvious to them; give the reason instead

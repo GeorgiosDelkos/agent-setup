@@ -304,8 +304,8 @@ sub check_panics {
   return;
 }
 
-# The first TODO/FIXME/XXX/HACK in comment $text that is used as a marker and lacks a
-# tracker, or undef. A marker opens the comment text or is followed by `:` or `(`; the
+# The first TODO/FIXME/XXX/HACK in comment $text that is used as a marker and lacks an
+# owner and tracker, or undef. A marker opens the comment text or is followed by `:` or `(`; the
 # same word in prose ("returns the TODO items") is not one.
 sub untracked_marker {
   my ($text, $tracker) = @_;
@@ -321,14 +321,31 @@ sub untracked_marker {
 sub check_comments {
   my ($f) = @_;
   my $comment = $f->{comment};
-  my $tracker = qr{\((?:#\d+|https?://[^\s)]+|MSRV 1\.\d+(?:\.\d+)?)\)};
+  # An owner handle, then a tracker: `TODO(alice, #12)`. The handle survives the code moves
+  # that break git blame; the tracker holds the work itself.
+  my $tracker
+    = qr{\([A-Za-z0-9][\w.-]*,\s*(?:#\d+|https?://[^\s)]+|MSRV 1\.\d+(?:\.\d+)?)\)};
+  my $branch_link = qr{\b((?:github|gitlab)\.com/\S+?/(?:blob|tree)/(?:main|master|HEAD)/\S*)};
+
+  # "just" and "simply" are left out: too many comments use them harmlessly.
+  my $dismissive = qr{\b(obviously|trivially|of course)\b}i;
   for my $i (0 .. $#$comment) {
     my $text = $comment->[$i];
     next if $text =~ /house-check:\s*allow/;
     if (my $marker = untracked_marker($text, $tracker)) {
       report($f, $i, 'DOC-TODO',
-        "(rust-style DOC-10) $marker needs a tracker: $marker(#N), $marker(<url>), or"
-          . " $marker(MSRV 1.xx)");
+        "(rust-style DOC-10) $marker needs an owner and a tracker: $marker(handle, #N),"
+          . " $marker(handle, <url>), or $marker(handle, MSRV 1.xx)");
+    }
+    if ($text =~ $branch_link) {
+      report($f, $i, 'DOC-LINK',
+        "(rust-style DOC-14) $1 follows a branch and will drift or 404: link a commit"
+          . ' hash (press y on GitHub) or an archived copy');
+    }
+    if ($text =~ $dismissive) {
+      report($f, $i, 'DOC-WORDS',
+        "(rust-style DOC-15) \"$1\" in a comment: the reader is here because it was not"
+          . ' obvious to them; give the reason instead');
     }
     if ($text =~ /\b((?:LAY|NAM|DAT|API|CTL|ERR|PAN|DOC|LOG|LNT|TST|UNS|CON|ASY|LIB|REPO)-\d+)\b/) {
       report($f, $i, 'DOC-RULEID',

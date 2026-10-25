@@ -373,10 +373,12 @@ auto traits as API) are in `topics/library-api.md`.
 - **DOC-8** A tuned constant says how it was chosen and how to re-measure it. [ref: J]
 - **DOC-9** Private fields are documented when they carry an invariant, a unit, or a role
   in a protocol. [ref: J; T documents about half]
-- **DOC-10** `TODO`/`FIXME`/`XXX`/`HACK` take a tracker: `TODO(#123)`, `TODO(<url>)`, or
-  `TODO(MSRV 1.85): switch to try_update` `[check]`. Never commit `todo!()` or
+- **DOC-10** `TODO`/`FIXME`/`XXX`/`HACK` take an owner and a tracker: `TODO(alice, #123)`,
+  `TODO(alice, <url>)`, or `TODO(alice, MSRV 1.85): switch to try_update` `[check]`. The
+  owner is the user's GitHub login, never the agent's. Never commit `todo!()` or
   `unimplemented!()` (lints). [house: T C J leave most untracked; an untracked TODO never
-  gets done]
+  gets done. Owner: Jon, *Don't make me read between the lines*: code moves break git
+  blame]
 - **DOC-11** Rule IDs (`ERR-3`) go in reviews and commit messages, never in code comments:
   a comment states the reason itself `[check]`. [house: the reader of the code has no
   skill loaded]
@@ -387,6 +389,13 @@ auto traits as API) are in `topics/library-api.md`.
 - **DOC-13** Docs say what a call does not do and what it costs, wherever a reader would
   otherwise guess: which lock it takes, whether it allocates, blocks, waits on the network or
   runs user code ("Does not publish. It does not wait on the network."). [house]
+- **DOC-14** Links in comments and docs are permalinks: a commit-hash URL (press `y` on
+  GitHub) or an archive copy, never `blob/main`, `tree/master` or `HEAD` `[check]`. [Jon,
+  *Don't make me read between the lines*: branch links drift or 404]
+- **DOC-15** No "obviously", "trivially" or "of course" in comments `[check]`, nor "just"
+  or "simply" used the same way (not checked: too many harmless uses). Give the reason
+  instead. [Jon, *Don't make me read between the lines*: the reader is there because it
+  was not obvious]
 
 ## Logging and output (LOG)
 
