@@ -3,3 +3,4 @@
 // The main branch stays protected; see https://github.com/owner/repo/issues/7.
 const LINK: &str = "https://github.com/owner/repo/blob/main/README.md";
 fn f() {}
+// Branch mainline-docs is a different name: https://github.com/owner/repo/tree/mainline-docs

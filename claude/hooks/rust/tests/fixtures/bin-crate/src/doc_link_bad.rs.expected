@@ -1,3 +1,5 @@
 bin-crate/src/doc_link_bad.rs:1: [DOC-LINK] (rust-style DOC-14) github.com/owner/repo/blob/main/SPEC.md#L10 follows a branch and will drift or 404: link a commit hash (press y on GitHub) or an archived copy
 bin-crate/src/doc_link_bad.rs:2: [DOC-LINK] (rust-style DOC-14) gitlab.com/group/project/-/tree/master/docs follows a branch and will drift or 404: link a commit hash (press y on GitHub) or an archived copy
 bin-crate/src/doc_link_bad.rs:3: [DOC-LINK] (rust-style DOC-14) github.com/owner/repo/blob/HEAD/src/lib.rs follows a branch and will drift or 404: link a commit hash (press y on GitHub) or an archived copy
+bin-crate/src/doc_link_bad.rs:4: [DOC-LINK] (rust-style DOC-14) github.com/owner/repo/tree/main follows a branch and will drift or 404: link a commit hash (press y on GitHub) or an archived copy
+bin-crate/src/doc_link_bad.rs:5: [DOC-LINK] (rust-style DOC-14) raw.githubusercontent.com/owner/repo/main/x.md follows a branch and will drift or 404: link a commit hash (press y on GitHub) or an archived copy

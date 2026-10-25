@@ -325,7 +325,8 @@ sub check_comments {
   # that break git blame; the tracker holds the work itself.
   my $tracker
     = qr{\([A-Za-z0-9][\w.-]*,\s*(?:#\d+|https?://[^\s)]+|MSRV 1\.\d+(?:\.\d+)?)\)};
-  my $branch_link = qr{\b((?:github|gitlab)\.com/\S+?/(?:blob|tree)/(?:main|master|HEAD)/\S*)};
+  my $branch_link = qr{\b((?:(?:github|gitlab)\.com/\S+?/(?:blob|tree)
+    |raw\.githubusercontent\.com/[^/\s]+/[^/\s]+)/(?:main|master|HEAD)(?=[/#?)\s]|$)\S*)}x;
 
   # "just" and "simply" are left out: too many comments use them harmlessly.
   my $dismissive = qr{\b(obviously|trivially|of course)\b}i;
