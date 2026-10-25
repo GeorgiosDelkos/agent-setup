@@ -82,7 +82,7 @@ workflows. Tags and IDs as in `../SKILL.md`. For depth: `rfr-project-structure`,
   a minor release with the reason in a comment and the changelog. CI checks it with `cargo
   hack check --rust-version`, which reads the manifest and cannot drift. Applications pin
   the latest stable in `rust-toolchain.toml`. Workarounds for an old MSRV are tagged
-  `TODO(MSRV 1.xx)`. [ref: C T J; house: toolchain pin for apps]
+  `TODO(<owner>, MSRV 1.xx)` (DOC-10). [ref: C T J; house: toolchain pin for apps]
 - **REPO-12** Library metadata: `description` (same sentence as the crate docs' first
   line), `license = "MIT OR Apache-2.0"`, `repository`, `keywords`, `categories`,
   `rust-version`; `exclude` CI files and fixtures from the package. [ref: J B]

@@ -4,5 +4,5 @@
 fn f() {}
 
 // house-check: allow(UNS-SPELL): check IDs are fine
-// TODO(MSRV 1.85): fine too
+// TODO(alice, MSRV 1.85): fine too
 fn g() {}

@@ -25,7 +25,9 @@ Check in this order:
 7. Tests: behavior changes have tests covering edges and errors; property tests for parsers,
    serialization, and algorithms; mocks only at boundaries.
 8. Docs: public APIs documented, with Errors/Panics/Safety sections where they apply.
-   Comments explain why, never what. Do not ask for comments that narrate code.
+   Comments explain why, never what. Do not ask for comments that narrate code. A comment
+   that contradicts the code or has gone stale is high; one that only restates the code is
+   low. Do not report wording that is already clear.
 9. Performance: only hot-path cost with a concrete reason (complexity, allocations, copies,
    locks).
 

@@ -1,6 +1,6 @@
-// TODO(#123): handle the empty case
-// FIXME(https://github.com/owner/repo/issues/1): upstream bug
-// TODO(MSRV 1.85): switch to try_update
+// TODO(alice, #123): handle the empty case
+// FIXME(bob, https://github.com/owner/repo/issues/1): upstream bug
+// TODO(carol.d, MSRV 1.85): switch to try_update
 const TODO_LIST: &str = "TODO: not a comment";
 fn f() {}
 

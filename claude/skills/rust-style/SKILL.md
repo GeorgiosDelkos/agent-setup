@@ -359,10 +359,11 @@ auto traits as API) are in `topics/library-api.md`.
   only for pseudo-signatures. [ref: T J B (C-QUESTION-MARK); house: error code]
 - **DOC-4** Intra-doc links (``[`Sender::send`]``), checked as errors. An import that
   exists only for a link is `#[cfg(doc)] use ...;`. [ref: J]
-- **DOC-5** Comments say why: invariants, orderings, why this is correct, why not the
-  obvious alternative, which alternatives were rejected and which downsides accepted. Say
-  what is deliberately not there (a missing `From` impl, an unhandled corner case). Never
-  restate the code. [ref: B (Jon, *Towards Impeccable Rust*) J]
+- **DOC-5** Code comments take only the kinds listed under Comments in `AGENTS.md`. In
+  Rust that means invariants, orderings, why this is correct (backed by `expect`,
+  `unreachable!` or `compile_fail` where one can check it), and what is deliberately not
+  there (a missing `From` impl, an unhandled corner case). Never restate the code. [ref: B
+  (Jon, *Towards Impeccable Rust*) J; Jon, *Don't make me read between the lines*]
 - **DOC-6** Structures with non-trivial invariants state them once (module docs or an `#
   Invariants` section on the type); each mutating method that relies on them argues they
   still hold in a `// Post-invariant:` comment. [ref: C T]
@@ -370,13 +371,18 @@ auto traits as API) are in `topics/library-api.md`.
   with the bound that proves it. A claim about a dependency cites its docs. Reliance on
   undocumented behaviour says so and is pinned by a test. Every workaround links the
   upstream issue. [ref: J; house: checkable]
-- **DOC-8** A tuned constant says how it was chosen and how to re-measure it. [ref: J]
+- **DOC-8** A constant gives its unit and says how it was chosen: measured (and how to
+  re-measure), sourced (a permalink), or arbitrary. A computed value is written as its
+  formula, from `size_of::<T>()` where it depends on a type, so it stays right when the type
+  changes. [ref: J; Jon, *Don't make me read between the lines*]
 - **DOC-9** Private fields are documented when they carry an invariant, a unit, or a role
   in a protocol. [ref: J; T documents about half]
-- **DOC-10** `TODO`/`FIXME`/`XXX`/`HACK` take a tracker: `TODO(#123)`, `TODO(<url>)`, or
-  `TODO(MSRV 1.85): switch to try_update` `[check]`. Never commit `todo!()` or
+- **DOC-10** `TODO`/`FIXME`/`XXX`/`HACK` take an owner and a tracker: `TODO(alice, #123)`,
+  `TODO(alice, <url>)`, or `TODO(alice, MSRV 1.85): switch to try_update` `[check]`. The
+  owner is the user's GitHub login, never the agent's. Never commit `todo!()` or
   `unimplemented!()` (lints). [house: T C J leave most untracked; an untracked TODO never
-  gets done]
+  gets done. Owner: Jon, *Don't make me read between the lines*: code moves break git
+  blame]
 - **DOC-11** Rule IDs (`ERR-3`) go in reviews and commit messages, never in code comments:
   a comment states the reason itself `[check]`. [house: the reader of the code has no
   skill loaded]
@@ -387,6 +393,13 @@ auto traits as API) are in `topics/library-api.md`.
 - **DOC-13** Docs say what a call does not do and what it costs, wherever a reader would
   otherwise guess: which lock it takes, whether it allocates, blocks, waits on the network or
   runs user code ("Does not publish. It does not wait on the network."). [house]
+- **DOC-14** Links in comments and docs are permalinks: a commit-hash URL (press `y` on
+  GitHub) or an archive copy, never `blob/main`, `tree/master` or `HEAD` `[check]`. [Jon,
+  *Don't make me read between the lines*: branch links drift or 404]
+- **DOC-15** No "obviously", "trivially" or "of course" in comments and docs `[check]`,
+  nor "just" or "simply" used the same way (not checked: too many harmless uses). Give the
+  reason instead. [Jon, *Don't make me read between the lines*: the reader is there because
+  it was not obvious]
 
 ## Logging and output (LOG)
 
