@@ -995,7 +995,7 @@
     },
     "comment.todo": {
       "foregroundColor": "#FFD43BFF",
-        "scrollbarMarkColor": "#81DE8A"
+      "scrollbarMarkColor": "#FFD43BFF"
     },
     "link": {
         "foregroundColor": "Blue_110"
