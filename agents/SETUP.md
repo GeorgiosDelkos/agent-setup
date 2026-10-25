@@ -338,9 +338,10 @@ History lives in the private repo https://github.com/GeorgiosDelkos/agent-setup;
 only carries the working files between machines. The git directory is outside the synced
 folder, at `~/.local/share/agent-setup.git`, because a `.git` directory synced between
 machines can be corrupted by concurrent writes. `AgentSetup/.git` is a one-line file,
-`gitdir: ../../.local/share/agent-setup.git`, so plain `git` works in the folder.
-`install.sh` clones the git directory on a machine that has none (`setup_git`) and leaves
-the synced files as they are.
+`gitdir: ../../.local/share/agent-setup.git`, so plain `git` works in the folder. Sync
+does not sync that file, so `install.sh` (`setup_git`) writes it on each machine, clones the
+git directory where there is none, and leaves the synced files as they are. A run that
+stopped after the clone is finished by the next one.
 
 - Change the setup on one machine at a time: `git pull`, edit, `bash check.sh`, commit, push.
   Changes go through a branch and a PR like any repo (the Bash guard blocks pushes to
