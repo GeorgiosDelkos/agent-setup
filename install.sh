@@ -186,7 +186,10 @@ setup_git() {
   fi
   git --git-dir="$git_dir" config core.bare false
   git --git-dir="$git_dir" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-  git -C "$SETUP_DIR" fetch -q origin
+  if ! git -C "$SETUP_DIR" fetch -q origin; then
+    echo "skip    git history (cannot fetch $remote: check \`gh auth status\`, then re-run)"
+    return 0
+  fi
   git -C "$SETUP_DIR" branch -q --set-upstream-to=origin/main main
   git -C "$SETUP_DIR" reset -q
   echo "cloned  $git_dir"
