@@ -54,13 +54,42 @@ rule and skill below, except correctness and safety.
   line of steps makes code harder to follow.
 - Readable, not horizontally dense. Blank lines between distinct thoughts, not every statement.
 - Absolute imports. Language skills list the exceptions (e.g. Rust `use super::*` in tests).
-- Comments say why (intent, invariants, tradeoffs), never what. Document public APIs and
-  unsafe/FFI boundaries.
+- Document public APIs and unsafe/FFI boundaries. Code comments follow Comments below.
 - Fail fast with actionable errors (operation, input, fix). Never swallow errors.
 - Zero warnings from any tool. If one truly can't be fixed, ignore it inline with a reason.
 - Prefer structure-aware tools (ast-grep, LSP, compiler) over regex for code changes.
 - Subagents writing code get the design principles and these style rules in their prompt.
   Parallel ones each work in their own worktree.
+
+## Comments
+
+Code comments, not doc comments (API docs follow the language skill). The code shows how; a
+comment holds the why the code cannot show. From Jon Gjengset's talk *Don't make me read
+between the lines* (Rust Munich 2026).
+
+- Comment only to give: a TODO with owner and tracker, `TODO(handle, #123)` (the handle is
+  the user's GitHub login, never the agent's); a permalink to the spec, paper, or upstream
+  issue the code follows; an argument for why the code is correct; the reasoning behind code
+  that took investigation or failed attempts; why a constant, type, or limit has its value
+  (unit, source, formula, or "arbitrary"); why the obvious simpler version fails; what is
+  deliberately absent and why; a decision with the alternatives weighed and the downside
+  accepted; a prose walk-through of a hard algorithm; a tool directive with its reason.
+  Nothing else.
+- The chat is lost after the session. When the user states a constraint, rejects an
+  approach, or picks a tradeoff, record it in a comment next to the code it governs, or in
+  the commit body if it spans the change.
+- Prefer a check to a comment: a type, an assert, `expect` naming the invariant, a test.
+  Comment what is left.
+- A wrong comment is worse than none. Change comments in the same edit as their code, and
+  reread the comments around every edit. If you cannot state it precisely, leave it out.
+- Existing comments are claims, not facts. Where one disagrees with the code, follow neither
+  silently: list it in your report. Do not remove a comment, or the code it guards, until
+  you can say why it no longer holds.
+- Write for a reader without your context: full sentences, no private abbreviations, never
+  "obviously", "just", "simply", "trivially", "of course". Links are permalinks (commit hash
+  or archive), never a branch URL. Name an invariant used in many places once, in module
+  docs, and refer to it by that name.
+- Length follows difficulty, not a ratio. Never narrate code.
 
 ## Dependencies
 
