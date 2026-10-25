@@ -396,10 +396,10 @@ auto traits as API) are in `topics/library-api.md`.
 - **DOC-14** Links in comments and docs are permalinks: a commit-hash URL (press `y` on
   GitHub) or an archive copy, never `blob/main`, `tree/master` or `HEAD` `[check]`. [Jon,
   *Don't make me read between the lines*: branch links drift or 404]
-- **DOC-15** No "obviously", "trivially" or "of course" in comments `[check]`, nor "just"
-  or "simply" used the same way (not checked: too many harmless uses). Give the reason
-  instead. [Jon, *Don't make me read between the lines*: the reader is there because it
-  was not obvious]
+- **DOC-15** No "obviously", "trivially" or "of course" in comments and docs `[check]`,
+  nor "just" or "simply" used the same way (not checked: too many harmless uses). Give the
+  reason instead. [Jon, *Don't make me read between the lines*: the reader is there because
+  it was not obvious]
 
 ## Logging and output (LOG)
 

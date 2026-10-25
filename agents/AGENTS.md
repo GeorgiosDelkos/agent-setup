@@ -68,7 +68,7 @@ comment holds the why the code cannot show. From Jon Gjengset's talk *Don't make
 between the lines* (Rust Munich 2026).
 
 - Comment only to give: a TODO with owner and tracker, `TODO(handle, #123)` (the handle is
-  the user's GitHub login, never the agent's); a permalink to the spec, paper, or upstream
+  the user's GitHub login from `gh api user -q .login`, never the agent's); a permalink to the spec, paper, or upstream
   issue the code follows; an argument for why the code is correct; the reasoning behind code
   that took investigation or failed attempts; why a constant, type, or limit has its value
   (unit, source, formula, or "arbitrary"); why the obvious simpler version fails; what is
