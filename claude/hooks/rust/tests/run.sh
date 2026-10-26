@@ -644,7 +644,29 @@ run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/small.rs" 'x' sub1)"
 expect "review: small non-git file passes" 0 review-gate.sh "$(stop r3)"
 lines "$WORK/plain/x.rs" 0 25
 run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/x.rs" 'x' sub2)"
-expect "review: subagent's non-git edits count" 2 review-gate.sh "$(stop r3)" "plain/x.rs"
+expect "review: a running subagent's edits wait" 0 review-gate.sh "$(stop r3)"
+sub2_done="$(subagent_stop r3 "$WORK" '{"agent_id": "sub2", "agent_type": "general-purpose"}')"
+run_hook review-done.sh "$sub2_done"
+expect "review: subagent's non-git edits count once it stops" 2 review-gate.sh "$(stop r3)" \
+  "plain/x.rs"
+lines "$WORK/plain/resumed.rs" 0 25
+run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/resumed.rs" 'x' sub2)"
+expect "review: edits after a resume wait for the next stop" 0 review-gate.sh "$(stop r3)"
+run_hook review-done.sh "$sub2_done"
+expect "review: edits after a resume count at the next stop" 2 review-gate.sh "$(stop r3)" \
+  "plain/resumed.rs"
+# A subagent's work counts only once review-done.sh has recorded its stop, so it must run
+# for every subagent, not only the reviewer.
+SETTINGS="$HOOKS/../../settings.json"
+check "settings: review-done.sh runs for every subagent" "$(jq -e '[.hooks.SubagentStop[]
+  | select(any(.hooks[]; .command | test("review-done")))
+  | .matcher] == [""]' "$SETTINGS" >/dev/null && echo yes)"
+# A garbled stop count reads as not stopped yet, not as an error.
+printf 'x\n' >"$STATE_TMP/claude-rust-hooks/r3.sub2.finished"
+lines "$WORK/plain/garbled.rs" 0 25
+run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/garbled.rs" 'x' sub2)"
+expect "review: a garbled stop count waits" 0 review-gate.sh "$(stop r3)"
+check "review: a garbled stop count is not an error" "$([[ -z "$out" ]] && echo yes)" "$out"
 expect "review: session without edits passes" 0 review-gate.sh "$(rstop r4 "$WORK/notrust")"
 
 # A git repo inside a non-git directory that also holds a recorded file: each file is

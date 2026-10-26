@@ -5,8 +5,9 @@
 #
 # Only repos this session changed count (changes.sh `session_caused`), so a Q&A session in
 # a dirty checkout passes. Changed files come from git, measured from changes.sh `diff_base`
-# (so commits made before stopping still count) plus the paths any agent of the session
-# recorded. Per file, the changed lines are the smaller of:
+# (so commits made before stopping still count) plus the paths the session's agents recorded
+# (a subagent's only once it has stopped; see judged_lists). Per file, the changed lines
+# are the smaller of:
 #   - the session's own lines: changes from changes.sh `diff_base`, which leaves out commits
 #     that only arrived (a pull, a checkout of main after a merge),
 #   - lines changed since the snapshot review-done.sh took when the reviewer last finished,
@@ -63,10 +64,36 @@ if is_subagent || stop_is_exempt; then
   exit 0
 fi
 
+# The lists this stop judges: the main agent's whole `touched` list, and of each subagent
+# only the paths it had recorded at its last SubagentStop (the count review-done.sh writes
+# to its `finished` file, so settings.json runs it for every subagent), copied to a
+# `judged` file. A subagent that is still running is mid-change: its parent reviews the
+# work once it is handed back, and asking on every parent stop meanwhile only repeats a
+# request that cannot be met yet. Only recorded paths wait: a running subagent's edits in
+# a git checkout the session works in show in git's changes and count at once, so the wait
+# matters for files outside git and for a subagent's own worktree, found only through its
+# paths. A subagent that never stops (killed, or the session ends first) is never judged.
+judged_lists() {
+  local list finished count
+  while IFS= read -r list; do
+    if [[ "$list" == *.main.touched ]]; then
+      printf '%s\n' "$list"
+      continue
+    fi
+    finished="${list%.touched}.finished"
+    count="$(cat "$finished" 2>/dev/null || true)"
+    # A missing or unreadable count means the subagent has not stopped yet.
+    if [[ "$count" =~ ^[0-9]+$ ]]; then
+      head -n "$count" "$list" >"${list%.touched}.judged"
+      printf '%s\n' "${list%.touched}.judged"
+    fi
+  done < <(session_touched_lists)
+}
+
 lists=()
 while IFS= read -r list; do
   lists+=("$list")
-done < <(session_touched_lists)
+done < <(judged_lists)
 
 # Diff base of root $1: the session baseline logic for a git root, nothing otherwise.
 base_of() {

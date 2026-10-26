@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# SubagentStop (matcher rust-style-reviewer): when the reviewer finishes, snapshot every
-# changed .rs file of the repos the session works in. review-gate.sh then asks for a new
-# review only when the code moved far enough from what was reviewed, so the small fixes
-# that follow a review do not trigger another one.
+# SubagentStop: every subagent records how many paths it had recorded when it stopped, since
+# review-gate.sh counts a subagent's work only once it is handed back. When the
+# rust-style-reviewer finishes, this also snapshots every changed .rs file of the repos the
+# session works in: review-gate.sh then asks for a new review only when the code moved far
+# enough from what was reviewed, so the small fixes that follow a review do not trigger
+# another one.
 #
 # SubagentStop, not PostToolUse on the Agent tool: the reviewer usually runs in the
 # background, and PostToolUse fires at spawn time, before it has read anything. The agent
@@ -17,6 +19,13 @@ read_hook_input
 need_tools fail-open jq git shasum
 # shellcheck source-path=SCRIPTDIR source=changes.sh
 source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
+
+# Every subagent: how many paths it had recorded when it stopped. review-gate.sh judges
+# those and leaves paths recorded after a resume until the next stop.
+touched="$(agent_file touched)"
+if [[ -f "$touched" ]]; then
+  wc -l <"$touched" | tr -d ' ' >"$(agent_file finished)"
+fi
 
 if [[ "$(hook_field '.agent_type // .subagentType')" != "rust-style-reviewer" ]]; then
   exit 0

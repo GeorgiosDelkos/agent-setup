@@ -84,11 +84,11 @@ read those files. Only Claude Code's sandbox settings would close that.
 | `house-metadata.pl` | called by the hooks | Reads `[workspace.metadata.house-check]`: the `baseline` opt-in and the feature set. Also decides whether a crate is published (opt-in: `publish = ["crates-io"]`/`true`, or inherited through `publish.workspace = true`). |
 | `minimal-lints.toml` | read by run-clippy | The only lints the hook adds to a repo's own config, in every repo: leftover `dbg!`/`todo!`/`unimplemented!`, undocumented `unsafe`. |
 | `session-baseline.sh` | UserPromptSubmit, timeout 30 | Records each repo's HEAD and state at the session's first prompt (else at the first edit or stop), the baseline for every change count. |
-| `changes.sh` | sourced by the stop-time hooks | The changed set and changed line ranges against the session baseline (merge-base fallback after a rebase or reset), and per-repo review state. |
+| `changes.sh` | sourced by the stop-time hooks | The changed set and changed line ranges against the session's own work: HEAD with the commits the session made undone (from every reflog of the repository), so commits that only arrived (a pull, a checkout of main after a merge) do not count. Falls back to the session baseline (merge-base after a rebase or reset) without a reflog. Also per-repo review state. |
 | `house-check.pl` | called by check-on-stop | Line-level rules clippy cannot express (`// SAFETY:` spelling, TODO owners and trackers, branch links and dismissive words in comments, `# Cancel safety` in published libraries, anyhow in library code and library dependencies, `Box<dyn Error>` in public library signatures, ...). Runs only in opted-in repos. Each finding names its rust-style rule ID. `// house-check: allow(ID): reason` silences one line. |
 | `baseline-lints.pl` | called by run-clippy | Merges `minimal-lints.toml` with the workspace's own lint tables into clippy flags (the workspace wins). |
-| `review-gate.sh` | Stop (main agent only), timeout 120 | When this session's Rust changes in a repo reach 20 lines (the smaller of: since the session baseline, since the last review), blocks once per state of the changed files (a later turn with no new Rust change passes): run `rust-style-reviewer`, fix its blocker and major findings. Each file counts once, under its deepest root; recorded files deleted outside git do not count. |
-| `review-done.sh` | SubagentStop, matcher `rust-style-reviewer`, timeout 120 | When the reviewer finishes, snapshots the reviewed files per repo for review-gate. |
+| `review-gate.sh` | Stop (main agent only), timeout 120 | When this session's Rust changes in a repo reach 20 lines (the smallest of: the session's own lines, the lines since the last review's snapshot, the lines of commits made after the last review), blocks once per state of the changed files (a later turn with no new Rust change passes): run `rust-style-reviewer`, fix its blocker and major findings. Each file counts once, under its deepest root; recorded files deleted outside git do not count. |
+| `review-done.sh` | SubagentStop, every subagent, timeout 120 | Records how many paths each subagent had recorded when it stopped, which review-gate judges (a running subagent's work waits for its stop). When the reviewer finishes, also records the time per repository and snapshots the reviewed files per repo for review-gate. |
 | `common.sh` | sourced | Shared helpers: input parsing, path resolution against the hook's `cwd`, per-agent state, edition and `max_width` lookup. |
 | `tests/run.sh` | manual | Fixture and hook-input tests for all of the above. Run after any hook change. |
 | `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`), and any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`. Tested in `rust/tests/run.sh`. |
@@ -212,7 +212,7 @@ read those first.
            ]
          },
          {
-           "matcher": "rust-style-reviewer",
+           "matcher": "",
            "hooks": [
              {
                "type": "command",
