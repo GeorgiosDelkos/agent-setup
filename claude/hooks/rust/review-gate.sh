@@ -4,13 +4,16 @@
 # principles, data structures, API shape, error design, docs.
 #
 # Only repos this session changed count (changes.sh `session_caused`), so a Q&A session in
-# a dirty checkout passes. Changed files come from git since the session's baseline (so
-# commits made before stopping still count) plus the paths any agent of the session
+# a dirty checkout passes. Changed files come from git, measured from changes.sh `diff_base`
+# (so commits made before stopping still count) plus the paths any agent of the session
 # recorded. Per file, the changed lines are the smaller of:
-#   - lines changed since the session's baseline, and
-#   - lines changed since the snapshot review-done.sh took when the reviewer last finished.
-# The first keeps an old review (whose snapshot predates other people's commits) from
-# counting their work; the second keeps fixes for a fresh review from demanding another.
+#   - the session's own lines: changes from changes.sh `diff_base`, which leaves out commits
+#     that only arrived (a pull, a checkout of main after a merge),
+#   - lines changed since the snapshot review-done.sh took when the reviewer last finished,
+#   - lines changed by commits made after that review (changes.sh `review_base`).
+# The first keeps other people's work out; the second keeps fixes for a fresh review from
+# demanding another; the third does the same when a pull after the review moved the
+# snapshot's files.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=common.sh
@@ -95,7 +98,22 @@ while IFS= read -r root; do
   if [[ -d "$(review_dir "$root")" ]]; then
     snapshots="$(printf '%s\n' "${root_files[@]}" | review_snapshots "$root")"
   fi
-  while IFS=$'\t' read -r count file snapshot; do
+  # The snapshots also differ by whatever arrived after the review (a pull, a checkout of
+  # main); counted from review_base, only commits made after the review add to a file.
+  after_review=""
+  if is_git_root "$root"; then
+    rbase="$(review_base "$root")"
+    if [[ -n "$rbase" ]]; then
+      after_review="$(lines_since_base "$root" "$rbase" "${root_files[@]}")"
+    fi
+  fi
+  while IFS=$'\t' read -r count file after snapshot; do
+    if [[ "$after" != - ]]; then
+      reviewed=1
+      if ((after < count)); then
+        count="$after"
+      fi
+    fi
     if [[ -n "$snapshot" && -f "$snapshot" ]]; then
       reviewed=1
       current="$file"
@@ -114,12 +132,16 @@ while IFS= read -r root; do
     total=$((total + count))
     files+="$file"$'\n'
   done < <(lines_since_base "$root" "$base" "${root_files[@]}" |
-    SNAPSHOTS="$snapshots" awk -F '\t' '
+    SNAPSHOTS="$snapshots" AFTER="$after_review" awk -F '\t' '
       BEGIN {
         n = split(ENVIRON["SNAPSHOTS"], row, "\n")
         for (i = 1; i <= n; i++) if (split(row[i], f, "\t") == 2) snap[f[1]] = f[2]
+        n = split(ENVIRON["AFTER"], row, "\n")
+        for (i = 1; i <= n; i++) if (split(row[i], f, "\t") == 2) after[f[2]] = f[1]
       }
-      { printf "%s\t%s\t%s\n", $1, $2, snap[$2] }')
+      # The after-review count sits before the snapshot path, which may be empty: read
+      # splits on tabs as whitespace, so an empty field in the middle would shift the rest.
+      { printf "%s\t%s\t%s\t%s\n", $1, $2, ($2 in after ? after[$2] : "-"), snap[$2] }')
 done < <(cut -f 1 <<<"$claimed" | { grep -v '^$' || true; } | sort -u)
 
 if ((total < MIN_REVIEW_LINES)); then

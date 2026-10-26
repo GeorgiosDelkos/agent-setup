@@ -147,8 +147,19 @@ stop() {
   fi
   jq -nc --arg s "$1" --argjson extra "$extra" '{session_id: $s, hook_event_name: "Stop"} + $extra'
 }
+# Waits for the next second. The hooks tell the session's commits from earlier ones by
+# reflog time, in whole seconds, and count a tie as the session's; a test that commits and
+# then starts a session (or reviews) in the same second would see that tie.
+next_second() {
+  local now
+  now="$(date +%s)"
+  while (($(date +%s) == now)); do
+    sleep 0.1
+  done
+}
 # The session's first prompt in repo $2: records its baseline (session-baseline.sh).
 prompt() {
+  next_second
   run_hook session-baseline.sh "$(jq -nc --arg s "$1" --arg c "$2" \
     '{session_id: $s, hook_event_name: "UserPromptSubmit", cwd: $c, prompt: "go"}')"
 }
@@ -364,11 +375,31 @@ commit_all() {
   git -C "$1" add -A
   git -C "$1" -c user.name=t -c user.email=t@t commit -qm "${2:-snapshot}"
 }
+# commit_all an hour ago: work from before the session, which the hooks tell from the
+# session's own by its reflog time.
+old_commit() {
+  local then="@$(($(date +%s) - 3600)) +0000"
+  GIT_AUTHOR_DATE="$then" GIT_COMMITTER_DATE="$then" commit_all "$@"
+}
 new_repo() {
   mkdir -p "$1/src"
   lines "$1/src/lib.rs" 0 5
   git -C "$1" init -q -b main
-  commit_all "$1" init
+  old_commit "$1" init
+}
+# Others' work arriving in repo $1 as branch $2: what commands $3... do in a separate clone
+# (cwd the clone), committed there and pushed back, as a teammate's push or a GitHub merge
+# arrives.
+arrive() {
+  local repo="$1" branch="$2" clone="$1-elsewhere"
+  shift 2
+  git clone -q "$repo" "$clone"
+  (cd "$clone" && "$@")
+  if [[ -n "$(git -C "$clone" status --porcelain)" ]]; then
+    commit_all "$clone" "others' work"
+  fi
+  git -C "$clone" push -q origin "HEAD:refs/heads/$branch"
+  trash "$clone"
 }
 # Stop in repo $2 for session $1, with optional extra JSON fields $3.
 rstop() {
@@ -471,6 +502,114 @@ run_hook fmt-on-edit.sh "$(edit r8 "$REPO4B/src/lib.rs" 'x')"
 expect "review: stale baseline not used after a rebase (5 lines)" 0 review-gate.sh \
   "$(rstop r8 "$REPO4B")"
 
+# Commits that only arrive are not the session's: a fast-forward to work merged elsewhere,
+# or a checkout of main after the session's pull request merged. Its own commits still
+# count, through the merge, and a merge it finishes by hand counts only the hand-written
+# part.
+ARR_FF="$WORK/arr-ff"
+new_repo "$ARR_FF"
+git -C "$ARR_FF" checkout -q -b upstream
+lines "$ARR_FF/src/lib.rs" 5 40
+old_commit "$ARR_FF" "merged elsewhere"
+git -C "$ARR_FF" checkout -q main
+prompt r9 "$ARR_FF"
+git -C "$ARR_FF" merge -q --ff-only upstream
+expect "review: a fast-forward to others' work passes" 0 review-gate.sh "$(rstop r9 "$ARR_FF")"
+lines "$ARR_FF/src/own.rs" 0 25
+commit_all "$ARR_FF" "own work"
+expect "review: own commit after a fast-forward counts (25 lines)" 2 review-gate.sh \
+  "$(rstop r9 "$ARR_FF")" "changed 25 lines"
+
+ARR_PR="$WORK/arr-pr"
+new_repo "$ARR_PR"
+git -C "$ARR_PR" checkout -q -b feature
+prompt r10 "$ARR_PR"
+lines "$ARR_PR/src/lib.rs" 5 3
+commit_all "$ARR_PR" "own fix"
+# Elsewhere: 40 lines of others' work on main, then the feature branch merged into it, as
+# GitHub merges a pull request.
+merge_feature() {
+  git checkout -q main
+  lines src/other.rs 0 40
+  commit_all . "others' work"
+  git -c user.name=t -c user.email=t@t merge -q --no-ff origin/feature -m "Merge pull request"
+}
+arrive "$ARR_PR" main merge_feature
+git -C "$ARR_PR" checkout -q main
+expect "review: checkout of main after the merge passes (3 own lines)" 0 review-gate.sh \
+  "$(rstop r10 "$ARR_PR")"
+lines "$ARR_PR/src/lib.rs" 8 20
+expect "review: own commit inside the merge still counts (23 lines)" 2 review-gate.sh \
+  "$(rstop r10 "$ARR_PR")" "changed 23 lines"
+
+ARR_HAND="$WORK/arr-hand"
+new_repo "$ARR_HAND"
+git -C "$ARR_HAND" checkout -q -b other
+perl -pi -e 's/f0\(/other0(/' "$ARR_HAND/src/lib.rs"
+lines "$ARR_HAND/src/big.rs" 0 40
+old_commit "$ARR_HAND" "other side"
+git -C "$ARR_HAND" checkout -q main
+perl -pi -e 's/f0\(/main0(/' "$ARR_HAND/src/lib.rs"
+old_commit "$ARR_HAND" "main side"
+prompt r11 "$ARR_HAND"
+git -C "$ARR_HAND" merge -q other >/dev/null 2>&1 || true
+git -C "$ARR_HAND" checkout -q --ours src/lib.rs
+git -C "$ARR_HAND" add -A
+git -C "$ARR_HAND" -c user.name=t -c user.email=t@t commit -q --no-edit
+expect "review: a merge finished by hand counts the resolution only" 0 review-gate.sh \
+  "$(rstop r11 "$ARR_HAND")"
+
+# After a review, work that arrives in a reviewed file moves its snapshot diff but is not
+# the session's: a small fix on top passes.
+ARR_REV="$WORK/arr-rev"
+new_repo "$ARR_REV"
+prompt r12 "$ARR_REV"
+lines "$ARR_REV/src/lib.rs" 5 25
+commit_all "$ARR_REV" "own work"
+next_second
+run_hook review-done.sh \
+  "$(subagent_stop r12 "$ARR_REV" '{"agent_id": "rv", "agent_type": "rust-style-reviewer"}')"
+arrive "$ARR_REV" upstream lines src/lib.rs 30 40
+git -C "$ARR_REV" merge -q --ff-only upstream
+lines "$ARR_REV/src/lib.rs" 70 3
+expect "review: arrivals after a review do not count against it (3 lines)" 0 review-gate.sh \
+  "$(rstop r12 "$ARR_REV")"
+lines "$ARR_REV/src/lib.rs" 73 25
+expect "review: own work after the review still counts (28 lines)" 2 review-gate.sh \
+  "$(rstop r12 "$ARR_REV")" "changed 28 lines"
+
+# Undercounting is the failure that matters: the session's commits stay counted when git
+# expires old reflog entries, when a later change deletes or edits the file a session
+# commit created, when the work was committed in a linked worktree (a subagent's) and
+# merged in, and when gc prunes the cached base.
+ARR_KEEP="$WORK/arr-keep"
+new_repo "$ARR_KEEP"
+prompt r13 "$ARR_KEEP"
+lines "$ARR_KEEP/src/own.rs" 0 30
+commit_all "$ARR_KEEP" "own file"
+git -C "$ARR_KEEP" reflog expire --expire=30.minutes.ago --all
+expect "review: own commit counts after old reflog entries expire (30 lines)" 2 \
+  review-gate.sh "$(rstop r13 "$ARR_KEEP")" "changed 30 lines"
+arrive "$ARR_KEEP" edited perl -pi -e 's/f0\(/edited0(/' src/own.rs
+git -C "$ARR_KEEP" merge -q --ff-only edited
+unblock r13
+expect "review: own file edited by others still counts (30 lines)" 2 review-gate.sh \
+  "$(rstop r13 "$ARR_KEEP")" "changed 30 lines"
+git -C "$ARR_KEEP" gc -q --prune=now
+unblock r13
+expect "review: a base pruned by gc is rebuilt (30 lines)" 2 review-gate.sh \
+  "$(rstop r13 "$ARR_KEEP")" "changed 30 lines"
+
+ARR_WT="$WORK/arr-wt"
+new_repo "$ARR_WT"
+prompt r14 "$ARR_WT"
+git -C "$ARR_WT" worktree add -q -b sub "$WORK/arr-wt-sub" main
+lines "$WORK/arr-wt-sub/src/sub.rs" 0 25
+commit_all "$WORK/arr-wt-sub" "subagent work"
+git -C "$ARR_WT" worktree remove "$WORK/arr-wt-sub"
+git -C "$ARR_WT" merge -q --ff-only sub
+expect "review: work committed in a worktree and merged in counts (25 lines)" 2 \
+  review-gate.sh "$(rstop r14 "$ARR_WT")" "changed 25 lines"
 # M2: a Q&A session in a dirty repo changed nothing and passes both stop hooks.
 REPO5="$WORK/repo5"
 new_repo "$REPO5"
