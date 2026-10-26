@@ -471,6 +471,83 @@ run_hook fmt-on-edit.sh "$(edit r8 "$REPO4B/src/lib.rs" 'x')"
 expect "review: stale baseline not used after a rebase (5 lines)" 0 review-gate.sh \
   "$(rstop r8 "$REPO4B")"
 
+# Commits that only arrive are not the session's: a fast-forward to work merged elsewhere,
+# or a checkout of main after the session's pull request merged. Its own commits still
+# count, through the merge, and a merge it finishes by hand counts only the hand-written
+# part.
+REPO6="$WORK/repo6"
+new_repo "$REPO6"
+git -C "$REPO6" checkout -q -b upstream
+lines "$REPO6/src/lib.rs" 5 40
+commit_all "$REPO6" "merged elsewhere"
+git -C "$REPO6" checkout -q main
+prompt r9 "$REPO6"
+git -C "$REPO6" merge -q --ff-only upstream
+expect "review: a fast-forward to others' work passes" 0 review-gate.sh "$(rstop r9 "$REPO6")"
+lines "$REPO6/src/own.rs" 0 25
+commit_all "$REPO6" "own work"
+expect "review: own commit after a fast-forward counts (25 lines)" 2 review-gate.sh \
+  "$(rstop r9 "$REPO6")" "changed 25 lines"
+
+REPO7="$WORK/repo7"
+new_repo "$REPO7"
+git -C "$REPO7" checkout -q -b feature
+prompt r10 "$REPO7"
+lines "$REPO7/src/lib.rs" 5 3
+commit_all "$REPO7" "own fix"
+# Elsewhere (a worktree has its own HEAD reflog): 40 lines of others' work on main, then the
+# feature branch merged into it, as GitHub merges a pull request.
+git -C "$REPO7" worktree add -q "$WORK/repo7-main" main
+lines "$WORK/repo7-main/src/other.rs" 0 40
+commit_all "$WORK/repo7-main" "others' work"
+git -C "$WORK/repo7-main" -c user.name=t -c user.email=t@t merge -q --no-ff feature \
+  -m "Merge pull request"
+git -C "$REPO7" worktree remove "$WORK/repo7-main"
+git -C "$REPO7" checkout -q main
+expect "review: checkout of main after the merge passes (3 own lines)" 0 review-gate.sh \
+  "$(rstop r10 "$REPO7")"
+lines "$REPO7/src/lib.rs" 8 20
+expect "review: own commit inside the merge still counts (23 lines)" 2 review-gate.sh \
+  "$(rstop r10 "$REPO7")" "changed 23 lines"
+
+REPO8="$WORK/repo8"
+new_repo "$REPO8"
+git -C "$REPO8" checkout -q -b other
+perl -pi -e 's/f0\(/other0(/' "$REPO8/src/lib.rs"
+lines "$REPO8/src/big.rs" 0 40
+commit_all "$REPO8" "other side"
+git -C "$REPO8" checkout -q main
+perl -pi -e 's/f0\(/main0(/' "$REPO8/src/lib.rs"
+commit_all "$REPO8" "main side"
+prompt r11 "$REPO8"
+git -C "$REPO8" merge -q other >/dev/null 2>&1 || true
+git -C "$REPO8" checkout -q --ours src/lib.rs
+git -C "$REPO8" add -A
+git -C "$REPO8" -c user.name=t -c user.email=t@t commit -q --no-edit
+expect "review: a merge finished by hand counts the resolution only" 0 review-gate.sh \
+  "$(rstop r11 "$REPO8")"
+
+# After a review, work that arrives in a reviewed file moves its snapshot diff but is not
+# the session's: a small fix on top passes.
+REPO9="$WORK/repo9"
+new_repo "$REPO9"
+prompt r12 "$REPO9"
+lines "$REPO9/src/lib.rs" 5 25
+commit_all "$REPO9" "own work"
+run_hook review-done.sh \
+  "$(subagent_stop r12 "$REPO9" '{"agent_id": "rv", "agent_type": "rust-style-reviewer"}')"
+git -C "$REPO9" worktree add -q -b upstream "$WORK/repo9-up" main
+lines "$WORK/repo9-up/src/lib.rs" 30 40
+commit_all "$WORK/repo9-up" "others' work"
+git -C "$REPO9" worktree remove "$WORK/repo9-up"
+git -C "$REPO9" merge -q --ff-only upstream
+lines "$REPO9/src/lib.rs" 70 3
+expect "review: arrivals after a review do not count against it (3 lines)" 0 review-gate.sh \
+  "$(rstop r12 "$REPO9")"
+lines "$REPO9/src/lib.rs" 73 25
+expect "review: own work after the review still counts (28 lines)" 2 review-gate.sh \
+  "$(rstop r12 "$REPO9")" "changed 28 lines"
+
 # M2: a Q&A session in a dirty repo changed nothing and passes both stop hooks.
 REPO5="$WORK/repo5"
 new_repo "$REPO5"

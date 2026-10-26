@@ -40,6 +40,10 @@ all_bases() {
 
 stop_roots ${lists[@]+"${lists[@]}"} | while IFS= read -r root; do
   mkdir -p "$(review_dir "$root")"
+  # Where the reflog stood: commits made after it are the unreviewed ones (review_base).
+  if is_git_root "$root"; then
+    printf '%s\t%s\n' "$(date +%s)" "$(reflog_lines "$root")" >"$(review_position_file "$root")"
+  fi
   {
     if is_git_root "$root"; then
       all_bases "$root" | while IFS= read -r base; do
