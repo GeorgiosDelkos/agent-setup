@@ -66,19 +66,25 @@ fi
 
 # The lists this stop judges: the main agent's whole `touched` list, and of each subagent
 # only the paths it had recorded at its last SubagentStop (the count review-done.sh writes
-# to its `finished` file), copied to a `judged` file. A subagent that is still running is
-# mid-change: its parent reviews the work once it is handed back, and asking on every
-# parent stop meanwhile only repeats a request that cannot be met yet.
+# to its `finished` file, so settings.json runs it for every subagent), copied to a
+# `judged` file. A subagent that is still running is mid-change: its parent reviews the
+# work once it is handed back, and asking on every parent stop meanwhile only repeats a
+# request that cannot be met yet. Only recorded paths wait: a running subagent's edits in
+# a git checkout the session works in show in git's changes and count at once, so the wait
+# matters for files outside git and for a subagent's own worktree, found only through its
+# paths. A subagent that never stops (killed, or the session ends first) is never judged.
 judged_lists() {
-  local list finished
+  local list finished count
   while IFS= read -r list; do
     if [[ "$list" == *.main.touched ]]; then
       printf '%s\n' "$list"
       continue
     fi
     finished="${list%.touched}.finished"
-    if [[ -f "$finished" ]]; then
-      head -n "$(cat "$finished")" "$list" >"${list%.touched}.judged"
+    count="$(cat "$finished" 2>/dev/null || true)"
+    # A missing or unreadable count means the subagent has not stopped yet.
+    if [[ "$count" =~ ^[0-9]+$ ]]; then
+      head -n "$count" "$list" >"${list%.touched}.judged"
       printf '%s\n' "${list%.touched}.judged"
     fi
   done < <(session_touched_lists)
