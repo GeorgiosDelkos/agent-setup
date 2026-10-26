@@ -4,8 +4,8 @@
 # principles, data structures, API shape, error design, docs.
 #
 # Only repos this session changed count (changes.sh `session_caused`), so a Q&A session in
-# a dirty checkout passes. Changed files come from git since the session's baseline (so
-# commits made before stopping still count) plus the paths any agent of the session
+# a dirty checkout passes. Changed files come from git, measured from changes.sh `diff_base`
+# (so commits made before stopping still count) plus the paths any agent of the session
 # recorded. Per file, the changed lines are the smaller of:
 #   - the session's own lines: changes from changes.sh `diff_base`, which leaves out commits
 #     that only arrived (a pull, a checkout of main after a merge),
