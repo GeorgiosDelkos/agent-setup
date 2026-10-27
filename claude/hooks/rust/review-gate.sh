@@ -104,21 +104,32 @@ base_of() {
   fi
 }
 
-# Roots a resumed subagent is still changing, one per line: a subagent whose `touched`
-# list grew past its last stop count recorded edits since it was handed back, and git shows
-# those edits at once, so a root only such subagents recorded paths in would be judged
-# mid-change. A root the main agent recorded a path in is never waiting: its changes may
-# be the main agent's own. The root counts again at the subagent's next stop.
+# Roots a resumed subagent is still changing, one per line. A subagent is mid-change when
+# the stop input lists it as a running background task (Claude Code's `background_tasks`,
+# which covers a subagent resumed by a follow-up message however it edits, shell scripts
+# included), or when its `touched` list grew past its last stop count (the only signal
+# Grok gives). Git shows its edits at once, so a root only such subagents recorded paths in
+# would be judged mid-change. A root the main agent recorded a path in is never waiting: its
+# changes may be the main agent's own. The root counts again at the subagent's next stop.
 waiting_roots() {
-  local list count main
+  local list count main agent running
   main="$RUST_HOOKS_STATE/$(session_id).main.touched"
+  running="$(jq -r '.background_tasks[]? | select(.type == "subagent" and .status == "running")
+    | .id // empty' <<<"$HOOK_INPUT")"
   while IFS= read -r list; do
     if [[ "$list" == *.main.touched ]]; then
       continue
     fi
     count="$(cat "${list%.touched}.finished" 2>/dev/null || true)"
+    agent="${list%.touched}"
+    agent="${agent##*.}"
     # A subagent that never stopped has no judged paths, so nothing of it is counted.
-    if [[ "$count" =~ ^[0-9]+$ ]] && (($(wc -l <"$list") > count)); then
+    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
+      continue
+    fi
+    if grep -qxF -- "$agent" <<<"$running"; then
+      cat "$list"
+    elif (($(wc -l <"$list") > count)); then
       tail -n "+$((count + 1))" "$list"
     fi
   done < <(session_touched_lists) | sed 's|/[^/]*$||' | sort -u | while IFS= read -r dir; do

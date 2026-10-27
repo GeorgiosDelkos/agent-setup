@@ -671,6 +671,23 @@ expect "review: its edits after a resume wait, even in git" 0 review-gate.sh "$(
 run_hook review-done.sh "$sub5_done"
 expect "review: they count again at its next stop" 2 review-gate.sh "$(stop wt1)" \
   "worktree/src/lib.rs"
+# A resumed subagent that edits by shell records no new paths, so its list does not grow;
+# the stop input's running background tasks still say it is mid-change.
+WT2="$WORK/worktree2"
+new_repo "$WT2"
+lines "$WT2/src/lib.rs" 5 25
+run_hook fmt-on-edit.sh "$(edit wt2 "$WT2/src/lib.rs" 'x' sub6)"
+run_hook review-done.sh \
+  "$(subagent_stop wt2 "$WORK" '{"agent_id": "sub6", "agent_type": "general-purpose"}')"
+unblock wt2
+lines "$WT2/src/lib.rs" 30 25
+sub6_task() {
+  jq -nc --arg s "$1" '{background_tasks: [{id: "sub6", type: "subagent", status: $s}]}'
+}
+expect "review: a running subagent's shell edits wait" 0 review-gate.sh \
+  "$(stop wt2 "$(sub6_task running)")"
+expect "review: they count once it no longer runs" 2 review-gate.sh \
+  "$(stop wt2 "$(sub6_task completed)")" "worktree2/src/lib.rs"
 # A subagent's work counts only once review-done.sh has recorded its stop, so it must run
 # for every subagent, not only the reviewer.
 SETTINGS="$HOOKS/../../settings.json"
