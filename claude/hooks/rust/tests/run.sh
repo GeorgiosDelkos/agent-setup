@@ -668,6 +668,27 @@ run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/garbled.rs" 'x' sub2)"
 expect "review: a garbled stop count waits" 0 review-gate.sh "$(stop r3)"
 check "review: a garbled stop count is not an error" "$([[ -z "$out" ]] && echo yes)" "$out"
 expect "review: session without edits passes" 0 review-gate.sh "$(rstop r4 "$WORK/notrust")"
+# A subagent that stops while a task it started still runs has only paused: its work waits.
+# The session-wide task list holds the subagent itself and tasks it did not start; neither
+# makes it a pause.
+lines "$WORK/plain/paused.rs" 0 25
+run_hook fmt-on-edit.sh "$(edit pause1 "$WORK/plain/paused.rs" 'x' sub3)"
+printf '%s\n' '{"note": "agent sub3 launched background task bg42"}' >"$WORK/sub3.jsonl"
+sub3_stop() {
+  subagent_stop pause1 "$WORK" "$(jq -nc --arg t "$WORK/sub3.jsonl" --argjson tasks "$1" \
+    '{agent_id: "sub3", agent_type: "general-purpose", agent_transcript_path: $t,
+      background_tasks: $tasks}')"
+}
+run_hook review-done.sh "$(sub3_stop '[{"id": "sub3", "type": "subagent", "status": "running"},
+  {"id": "bg42", "type": "shell", "status": "running"},
+  {"id": "bg99", "type": "shell", "status": "running"}]')"
+expect "review: a subagent paused on its own background task waits" 0 review-gate.sh \
+  "$(stop pause1)"
+run_hook review-done.sh "$(sub3_stop '[{"id": "sub3", "type": "subagent", "status": "running"},
+  {"id": "bg42", "type": "shell", "status": "completed"},
+  {"id": "bg99", "type": "shell", "status": "running"}]')"
+expect "review: its work counts once its own tasks are done" 2 review-gate.sh "$(stop pause1)" \
+  "plain/paused.rs"
 
 # A git repo inside a non-git directory that also holds a recorded file: each file is
 # counted once, under the repo, and a recorded file deleted since is not listed.
