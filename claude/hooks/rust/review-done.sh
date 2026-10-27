@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SubagentStop: every subagent records how many paths it had recorded when it stopped, since
-# review-gate.sh counts a subagent's work only once it is handed back. When the
+# review-gate.sh counts a subagent's work only once it is handed back. A stop while a task
+# the subagent started still runs is a pause, not a hand-back, and records nothing. When the
 # rust-style-reviewer finishes, this also snapshots every changed .rs file of the repos the
 # session works in: review-gate.sh then asks for a new review only when the code moved far
 # enough from what was reviewed, so the small fixes that follow a review do not trigger
@@ -20,10 +21,34 @@ need_tools fail-open jq git shasum
 # shellcheck source-path=SCRIPTDIR source=changes.sh
 source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
 
-# Every subagent: how many paths it had recorded when it stopped. review-gate.sh judges
-# those and leaves paths recorded after a resume until the next stop.
+# Whether the stopping subagent has only paused: a task it started (a background command, a
+# child agent, a monitor) is still running, so it will resume and keep changing files when
+# that task reports. SubagentStop fires on such a pause too, and the input has no flag for
+# it. `background_tasks` lists every running task of the whole session, including the
+# stopping agent itself, so a task counts as this agent's when its id appears in the agent's
+# own transcript, where its launch result names it. Grok sends no `background_tasks`, so a
+# Grok subagent never reads as paused.
+has_paused() {
+  local transcript self id
+  transcript="$(hook_field '.agent_transcript_path')"
+  self="$(hook_field '.agent_id')"
+  if [[ ! -f "$transcript" ]]; then
+    return 1
+  fi
+  while IFS= read -r id; do
+    if [[ -n "$id" && "$id" != "$self" ]] && grep -qF -- "$id" "$transcript"; then
+      return 0
+    fi
+  done < <(jq -r '.background_tasks[]? | select(.status == "running") | .id // empty' \
+    <<<"$HOOK_INPUT")
+  return 1
+}
+
+# Every subagent that is done for now: how many paths it had recorded when it stopped.
+# review-gate.sh judges those and leaves paths recorded after a resume until the next stop.
+# A pause keeps the count of the last real stop, so work done before it waits as well.
 touched="$(agent_file touched)"
-if [[ -f "$touched" ]]; then
+if [[ -f "$touched" ]] && ! has_paused; then
   wc -l <"$touched" | tr -d ' ' >"$(agent_file finished)"
 fi
 

@@ -655,6 +655,22 @@ expect "review: edits after a resume wait for the next stop" 0 review-gate.sh "$
 run_hook review-done.sh "$sub2_done"
 expect "review: edits after a resume count at the next stop" 2 review-gate.sh "$(stop r3)" \
   "plain/resumed.rs"
+# A subagent resumed after a stop (a SendMessage follow-up) edits a git root of its own,
+# a worktree: git shows the new edits at once, but they wait for its next stop.
+WT="$WORK/worktree"
+new_repo "$WT"
+lines "$WT/src/lib.rs" 5 25
+run_hook fmt-on-edit.sh "$(edit wt1 "$WT/src/lib.rs" 'x' sub5)"
+sub5_done="$(subagent_stop wt1 "$WORK" '{"agent_id": "sub5", "agent_type": "general-purpose"}')"
+run_hook review-done.sh "$sub5_done"
+expect "review: a worktree subagent's work counts at its stop" 2 review-gate.sh "$(stop wt1)" \
+  "worktree/src/lib.rs"
+lines "$WT/src/lib.rs" 30 25
+run_hook fmt-on-edit.sh "$(edit wt1 "$WT/src/lib.rs" 'x' sub5)"
+expect "review: its edits after a resume wait, even in git" 0 review-gate.sh "$(stop wt1)"
+run_hook review-done.sh "$sub5_done"
+expect "review: they count again at its next stop" 2 review-gate.sh "$(stop wt1)" \
+  "worktree/src/lib.rs"
 # A subagent's work counts only once review-done.sh has recorded its stop, so it must run
 # for every subagent, not only the reviewer.
 SETTINGS="$HOOKS/../../settings.json"
@@ -668,6 +684,27 @@ run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/garbled.rs" 'x' sub2)"
 expect "review: a garbled stop count waits" 0 review-gate.sh "$(stop r3)"
 check "review: a garbled stop count is not an error" "$([[ -z "$out" ]] && echo yes)" "$out"
 expect "review: session without edits passes" 0 review-gate.sh "$(rstop r4 "$WORK/notrust")"
+# A subagent that stops while a task it started still runs has only paused: its work waits.
+# The session-wide task list holds the subagent itself and tasks it did not start; neither
+# makes it a pause.
+lines "$WORK/plain/paused.rs" 0 25
+run_hook fmt-on-edit.sh "$(edit pause1 "$WORK/plain/paused.rs" 'x' sub3)"
+printf '%s\n' '{"note": "agent sub3 launched background task bg42"}' >"$WORK/sub3.jsonl"
+sub3_stop() {
+  subagent_stop pause1 "$WORK" "$(jq -nc --arg t "$WORK/sub3.jsonl" --argjson tasks "$1" \
+    '{agent_id: "sub3", agent_type: "general-purpose", agent_transcript_path: $t,
+      background_tasks: $tasks}')"
+}
+run_hook review-done.sh "$(sub3_stop '[{"id": "sub3", "type": "subagent", "status": "running"},
+  {"id": "bg42", "type": "shell", "status": "running"},
+  {"id": "bg99", "type": "shell", "status": "running"}]')"
+expect "review: a subagent paused on its own background task waits" 0 review-gate.sh \
+  "$(stop pause1)"
+run_hook review-done.sh "$(sub3_stop '[{"id": "sub3", "type": "subagent", "status": "running"},
+  {"id": "bg42", "type": "shell", "status": "completed"},
+  {"id": "bg99", "type": "shell", "status": "running"}]')"
+expect "review: its work counts once its own tasks are done" 2 review-gate.sh "$(stop pause1)" \
+  "plain/paused.rs"
 
 # A git repo inside a non-git directory that also holds a recorded file: each file is
 # counted once, under the repo, and a recorded file deleted since is not listed.

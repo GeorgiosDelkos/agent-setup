@@ -67,12 +67,14 @@ fi
 # The lists this stop judges: the main agent's whole `touched` list, and of each subagent
 # only the paths it had recorded at its last SubagentStop (the count review-done.sh writes
 # to its `finished` file, so settings.json runs it for every subagent), copied to a
-# `judged` file. A subagent that is still running is mid-change: its parent reviews the
-# work once it is handed back, and asking on every parent stop meanwhile only repeats a
-# request that cannot be met yet. Only recorded paths wait: a running subagent's edits in
-# a git checkout the session works in show in git's changes and count at once, so the wait
-# matters for files outside git and for a subagent's own worktree, found only through its
-# paths. A subagent that never stops (killed, or the session ends first) is never judged.
+# `judged` file. A stop while a task the subagent started still runs is a pause, which
+# review-done.sh does not count. A subagent that is still running is mid-change: its
+# parent reviews the work once it is handed back, and asking on every parent stop
+# meanwhile only repeats a request that cannot be met yet. Only recorded paths wait: a
+# running subagent's edits in a git checkout the session works in show in git's changes
+# and count at once, so the wait matters for files outside git and for a subagent's own
+# worktree, found only through its paths. A subagent that never stops (killed, or the
+# session ends first) is never judged.
 judged_lists() {
   local list finished count
   while IFS= read -r list; do
@@ -102,9 +104,40 @@ base_of() {
   fi
 }
 
+# Roots a resumed subagent is still changing, one per line: a subagent whose `touched`
+# list grew past its last stop count recorded edits since it was handed back, and git shows
+# those edits at once, so a root only such subagents recorded paths in would be judged
+# mid-change. A root the main agent recorded a path in is never waiting: its changes may
+# be the main agent's own. The root counts again at the subagent's next stop.
+waiting_roots() {
+  local list count main
+  main="$RUST_HOOKS_STATE/$(session_id).main.touched"
+  while IFS= read -r list; do
+    if [[ "$list" == *.main.touched ]]; then
+      continue
+    fi
+    count="$(cat "${list%.touched}.finished" 2>/dev/null || true)"
+    # A subagent that never stopped has no judged paths, so nothing of it is counted.
+    if [[ "$count" =~ ^[0-9]+$ ]] && (($(wc -l <"$list") > count)); then
+      tail -n "+$((count + 1))" "$list"
+    fi
+  done < <(session_touched_lists) | sed 's|/[^/]*$||' | sort -u | while IFS= read -r dir; do
+    state_root_of "$dir"
+    echo
+  done | { grep -v '^$' || true; } | sort -u | while IFS= read -r root; do
+    if ! grep -qsF -- "$root/" "$main"; then
+      printf '%s\n' "$root"
+    fi
+  done
+}
+waiting="$(waiting_roots)"
+
 # `root<TAB>file` for every changed .rs file of the roots this session changed, each file
 # under its deepest root only.
 claimed="$(stop_roots ${lists[@]+"${lists[@]}"} | while IFS= read -r root; do
+  if grep -qxF -- "$root" <<<"$waiting"; then
+    continue
+  fi
   if session_caused "$root" ${lists[@]+"${lists[@]}"}; then
     changed_files "$root" "$(base_of "$root")" ${lists[@]+"${lists[@]}"} |
       { grep '\.rs$' || true; } | awk -v root="$root" '{ print root "\t" $0 }'
