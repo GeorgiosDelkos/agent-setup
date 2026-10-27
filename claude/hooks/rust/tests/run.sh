@@ -655,6 +655,22 @@ expect "review: edits after a resume wait for the next stop" 0 review-gate.sh "$
 run_hook review-done.sh "$sub2_done"
 expect "review: edits after a resume count at the next stop" 2 review-gate.sh "$(stop r3)" \
   "plain/resumed.rs"
+# A subagent resumed after a stop (a SendMessage follow-up) edits a git root of its own,
+# a worktree: git shows the new edits at once, but they wait for its next stop.
+WT="$WORK/worktree"
+new_repo "$WT"
+lines "$WT/src/lib.rs" 5 25
+run_hook fmt-on-edit.sh "$(edit wt1 "$WT/src/lib.rs" 'x' sub5)"
+sub5_done="$(subagent_stop wt1 "$WORK" '{"agent_id": "sub5", "agent_type": "general-purpose"}')"
+run_hook review-done.sh "$sub5_done"
+expect "review: a worktree subagent's work counts at its stop" 2 review-gate.sh "$(stop wt1)" \
+  "worktree/src/lib.rs"
+lines "$WT/src/lib.rs" 30 25
+run_hook fmt-on-edit.sh "$(edit wt1 "$WT/src/lib.rs" 'x' sub5)"
+expect "review: its edits after a resume wait, even in git" 0 review-gate.sh "$(stop wt1)"
+run_hook review-done.sh "$sub5_done"
+expect "review: they count again at its next stop" 2 review-gate.sh "$(stop wt1)" \
+  "worktree/src/lib.rs"
 # A subagent's work counts only once review-done.sh has recorded its stop, so it must run
 # for every subagent, not only the reviewer.
 SETTINGS="$HOOKS/../../settings.json"
