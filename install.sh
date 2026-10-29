@@ -195,6 +195,30 @@ setup_git() {
   echo "cloned  $git_dir"
 }
 
+# The synced folder is the deployed copy and should match origin/main (agents/SETUP.md,
+# Version control): an edit made in it is live on every machine before any review or test.
+# Read-only and offline: it compares against the last fetched origin/main.
+check_sync() {
+  local branch changed behind
+  if ! git -C "$SETUP_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+    return 0
+  fi
+  branch="$(git -C "$SETUP_DIR" symbolic-ref -q --short HEAD || echo "a detached HEAD")"
+  if [[ "$branch" != main ]]; then
+    echo "warning: $SETUP_DIR is on $branch, not main: every machine runs that branch"
+  fi
+  changed="$(git -C "$SETUP_DIR" status --porcelain | wc -l | tr -d ' ')"
+  if ((changed > 0)); then
+    echo "warning: $SETUP_DIR has $changed changed files that are not in git; they are live" \
+      "on every machine, unreviewed. Move them to a clone and open a PR (SETUP.md, Version" \
+      "control)."
+  fi
+  behind="$(git -C "$SETUP_DIR" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)"
+  if ((behind > 0)); then
+    echo "note: $SETUP_DIR is $behind commits behind origin/main: git pull --ff-only"
+  fi
+}
+
 check_tools() {
   local tool missing=()
   # The Rust hooks need jq, git, perl, shasum, cargo, rustfmt and clippy; without one they
@@ -249,6 +273,7 @@ main() {
   register_Sync_mem
   setup_air
   setup_git
+  check_sync
   # Sync drops the executable bit, so restore it on everything that is run directly.
   chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh "$SETUP_DIR/claude/statusline.sh"
   check_tools
