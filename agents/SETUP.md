@@ -34,7 +34,7 @@ machine reaches every machine.
 
 | Path on the machine | Links to | Purpose |
 |---|---|---|
-| `~/.config/agents/` | `$SETUP/agents/` | `AGENTS.md` (canonical rules; edit only this) and this document. |
+| `~/.config/agents/` | `$SETUP/agents/` | `AGENTS.md` (the canonical rules) and this document. |
 | `~/.claude/skills/` | `$SETUP/claude/skills/` | `rust-style` (+ `templates/`), `rfr-*`, `rust-*`, `{python,ts,bash,gh-actions}-style`, others. |
 | `~/.claude/agents/` | `$SETUP/claude/agents/` | `rust-style-reviewer.md`. |
 | `~/.claude/hooks/` | `$SETUP/claude/hooks/` | `rust/*.sh` enforcement hooks (see below). |
@@ -51,8 +51,9 @@ machine reaches every machine.
 
 `settings.json` is the one file that is not linked: Claude Code rewrites it in place, which
 would replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
-merges it in (shared keys win, local-only keys stay). After changing settings you want on
-every machine, copy `~/.claude/settings.json` to `$SETUP/claude/settings.json`.
+merges it in (shared keys win, local-only keys stay). To share a setting with every
+machine, add only its key to `claude/settings.json` in a clone, through a PR. Copying the
+whole local file would also share machine-local keys (an effort level, a model override).
 
 Grok scans `~/.claude/skills/` and `~/.claude/settings.json` by default
 (`[compat.claude] skills/hooks = true`), so skills and hooks exist once and serve both
@@ -247,7 +248,7 @@ The steps are rule REPO-1 in `rust-style/topics/repo.md`. In short:
 
 ## Version control
 
-History lives in the private repo https://github.com/GeorgiosDelkos/agent-setup; Sync
+History lives in the repo https://github.com/GeorgiosDelkos/agent-setup; Sync
 only carries the working files between machines. The git directory is outside the synced
 folder, at `~/.local/share/agent-setup.git`, because a `.git` directory synced between
 machines can be corrupted by concurrent writes. `AgentSetup/.git` is a one-line file,
@@ -256,18 +257,29 @@ does not sync that file, so `install.sh` (`setup_git`) writes it on each machine
 git directory where there is none, and leaves the synced files as they are. A run that
 stopped after the clone is finished by the next one.
 
-- Change the setup on one machine at a time: `git pull`, edit, `bash check.sh`, commit, push.
-  Changes go through a branch and a PR like any repo (the Bash guard blocks pushes to
-  `main`).
-- On a machine where the synced files arrived before its git directory saw the commits,
-  `git fetch && git status` shows them as matching once `git pull` runs; the content is
-  already there.
+- The synced folder is the deployed copy: it should match `origin/main`. An edit made in it
+  is live on every machine at the next sync, before any review or test, which is how
+  unreviewed changes piled up there before. So:
+  1. Edit in a separate clone (`gh repo clone GeorgiosDelkos/agent-setup`), on a branch.
+  2. `bash check.sh`, commit, open a draft PR; review, fix, `gh pr ready`, CI green, merge.
+  3. On one machine: `git -C ~/Synced-Storage/AgentSetup pull --ff-only`, then
+     `bash ~/Synced-Storage/AgentSetup/install.sh` when `settings.json` or a hook
+     registration changed. Sync carries the files to the other machines.
+- `install.sh` warns when the synced folder is off `main`, has changes not in git, or is
+  behind the last fetched `origin/main`. Tools that install into `~/.claude/skills/` write
+  into the synced folder too; such a skill shows up there as untracked until it is committed
+  or removed.
+- On every other machine the files arrive through the sync while its git directory still
+  points at the old commit, and `git pull` refuses to overwrite them. Sync the git directory
+  without touching the files: `git -C ~/Synced-Storage/AgentSetup fetch`, then
+  `git -C ~/Synced-Storage/AgentSetup reset -q origin/main` (a mixed reset: index and
+  HEAD only). `install.sh` says when this is needed.
 
 ## Maintenance
 
-- Edit the rules only in `~/.config/agents/AGENTS.md` (the synced copy). Both tools, on every
-  machine, follow the links. Sync sync carries the changes, so let an edit sync before
-  editing the same file on another machine.
+- `~/.config/agents/AGENTS.md` is the one rules file both tools read, on every machine,
+  through the links. Change it like any other file here: in a clone, through a PR (Version
+  control), never in place.
 - After changing a hook or script, run `check.sh` and one end-to-end check in each tool.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
   20 skill descriptions to every session. Turn one on for a project in that project's

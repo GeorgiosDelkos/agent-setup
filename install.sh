@@ -178,6 +178,10 @@ setup_git() {
     echo "wrote   $SETUP_DIR/.git"
   fi
 
+  # The sync drops executable bits, so file modes say nothing here; tracked, they would show
+  # every hook as changed until the chmod below runs.
+  git --git-dir="$git_dir" config core.fileMode false
+
   # The index is the last thing written below, so it marks a finished setup. A run that
   # stopped after the clone resumes from here.
   if [[ -f "$git_dir/index" ]]; then
@@ -193,6 +197,49 @@ setup_git() {
   git -C "$SETUP_DIR" branch -q --set-upstream-to=origin/main main
   git -C "$SETUP_DIR" reset -q
   echo "cloned  $git_dir"
+}
+
+# The synced folder is the deployed copy and should match origin/main (agents/SETUP.md,
+# Version control): an edit made in it is live on every machine before any review or test.
+# Read-only and offline: it compares against the last fetched origin/main. The files are
+# compared, not HEAD: on every machine but the one that pulled, the files arrive through the
+# sync while that machine's git directory still points at the old commit.
+check_sync() {
+  local top branch changed counts ahead behind
+  top="$(git -C "$SETUP_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  if [[ -z "$top" || "$(cd "$top" && pwd -P)" != "$(cd "$SETUP_DIR" && pwd -P)" ]]; then
+    return 0
+  fi
+  if ! git -C "$SETUP_DIR" rev-parse -q --verify origin/main >/dev/null; then
+    echo "note: $SETUP_DIR has no origin/main to compare with (git fetch)"
+    return 0
+  fi
+  branch="$(git -C "$SETUP_DIR" symbolic-ref -q --short HEAD || echo "a detached HEAD")"
+  if [[ "$branch" != main ]]; then
+    echo "warning: $SETUP_DIR is on $branch, not main"
+  fi
+
+  if ! changed="$({
+    git -C "$SETUP_DIR" diff --name-only origin/main --
+    git -C "$SETUP_DIR" ls-files --others --exclude-standard
+  } | wc -l | tr -d ' ')"; then
+    echo "warning: cannot compare $SETUP_DIR with origin/main (see git's message above)"
+    return 0
+  fi
+  if ((changed > 0)); then
+    echo "warning: $SETUP_DIR has $changed files that differ from origin/main; they are live" \
+      "on every machine, unreviewed. Move them to a clone and open a PR, or git pull if this" \
+      "machine is behind (SETUP.md, Version control)."
+    return 0
+  fi
+
+  # The files match origin/main. A HEAD elsewhere is only this git directory lagging.
+  counts="$(git -C "$SETUP_DIR" rev-list --left-right --count HEAD...origin/main)"
+  read -r ahead behind <<<"$counts"
+  if ((ahead > 0 || behind > 0)); then
+    echo "note: $SETUP_DIR matches origin/main but its git directory does not; sync it" \
+      "without touching the files: git -C $SETUP_DIR reset -q origin/main"
+  fi
 }
 
 check_tools() {
@@ -249,6 +296,7 @@ main() {
   register_Sync_mem
   setup_air
   setup_git
+  check_sync
   # Sync drops the executable bit, so restore it on everything that is run directly.
   chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh "$SETUP_DIR/claude/statusline.sh"
   check_tools
