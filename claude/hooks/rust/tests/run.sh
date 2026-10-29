@@ -642,6 +642,9 @@ cstop() {
     '{session_id: $s, hook_event_name: "Stop", cwd: $c} + $extra'
 }
 
+# Session $1 ran its tests (tests-ran.sh), so the stop check judges the lints alone.
+ran_tests() { run_hook tests-ran.sh "$(bash_cmd "$1" 'cargo nextest run')"; }
+
 C1="$WORK/c1"
 new_crate_repo "$C1"
 prompt k1 "$C1"
@@ -673,6 +676,7 @@ git -C "$C2" checkout -q -- src/main.rs
 prompt k3 "$C2"
 printf '// Touched line.\n' >>"$C2/src/lib.rs"
 run_hook fmt-on-edit.sh "$(edit k3 "$C2/src/lib.rs" 'x')"
+ran_tests k3
 expect "check: touching one line of a legacy file passes" 0 check-on-stop.sh "$(cstop k3 "$C2")"
 printf '// TODO: new\n' >>"$C2/src/lib.rs"
 expect "check: house-check finding on a changed line" 2 check-on-stop.sh "$(cstop k3 "$C2")" \
@@ -720,6 +724,7 @@ expect "check: the repo's pedantic lint reported" 2 check-on-stop.sh "$(cstop k5
 allows='\ncast_possible_truncation = "allow"\ndbg_macro = "allow"'
 perl -pi -e "s/^(pedantic = .*)\$/\$1$allows/" "$C4/Cargo.toml"
 printf '\n/// Logs.\npub fn log() {\n    dbg!(1);\n}\n' >>"$C4/src/lib.rs"
+ran_tests k5
 expect "check: repo lint settings win over the minimal set" 0 check-on-stop.sh \
   "$(cstop k5 "$C4")"
 
@@ -744,6 +749,7 @@ run_hook fmt-on-edit.sh "$(edit k6 "$C5/src/lib.rs" 'x')"
 expect "check: non-git recorded file checks all lines" 2 check-on-stop.sh "$(stop k6)" \
   "src/lib.rs:3: [DOC-TODO]"
 printf '//! Crate.\n' >"$C5/src/lib.rs"
+ran_tests k6
 expect "check: fixed file passes" 0 check-on-stop.sh "$(stop k6)"
 check "check: passing stop clears the edited list" \
   "$([[ ! -s "$STATE_TMP/claude-rust-hooks/k6.main.edited" ]] && echo yes)"
@@ -797,6 +803,7 @@ new_crate_repo "$C7" $'\n[features]\nbroken = []\n'
 printf '\n#[cfg(feature = "broken")]\ncompile_error!("broken feature");\n' >>"$C7/src/lib.rs"
 prompt k10 "$C7"
 printf '// touched\n' >>"$C7/src/lib.rs"
+ran_tests k10
 expect "check: default features only" 0 check-on-stop.sh "$(cstop k10 "$C7")"
 perl -pi -e 's/^baseline = true$/baseline = true\nall-features = true/' "$C7/Cargo.toml"
 expect "check: repo opts in to all features" 2 check-on-stop.sh "$(cstop k10 "$C7")" \
@@ -854,6 +861,7 @@ printf '//! Crate.\n' >"$C12/src/lib.rs"
 printf 'fn a() {}\n' >"$C12/locked.rs"
 run_hook fmt-on-edit.sh "$(edit k15 "$C12/locked.rs" 'x')"
 chmod 000 "$C12/locked.rs"
+ran_tests k15
 run_hook check-on-stop.sh "$(stop k15)"
 chmod 644 "$C12/locked.rs"
 check "check: internal failure exits 1, not 2" \
@@ -893,6 +901,36 @@ expect "scope: dependent of the changed member reports its break" 2 check-on-sto
   "$(cstop k18 "$SC")" "c/src/lib.rs"
 check "scope: unrelated broken member not checked" \
   "$([[ "$out" != *"b/src/lib.rs"* ]] && echo yes)" "$out"
+
+# Tests ran: a test command records the run for the session; other commands do not.
+tests_stamp="$STATE_TMP/claude-rust-hooks/t1.tests-ran"
+for cmd in 'cargo build' 'git status' 'echo cargo-test' 'cargo testx'; do
+  run_hook tests-ran.sh "$(bash_cmd t1 "$cmd")"
+  check "tests-ran: '$cmd' is no test run" "$([[ ! -e "$tests_stamp" ]] && echo yes)"
+done
+for cmd in 'cargo test' 'cargo t -p c' 'RUST_LOG=debug cargo nextest run' \
+  'cargo +nightly miri test' 'cargo mutants --in-diff x.diff' 'cd c && cargo test --doc'; do
+  trash "$tests_stamp" 2>/dev/null || true
+  run_hook tests-ran.sh "$(bash_cmd t1 "$cmd")"
+  check "tests-ran: '$cmd' is a test run" "$([[ -e "$tests_stamp" ]] && echo yes)"
+done
+
+# The stop check asks once for a test run when Rust changed after the last one.
+TR="$WORK/tests-ran"
+new_crate_repo "$TR" "" plain
+prompt t2 "$TR"
+printf '\n/// Doubles.\n#[must_use]\npub fn double(a: u8) -> u8 {\n    a.wrapping_mul(2)\n}\n' \
+  >>"$TR/src/lib.rs"
+expect "untested: a Rust change without a test run asks once" 2 check-on-stop.sh \
+  "$(cstop t2 "$TR")" "No test run since this Rust changed"
+check "untested: the message names the file" "$([[ "$out" == *"$TR/src/lib.rs"* ]] && echo yes)" \
+  "$out"
+expect "untested: the next stop in the same state passes" 0 check-on-stop.sh "$(cstop t2 "$TR")"
+printf '// later\n' >>"$TR/src/lib.rs"
+ran_tests t2
+expect "untested: a test run after the change passes" 0 check-on-stop.sh "$(cstop t2 "$TR")"
+printf '\n[profile.dev]\nopt-level = 1\n' >>"$TR/Cargo.toml"
+expect "untested: a manifest-only change does not ask" 0 check-on-stop.sh "$(cstop t2 "$TR")"
 
 # ---- 4. bash guard ---------------------------------------------------------------------------
 

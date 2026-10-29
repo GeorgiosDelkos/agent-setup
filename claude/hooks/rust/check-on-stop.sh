@@ -13,6 +13,7 @@
 # for a subagent; lint warnings on changed lines only), then, in a repo that opted in to the
 # house rules (house_opted_in), house-check.pl and the column limit on changed lines. Changed
 # lines are the hunks since that base; an untracked or non-git file counts as all changed.
+# Last, Rust files this session modified after its last test run (tests-ran.sh) ask for one.
 #
 # A state that was already checked is not checked again, and a second stop in a row always
 # passes. Exit 2 only for findings; a hook's own failure is reported loudly and exits 1, so
@@ -144,6 +145,23 @@ opted_in_files() {
   done
 }
 
+# The .rs files among the `root<TAB>file` pairs $1 modified after this session started (its
+# baseline for the root, or ever outside git) and after the session's last test run
+# (tests-ran.sh), one per line. Sub-second times: an edit and a test run often share a second.
+untested_files() {
+  local root file
+  while IFS=$'\t' read -r root file; do
+    if [[ "$file" == *.rs ]]; then
+      printf '%s\t%s\n' "$(baseline_file "$root")" "$file"
+    fi
+  done <<<"$1" | STAMP="$(session_file tests-ran)" perl -MTime::HiRes=stat -F'\t' -lane '
+    my $since = (stat $F[0])[9] // 0;
+    my $run = (stat $ENV{STAMP})[9];
+    $since = $run if defined $run && $run > $since;
+    my $modified = (stat $F[1])[9];
+    print $F[1] if defined $modified && $modified > $since;'
+}
+
 pairs="$(files_to_check)"
 files=()
 while IFS= read -r file; do
@@ -217,12 +235,20 @@ findings="$(
   fi
 )"
 
-if [[ -z "$findings" ]]; then
+untested="$(untested_files "$pairs")"
+if [[ -z "$findings" && -z "$untested" ]]; then
   : >"$edited"
   exit "$internal"
 fi
-echo "Checks failed: compiler errors and clippy, house-check, or column-limit findings on" \
-  "lines you changed. Fix them, or for a finding that is wrong here use" \
-  "#[expect(lint, reason = \"...\")] or // house-check: allow(ID): <reason>:" >&2
-printf '%s\n' "$findings" >&2
+if [[ -n "$findings" ]]; then
+  echo "Checks failed: compiler errors and clippy, house-check, or column-limit findings on" \
+    "lines you changed. Fix them, or for a finding that is wrong here use" \
+    "#[expect(lint, reason = \"...\")] or // house-check: allow(ID): <reason>:" >&2
+  printf '%s\n' "$findings" >&2
+fi
+if [[ -n "$untested" ]]; then
+  echo "No test run since this Rust changed: run the tests of the changed packages" \
+    "(cargo nextest run, or cargo test), or say why not:" >&2
+  head -n 20 <<<"$untested" | sed 's/^/  /' >&2
+fi
 exit 2
