@@ -153,7 +153,7 @@ authority, all under the design principles above:
 
 - Load `rust-style` first, and the topic files it names (unsafe, concurrency, async,
   library API, testing, repo setup, the low-level profile) before editing those areas; the
-  edit hook blocks until you do (testing and repo setup only in repos that opted in). Before non-trivial work, load the matching `rfr-*` chapter skill.
+  edit hook blocks until you do. Before non-trivial work, load the matching `rfr-*` chapter skill.
 - Use ownership and the type system as safety rails: make invalid states unrepresentable.
 - Formatting is not optional: default `cargo fmt`, no `rustfmt.toml` style options (a
   low-level crate may keep the stable-options template, `rust-style` LLV-9). Clean

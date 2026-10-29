@@ -25,6 +25,8 @@ Global rules live in `~/.config/agents/AGENTS.md`. This skill adds only CI rules
   A skipped job reports success, which is safe for a required check only when the job has no
   `needs:`: its check run is replaced as soon as the ready run queues. A required job behind
   `needs:` (an aggregator) would show that stale green until its needs finish, so in such a
-  workflow fail the first job on a draft instead of skipping. Templates: `rust-style/templates/ci/`.
+  workflow fail the first job on a draft instead of skipping. A matrix job is skipped before
+  its matrix expands, so its per-entry checks (`stable / clippy`) report nothing on a draft
+  and show as expected until the ready run. Templates: `rust-style/templates/ci/`.
 - Dependabot: a 7-day cooldown and grouped updates for every ecosystem, including
   `github-actions`.

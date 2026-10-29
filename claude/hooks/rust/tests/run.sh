@@ -166,7 +166,7 @@ new_crate() {
   printf '//! Crate.\n' >"$1/src/lib.rs"
 }
 LIB="$WORK/lib"
-new_crate "$LIB" $'publish = ["crates-io"]\n\n[package.metadata.house-check]\nbaseline = true\n'
+new_crate "$LIB" $'publish = ["crates-io"]\n'
 new_crate "$WORK/internal"
 new_crate "$WORK/private" $'publish = false\n'
 mkdir -p "$WORK/notrust/.github/workflows" "$LIB/.github/workflows"
@@ -284,22 +284,6 @@ expect "repo: workflow outside Rust passes" 0 style-gate.sh \
   "$(edit g3 "$WORK/notrust/.github/workflows/ci.yml" 'on: push')"
 run_hook style-loaded.sh "$(read_file g3 "$SKILL/topics/repo.md")"
 expect "repo: passes after topic read" 0 style-gate.sh "$(edit g3 "$LIB/Cargo.toml" '[lints]')"
-
-# Outside an opted-in repo the testing and repo topics are house convention and not required;
-# the core skill and the soundness topics still are.
-expect "not opted in: Cargo.toml passes without anything loaded" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/Cargo.toml" '[lints]')"
-expect "not opted in: workflow passes" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/.github/workflows/ci.yml" 'on: push')"
-run_hook style-loaded.sh "$(skill g8)"
-expect "not opted in: #[test] passes without the testing topic" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/src/lib.rs" $'#[test]\nfn a() {}')"
-expect "not opted in: tests/ path passes" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/tests/t.rs" 'fn a() {}')"
-expect "not opted in: unsafe still blocked" 2 style-gate.sh \
-  "$(edit g8 "$WORK/internal/src/lib.rs" 'unsafe { f() }')" "topics/unsafe.md"
-expect "not opted in: core still required for .rs" 2 style-gate.sh \
-  "$(edit g9 "$WORK/internal/src/lib.rs" 'fn a() {}')" "SKILL.md"
 
 # A relative Grok target_file resolves against the hook input's cwd.
 grok_rel() {
@@ -1045,6 +1029,30 @@ guard "checkout of one file passes" 0 "git checkout -- src/x.rs"
 guard "checkout of a branch passes" 0 "git checkout feature"
 guard "restore --staged of the tree passes" 0 "git restore --staged ."
 guard "restore --staged --worktree of the tree blocked" 2 "git restore --staged --worktree ."
+
+# The leftmost quote wins: an apostrophe inside "..." does not hide the code after it.
+guard "apostrophe in a message does not hide a recursive rm" 2 \
+  "git commit -m \"it's fixed\" && $rm_r""f target && echo 'ok'"
+guard "apostrophe in a message does not hide a push to main" 2 \
+  "git commit -m \"don't block\" && git push origin main && echo 'pushed'"
+guard "an escaped quote opens nothing" 2 "echo don\\'t && $rm_r""f target && echo 'ok'"
+guard "apostrophe then a quoted rm mention passes" 0 \
+  "git commit -m \"it's\" && grep 'x' f && git commit -m \"drop $rm_r""f usage\""
+# Mentions of a shell hand-off in data are data too; a real hand-off is still checked whole.
+guard "eval and rm -r in a message pass" 0 "git commit -m \"no eval, no $rm_r""f\""
+guard "bash -c in a heredoc message passes" 0 \
+  $'git commit -F - <<\'EOF\'\nStop using bash -c and '"$rm_r"$'f in scripts\nEOF'
+guard "a path named eval passes" 0 "grep -rn \"$rm_r""f\" src/eval/"
+guard "ssh with a remote rm -r blocked" 2 "ssh host '$rm_r""f /srv/app'"
+guard "bash --norc -c blocked" 2 "bash --norc -c '$rm_r build'"
+guard "a backslash continuation is one command" 2 $'git reset \\\n  --hard origin/feature'
+# git global options and env prefixes do not hide a discard; forced checkouts are discards.
+guard "git -c key=value reset --hard blocked" 2 "git -c core.quotepath=off reset --hard"
+guard "git --no-pager reset --hard blocked" 2 "git --no-pager reset --hard HEAD"
+guard "env prefix reset --hard blocked" 2 "GIT_TRACE=1 git reset --hard"
+guard "checkout -f blocked" 2 "git checkout -f feature"
+guard "switch --discard-changes blocked" 2 "git switch --discard-changes feature"
+guard "switch to a branch passes" 0 "git switch -c feature"
 
 guard "gh pr merge --admin blocked" 2 "gh pr merge 7 --squash --admin"
 guard "gh pr merge passes" 0 "gh pr merge 7 --squash"
