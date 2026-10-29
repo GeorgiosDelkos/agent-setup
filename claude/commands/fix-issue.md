@@ -1,97 +1,67 @@
-# Fix GitHub Issue
+---
+description: Plan, implement, test, and open a reviewed PR for a GitHub issue, then comment on the issue.
+argument-hint: <issue-number>
+---
 
-@description End-to-end: plan, implement, test, PR, review, fix findings, and comment on a GitHub issue.
-@arguments $ISSUE_NUMBER: GitHub issue number to fix
+# Fix issue #$ARGUMENTS
 
-Read GitHub Issue #$ISSUE_NUMBER thoroughly. Understand the full
-context: problem description, acceptance criteria, linked PRs,
-and any discussion. Follow linked issues, referenced PRs, and
-external documentation to build complete understanding before
-planning.
+Read issue #$ARGUMENTS with `gh issue view $ARGUMENTS --comments`: the problem,
+acceptance criteria, linked PRs, and the discussion. Follow linked issues, referenced PRs,
+and external docs until you understand it.
 
-Execute every step below sequentially. Do not stop or ask for
-confirmation at any step.
+Run the steps below in order without stopping between them. The rules in
+`~/.config/agents/AGENTS.md` still hold: stop and ask when the issue is ambiguous, or when
+the fix needs an interface, data model, or architecture decision the issue does not settle.
 
 ## 1. Plan
 
-Write a detailed implementation plan to `plan-issue-$ISSUE_NUMBER.md`
-in the repo root. The plan must:
+Write the plan to `plan-issue-$ARGUMENTS.md` in the repo root:
 
-- Summarize the issue requirements
-- List every file to create or modify
-- Describe the approach and key design decisions
-- Call out risks or open questions
-- Reference relevant code paths by file:line
+- the issue's requirements, as what must be true when it is fixed;
+- every file to create or change, with `file:line` references to the code involved;
+- the approach and its key design decisions;
+- risks and open questions.
 
-## 2. Implement
+## 2. Test first
 
-Implement the plan across all necessary files. Follow the
-project's CLAUDE.md standards. Keep changes minimal and focused
-on the issue requirements -- no speculative features.
+Write the tests the acceptance criteria call for, and run them to see each fail for the
+reason the issue describes. A test that passes before the fix tests nothing.
 
-## 3. Build, test, lint
+## 3. Implement
 
-Run the project's full quality pipeline in this order:
+Implement the plan. Keep the change to what the issue needs: no speculative features.
 
-1. Build (compile/bundle if the project has a build step)
-2. Run the full test suite -- iterate on failures until green
-3. Add new tests for the changed behavior
-4. Run linting, formatting, and type-checking -- fix any issues
+## 4. Verify
 
-Refer to the project's CLAUDE.md or package.json/Makefile/etc.
-for the correct commands.
+Run the project's quality pipeline: build, the full test suite (iterate until green), then
+lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAUDE.md`,
+`Makefile`, `package.json`, or CI workflows.
 
-## 4. Branch, commit, and push
+## 5. Branch, commit, and push
 
-- Determine the branch prefix from the issue type: `fix/` for
-  bugs, `feat/` for features, `refactor/` for refactors, `docs/`
-  for documentation. When ambiguous, use `fix/`.
-- Create a branch named `{prefix}issue-$ISSUE_NUMBER`
-- Delete the plan file (`plan-issue-$ISSUE_NUMBER.md`) -- it was a
-  working artifact and should not be committed
-- Commit all changes with a conventional commit message referencing
-  the issue
-- Push the branch
+- Branch prefix from the issue type: `fix/` for bugs, `feat/` for features, `refactor/` for
+  refactors, `docs/` for documentation (`fix/` when unclear).
+  Branch `{prefix}issue-$ARGUMENTS`.
+- Delete `plan-issue-$ARGUMENTS.md` with `trash`: a working file, not part of the change.
+- Commit with an imperative subject of at most 72 characters and a body that says why,
+  ending with `Refs #$ARGUMENTS`.
+- Push the branch.
 
-## 5. Create PR
+## 6. Open a draft PR
 
-Create a PR with:
+`gh pr create --draft`, so CI waits for the review's fixes, with:
 
-- A concise title (under 70 chars)
-- A description that maps changes back to the issue requirements
-- Link to the issue with "Closes #$ISSUE_NUMBER" (or "Refs" if it
-  doesn't fully close it)
+- a title under 70 characters;
+- a description that maps the changes to the issue's requirements;
+- "Closes #$ARGUMENTS" (or "Refs #$ARGUMENTS" if it does not close it fully).
 
-## 6. Self-review
+## 7. Review, fix, and mark ready
 
-Use `/compound-engineering:ce-code-review` to perform a full
-multi-agent code review of the PR. Produce a list of findings
-ranked by severity (P1 = blocks merge, P2 = important, P3 = nice
-to have).
+Run the `review-pr` command (through the Skill tool) on the new PR number: it reviews
+with fresh-context agents, posts the review on the PR, fixes the findings, pushes, and
+marks the PR ready.
 
-## 7. Fix findings
+## 8. Comment on the issue
 
-Address all P1-P3 findings. For each finding, either:
-
-- **Fix it** -- apply the change, or
-- **Dismiss it** -- explain why it's a false positive or not worth
-  the churn (e.g. a stylistic disagreement or an impossible edge
-  case). Document the reasoning inline.
-
-After addressing all findings:
-
-1. Re-run the full quality pipeline (build, test, lint)
-2. Commit the fixes as a separate commit (do not squash into the
-  original -- preserve review history)
-3. Push the branch (regular push, not force-push)
-4. Delete any todo files in `todos/` that were created by the
-  review and are now resolved
-
-## 8. Comment on issue
-
-Post a summary comment on Issue #$ISSUE_NUMBER linking to the PR.
-Include:
-
-- What was implemented (1-3 bullet points)
-- Key design decisions
-- Link to the PR
+Comment on issue #$ARGUMENTS with a link to the PR, what was implemented (one to three
+points), and the key design decisions.
