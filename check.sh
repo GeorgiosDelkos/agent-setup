@@ -26,10 +26,14 @@ step() {
 # Every tracked shell script. git, not a glob: the synced folder also holds ignored local files
 # (the local layer), which are not this repo's to lint, and a glob that matches nothing in CI
 # would pass its own pattern to shellcheck as a file name.
+if ! tracked="$(git -C "$SETUP_DIR" ls-files '*.sh')"; then
+  echo "check.sh needs a git work tree (in the synced folder, install.sh sets one up)" >&2
+  exit 1
+fi
 shell_files=()
 while IFS= read -r file; do
   shell_files+=("$SETUP_DIR/$file")
-done < <(git -C "$SETUP_DIR" ls-files '*.sh')
+done <<<"$tracked"
 
 # Workflows: this repo's own, and the Rust templates (every file there with a `jobs:` key;
 # codecov.yml and dependabot.yml are not workflows).

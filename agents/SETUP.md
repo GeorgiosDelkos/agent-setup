@@ -42,6 +42,7 @@ machine reaches every machine.
 | `~/.claude/commands/` | `$SETUP/claude/commands/` | Slash commands. |
 | `~/.claude/statusline.sh` | `$SETUP/claude/statusline.sh` | Status line. |
 | `~/.grok/rules/AGENTS.md` | `$SETUP/agents/AGENTS.md` | Grok's global rules. |
+| `~/.grok/rules/AGENTS.local.md` | `$SETUP/agents/AGENTS.local.md` | The local layer's rules, when it has them. |
 | `~/.grok/agents/rust-style-reviewer.md` | `$SETUP/claude/agents/…` | The reviewer, for Grok. |
 | `~/.claude/CLAUDE.md` | (file) | `@~/.config/agents/AGENTS.md`, plus `@~/.config/agents/AGENTS.local.md` when the local layer has one. |
 | `~/.claude/settings.json` | (file, merged) | Hooks, permissions, plugins. Grok reads its hooks too. |
@@ -160,7 +161,8 @@ read those first.
 This repo is public, so anything company-specific or machine-specific stays out of it but
 still lives in `$SETUP`, synced to every machine like the rest. `.gitignore` lists it:
 
-- `agents/AGENTS.local.md`: rules imported after `AGENTS.md`. `install.sh` adds it to
+- `agents/AGENTS.local.md`: rules loaded with `AGENTS.md` (Claude imports it after; Grok
+  reads every file in `~/.grok/rules/`, in its own order). `install.sh` adds it to
   `~/.claude/CLAUDE.md` and links it into `~/.grok/rules/` when it exists.
 - `agents/SETUP.local.md`: setup notes for what the local layer adds (MCP servers, private
   tools).
@@ -204,7 +206,8 @@ subscriptions have changed several times. If it stops being allowed, either:
   seven Rust hooks (style-gate, style-loaded, fmt-on-edit, tests-ran, review-done,
   check-on-stop, and review-gate under PreToolUse `Bash`).
 - Grok, from any directory: `grok inspect --json`.
-  - `projectInstructions` lists `~/.grok/rules/AGENTS.md`.
+  - `projectInstructions` lists `~/.grok/rules/AGENTS.md`, and `AGENTS.local.md` when the
+    local layer has one.
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
@@ -247,9 +250,11 @@ History lives in the repo https://github.com/GeorgiosDelkos/agent-setup; the fil
 only carries the working files between machines. The git directory is outside the synced
 folder, at `~/.local/share/agent-setup.git`, because a `.git` directory synced between
 machines can be corrupted by concurrent writes. `$SETUP/.git` is a one-line file,
-`gitdir: <home>/.local/share/agent-setup.git`, so plain `git` works in the folder. The sync
-does not carry that file, so `install.sh` (`setup_git`) writes it on each machine, clones the
-git directory where there is none, and leaves the synced files as they are. A run that
+`gitdir: <home>/.local/share/agent-setup.git` (machines set up earlier keep the relative
+`../../.local/share/agent-setup.git`, which still resolves), so plain `git` works in the
+folder. The sync must exclude `.git`: the path in it is per machine. Since the sync does not
+carry it, `install.sh` (`setup_git`) writes it on each machine, clones the git directory
+where there is none, and leaves the synced files as they are. A run that
 stopped after the clone is finished by the next one.
 
 - The synced folder is the deployed copy: it should match `origin/main`. An edit made in it
@@ -269,6 +274,10 @@ stopped after the clone is finished by the next one.
   without touching the files: `git -C "$SETUP" fetch`, then
   `git -C "$SETUP" reset -q origin/main` (a mixed reset: index and
   HEAD only). `install.sh` says when this is needed.
+- The history was rewritten once, on 2026-10-29, to take company content out of the public
+  repo. A git directory from before that has unrelated history: run the same `fetch` and
+  mixed `reset`, never `pull`, which would delete the now-untracked local-layer files from
+  the synced folder and so from every machine.
 
 ## Maintenance
 

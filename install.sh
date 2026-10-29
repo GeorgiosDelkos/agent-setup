@@ -120,6 +120,13 @@ setup_git() {
     echo "skip    git history (git not found)"
     return 0
   fi
+  # A regular clone (a .git directory, or a pointer to another git directory) already has
+  # its history; setting up the shared git directory there would reset the clone's index.
+  if [[ -d "$SETUP_DIR/.git" ]] || { [[ -e "$SETUP_DIR/.git" ]] &&
+    [[ "$(git -C "$SETUP_DIR" rev-parse --absolute-git-dir 2>/dev/null)" != "$git_dir" ]]; }; then
+    echo "skip    git history ($SETUP_DIR is a clone with its own git directory)"
+    return 0
+  fi
 
   if [[ ! -d "$git_dir" ]]; then
     mkdir -p "$(dirname "$git_dir")"
@@ -245,6 +252,9 @@ main() {
   if [[ -f "$SETUP_DIR/agents/AGENTS.local.md" ]]; then
     link "$SETUP_DIR/agents/AGENTS.local.md" "$HOME/.grok/rules/AGENTS.local.md"
     claude_md+=$'\n'"@~/.config/agents/AGENTS.local.md"
+  elif [[ -L "$HOME/.grok/rules/AGENTS.local.md" ]]; then
+    # The local file is gone; a link left behind would point at nothing.
+    backup "$HOME/.grok/rules/AGENTS.local.md"
   fi
   if [[ "$(cat "$HOME/.claude/CLAUDE.md" 2>/dev/null)" != "$claude_md" ]]; then
     if [[ -e "$HOME/.claude/CLAUDE.md" ]]; then

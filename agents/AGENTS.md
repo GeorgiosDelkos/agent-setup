@@ -4,7 +4,7 @@ Shared by Claude Code and Grok. Defaults for every repo; the user's turn
 instruction and the repo's own AGENTS.md / CLAUDE.md win (deeper wins). Keep this
 file short: repo specifics go in the repo, language tooling goes in skills. How this setup
 is wired (skills, hooks, Claude and Grok): `~/.config/agents/SETUP.md`. Machine-local
-rules go in `AGENTS.local.md` beside it, which is imported after this file and not published.
+rules go in `AGENTS.local.md` beside it, which is loaded with this file and not published.
 
 ## Design principles
 
