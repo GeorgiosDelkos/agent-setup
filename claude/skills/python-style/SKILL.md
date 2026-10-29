@@ -57,14 +57,15 @@ The global rules (AGENTS.md, Testing) apply; this is how in Python.
 - `hypothesis` for parsers, serialization and algorithms: round trips, and comparison
   against a simple model.
 - Coverage (`pytest-cov` with `--cov-branch`) shows untested code; it is a floor, not the
-  goal. Before calling a change tested, run `mutmut` on the changed modules and kill or
+  goal. Before calling a change tested, run `mutmut`, restricted to the changed modules, and kill or
   explain each surviving mutant.
 
 ## Supply chain
 
 - Applications: commit `uv.lock`, which pins every version. `pyproject.toml` keeps the lower
-  bounds `uv add` writes (`>=`); no `==` there (AGENTS.md, Dependencies). Libraries: declare
-  the oldest compatible version (`>=`), and let the lockfile pin for development.
+  bounds `uv add` writes (`>=`); no `==` there (AGENTS.md, Dependencies). Libraries:
+  `>=` the oldest compatible version only where CI proves it (a minimal-versions job), else
+  the current minor; the lockfile pins for development.
 - `pip-audit` before deploying.
 
 ## New repo setup

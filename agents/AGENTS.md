@@ -107,7 +107,8 @@ between the lines* (Rust Munich 2026).
 - Behavior changes need tests. Test behavior, not implementation.
 - Cover edges and errors. Mock only boundaries (slow, external, non-deterministic).
 - Break the code once to confirm the test fails. For logic changes, run the language's
-  mutation tool over the diff (the language skill names it) and kill or explain survivors.
+  mutation tool over the changed code (the language skill names it, where one
+  exists) and kill or explain survivors.
 - Property tests for parsers, serialization, and algorithms.
 - Docs, formatting, and pure renames need no new tests.
 
