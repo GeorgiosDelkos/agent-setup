@@ -68,7 +68,8 @@ Read the topic file before an edit that touches its area. The edit hook blocks u
   opted-in repo it then runs `house-check` (the line-level rules tagged `[check]` below)
   and the column limit. Compiler errors in the checked packages block; lint and
   house-check findings block only on lines the branch changed, so touching a legacy file
-  does not mean rewriting it. It blocks once per change with the findings.
+  does not mean rewriting it. Last, Rust files modified after the session's last test run
+  (`cargo test`, `cargo nextest run`) ask for one. It blocks once per change.
 - **house-check escape**: a finding that is wrong for one line is silenced on that line (or
   the line above) with `// house-check: allow(UNS-SPELL): <reason>`. The reason is
   required; an empty one is itself a finding.

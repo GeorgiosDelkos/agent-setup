@@ -13,6 +13,13 @@ need_tools fail-open jq git shasum
 # shellcheck source-path=SCRIPTDIR source=changes.sh
 source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
 
+# When the session started, for the stop check's "changed after the last test run": one stamp
+# for the session, since a repo's own baseline is written only when the session first touches
+# it, after the edit that touched it.
+started="$(session_file started)"
+if [[ ! -f "$started" ]]; then
+  touch "$started"
+fi
 cwd="$(hook_field '.cwd')"
 if [[ -n "$cwd" && -d "$cwd" ]]; then
   root="$(git_root "$cwd")"
