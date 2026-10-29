@@ -115,6 +115,9 @@ between the lines* (Rust Munich 2026).
 - Small commits, one logical change. Imperative subject <=72 chars; body explains why.
 - Format, lint, and run relevant tests before committing.
 - Work on a feature branch and open a PR. Before a PR, review it adversarially.
+- Open PRs as drafts (`gh pr create --draft`). Post the review, push its fixes, then
+  `gh pr ready`. CI written to `gh-actions-style` skips drafts, so the ready run is the one
+  that counts; elsewhere the draft still runs CI.
 - Every PR I open gets its review posted ON the PR (`gh pr comment`: findings, severity,
   file:line) and every finding fixed and pushed, with a "Fixes" comment mapping finding to
   commit. A review only in my report, or a bot comment, does not count. A PR is ready to

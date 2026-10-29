@@ -16,12 +16,14 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 name: test
 jobs:
   required:
+    if: ${{ !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     name: ubuntu / ${{ matrix.toolchain }}
     strategy:
@@ -50,6 +52,7 @@ jobs:
       - name: cargo test --doc
         run: cargo test --locked --all-features --doc
   minimal:
+    if: ${{ !github.event.pull_request.draft }}
     # This action chooses the oldest version of the dependencies permitted by Cargo.toml to ensure
     # that this crate is compatible with the minimal version that this crate and its dependencies
     # require. This will pickup issues where this create relies on functionality that was introduced
@@ -104,6 +107,7 @@ jobs:
       - name: cargo check
         run: cargo check --locked --workspace --all-features
   os-check:
+    if: ${{ !github.event.pull_request.draft }}
     # run the tests on mac and windows
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} / stable
@@ -133,6 +137,7 @@ jobs:
       - name: cargo nextest run
         run: cargo nextest run --locked --all-features --all-targets
   coverage:
+    if: ${{ !github.event.pull_request.draft }}
     # use llvm-cov to build and collect coverage and outputs in a format that
     # is compatible with codecov.io
     #

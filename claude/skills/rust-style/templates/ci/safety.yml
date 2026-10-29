@@ -16,12 +16,14 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: true
 name: safety
 jobs:
   sanitizers:
+    if: ${{ !github.event.pull_request.draft }}
     name: ubuntu / nightly / sanitizers
     runs-on: ubuntu-latest
     steps:
@@ -71,6 +73,7 @@ jobs:
         env:
           RUSTFLAGS: "-Z sanitizer=thread"
   miri:
+    if: ${{ !github.event.pull_request.draft }}
     name: ubuntu / nightly / miri
     runs-on: ubuntu-latest
     steps:
@@ -94,6 +97,7 @@ jobs:
           # Add -Zmiri-disable-isolation if tests read the clock or the filesystem.
           MIRIFLAGS: "-Zmiri-strict-provenance"
   loom-build:
+    if: ${{ !github.event.pull_request.draft }}
     # Compiles the loom models on every PR so they cannot rot, even though they only run on main.
     name: ubuntu / stable / loom build
     runs-on: ubuntu-latest
@@ -112,7 +116,8 @@ jobs:
           RUSTFLAGS: "--cfg loom"
   loom:
     # Exhaustive permutation runs are slow, so they run on pushes to main only (Tokio). For a
-    # crate whose models finish in a few minutes, drop the `if` and run them on every PR (Jon).
+    # crate whose models finish in a few minutes, run them on every PR (Jon): replace the `if`
+    # with the draft guard the other jobs use.
     if: github.event_name == 'push'
     name: ubuntu / stable / loom
     runs-on: ubuntu-latest
@@ -135,6 +140,7 @@ jobs:
           # Bounds the search; 2 preemptions finds most bugs in reasonable time (Tokio, Jon).
           LOOM_MAX_PREEMPTIONS: 2
   panic-abort:
+    if: ${{ !github.event.pull_request.draft }}
     name: ubuntu / nightly / panic=abort
     runs-on: ubuntu-latest
     steps:
