@@ -146,13 +146,18 @@ opted_in_files() {
 }
 
 # The .rs files among the `root<TAB>file` pairs $1 modified after this session started (its
-# baseline for the root, or ever outside git) and after the session's last test run
-# (tests-ran.sh), one per line. Sub-second times: an edit and a test run often share a second.
+# first prompt, session-baseline.sh; without one, the root's baseline, or ever outside git)
+# and after the session's last test run (tests-ran.sh), one per line. Sub-second times: an
+# edit and a test run often share a second.
 untested_files() {
-  local root file
+  local root file start
   while IFS=$'\t' read -r root file; do
     if [[ "$file" == *.rs ]]; then
-      printf '%s\t%s\n' "$(baseline_file "$root")" "$file"
+      start="$(session_file started)"
+      if [[ ! -f "$start" ]]; then
+        start="$(baseline_file "$root")"
+      fi
+      printf '%s\t%s\n' "$start" "$file"
     fi
   done <<<"$1" | STAMP="$(session_file tests-ran)" perl -MTime::HiRes=stat -F'\t' -lane '
     my $since = (stat $F[0])[9] // 0;
@@ -249,6 +254,7 @@ fi
 if [[ -n "$untested" ]]; then
   echo "No test run since this Rust changed: run the tests of the changed packages" \
     "(cargo nextest run, or cargo test), or say why not:" >&2
-  head -n 20 <<<"$untested" | sed 's/^/  /' >&2
+  awk 'NR <= 20 { print "  " $0 } END { if (NR > 20) print "  ... and " NR - 20 " more" }' \
+    <<<"$untested" >&2
 fi
 exit 2

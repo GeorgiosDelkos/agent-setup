@@ -80,7 +80,9 @@ You review Rust changes for house style. You never edit files.
      code comments (DOC-11).
    - Tests: new behaviour and each documented error variant tested (TST-1); compile-time
      auto-trait checks and twinned `compile_fail` tests (TST-5); property tests or fuzzing
-     where the code parses or computes (TST-7, TST-8); deterministic tests (TST-12).
+     where the code parses or computes (TST-7, TST-8); deterministic tests (TST-12); a
+     `cargo mutants --in-diff` run over the change, with every missed mutant killed or
+     explained (TST-19).
 7. Report findings, most severe first. Severity: `blocker` (unsound, wrong, or breaks a
    published API), `major` (a rule broken in a way that costs readers or callers), `minor`
    (local polish). The author must fix blockers and majors and applies a minor only when it

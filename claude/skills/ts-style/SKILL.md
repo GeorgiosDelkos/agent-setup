@@ -30,8 +30,8 @@ config wins.
 - Runtime: the current Node Active LTS. Look it up, never assume.
 - ESM only: `"type": "module"`.
 - Applications: exact versions in `package.json` (no `^` or `~`) and a committed lockfile.
-  Libraries: ranges for `dependencies` and `peerDependencies`; exact pins only in
-  `devDependencies`.
+  Libraries: ranges everywhere, the oldest compatible version only where CI proves it
+  (AGENTS.md, Dependencies); the lockfile pins for development.
 
 ## Testing
 
@@ -44,8 +44,8 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
 - `fast-check` for parsers, serialization and algorithms: round trips, and comparison
   against a simple model.
 - Coverage (`@vitest/coverage-v8`) shows untested code; it is a floor, not the goal. Before
-  calling a change tested, run StrykerJS (`@stryker-mutator/vitest-runner`) on the changed
-  files and kill or explain each surviving mutant.
+  calling a change tested, run StrykerJS (`@stryker-mutator/vitest-runner`) with `--mutate` set to
+  the changed files, and kill or explain each surviving mutant.
 
 ## tsconfig.json strictness
 

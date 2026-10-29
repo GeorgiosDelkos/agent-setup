@@ -5,13 +5,19 @@ argument-hint: <pr-number>
 
 # Review and fix PR #$ARGUMENTS
 
+With no PR number given, use the current branch's PR (`gh pr view --json number`), and stop
+and ask if there is none.
+
 Read PR #$ARGUMENTS with `gh pr view $ARGUMENTS` and `gh pr diff $ARGUMENTS`: the
 description, linked issues, commit history, and the diff against its base branch. Check out
 the PR branch locally (`gh pr checkout $ARGUMENTS`).
 
 Run the steps below in order without stopping between them. The rules in
 `~/.config/agents/AGENTS.md` still hold: stop and ask before an interface, data model, or
-architecture change the PR did not already make, and before any destructive write.
+architecture change the PR did not already make, and before any destructive write. Fixing
+and pushing are writes to someone else's branch unless the PR is the user's own (its author
+is `gh api user -q .login`) or `fix-issue` opened it: for anyone else's PR, stop after
+posting the review (step 2) and ask before fixing.
 
 ## 1. Review
 

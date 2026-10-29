@@ -107,7 +107,8 @@ between the lines* (Rust Munich 2026).
 - Behavior changes need tests. Test behavior, not implementation.
 - Cover edges and errors. Mock only boundaries (slow, external, non-deterministic).
 - Break the code once to confirm the test fails. For logic changes, run the language's
-  mutation tool over the diff (the language skill names it) and kill or explain survivors.
+  mutation tool over the changed code (the language skill names it, where one
+  exists) and kill or explain survivors.
 - Property tests for parsers, serialization, and algorithms.
 - Docs, formatting, and pure renames need no new tests.
 
@@ -156,7 +157,7 @@ authority, all under the design principles above:
 
 - Load `rust-style` first, and the topic files it names (unsafe, concurrency, async,
   library API, testing, repo setup, the low-level profile) before editing those areas; the
-  edit hook blocks until you do (testing and repo setup only in repos that opted in). Before non-trivial work, load the matching `rfr-*` chapter skill.
+  edit hook blocks until you do. Before non-trivial work, load the matching `rfr-*` chapter skill.
 - Use ownership and the type system as safety rails: make invalid states unrepresentable.
 - Formatting is not optional: default `cargo fmt`, no `rustfmt.toml` style options (a
   low-level crate may keep the stable-options template, `rust-style` LLV-9). Clean
