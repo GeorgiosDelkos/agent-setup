@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
 # PreToolUse (Edit|Write|MultiEdit|search_replace|write|hashline_edit): block an edit until
-# this agent has the house style in context. Any .rs edit, or an edit to the manifest, lint,
-# toolchain, or CI config of a Rust repo that opted in to the house rules, needs the core
-# rust-style skill. On top of that, each topic file under rust-style/topics/ is required when
-# the edit's new text or path touches its area; the testing and repo topics only in an
-# opted-in repo, since elsewhere the repo's own conventions win (triggers from
-# research/SYNTHESIS.md 5.1). One message lists everything still missing, so the agent loads
-# it all in one round.
+# this agent has the house style in context. Any .rs edit, or an edit to a Rust repo's
+# manifest, lint, toolchain, or CI config, needs the core rust-style skill. On top of that,
+# each topic file under rust-style/topics/ is required when the edit's new text or path
+# touches its area (triggers from research/SYNTHESIS.md 5.1). One message lists everything
+# still missing, so the agent loads it all in one round.
 #
 # The block is a JSON deny on stdout (`hookSpecificOutput.permissionDecision`), the canonical
 # form for both Claude Code and Grok: Grok turns only the first stderr line into the deny
@@ -80,19 +78,14 @@ rust_topics() {
   grep -qE "$unsafe" <<<"$code" && echo unsafe
   grep -qE "$concurrency" <<<"$code" && echo concurrency
   grep -qE "$async" <<<"$code" && echo async
-  local crate
-  crate="$(crate_dir_of "$(dirname "$path")")"
-  # Testing is house convention, so outside an opted-in repo the repo's own tests are the
-  # model. It triggers on most edits (any #[cfg(test)]), so requiring it everywhere would
-  # cost a topic read for rules that do not apply.
-  if [[ -n "$crate" ]] && house_opted_in "$crate"; then
-    if [[ "$path" == */tests/* || "$path" == */benches/* ]] || grep -qE "$testing" <<<"$code"; then
-      echo testing
-    fi
+  if [[ "$path" == */tests/* || "$path" == */benches/* ]] || grep -qE "$testing" <<<"$code"; then
+    echo testing
   fi
   if grep -qE "$pub_item" <<<"$code" && is_published_lib_src "$path"; then
     echo library-api
   fi
+  local crate
+  crate="$(crate_dir_of "$(dirname "$path")")"
   if [[ -n "$crate" ]] && house_switch low-level "$crate"; then
     echo low-level
   fi
@@ -105,8 +98,7 @@ if is_scratch_path "$path"; then
 fi
 if [[ "$path" == *.rs ]]; then
   topics="$(rust_topics "$path")"
-elif is_repo_config "$path" && house_opted_in "$(crate_dir_of "$(dirname "$path")")"; then
-  # Only opted-in repos: elsewhere the repo's manifest and CI conventions win (REPO-1).
+elif is_repo_config "$path"; then
   topics="repo"
 else
   exit 0

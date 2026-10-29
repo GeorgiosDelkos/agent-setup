@@ -42,8 +42,6 @@ call site, readable with partial context):
 ## Topics (hooks force-load these)
 
 Read the topic file before an edit that touches its area. The edit hook blocks until you do.
-Testing and repo setup are house convention, so the hook requires them only in a repo that
-opted in (`baseline = true`, REPO-1); elsewhere, follow the repo's own tests and config.
 
 | Topic | File | Loaded when the edit adds |
 |---|---|---|
@@ -51,8 +49,8 @@ opted in (`baseline = true`, REPO-1); elsewhere, follow the repo's own tests and
 | Concurrency | `topics/concurrency.md` | atomics, `Ordering::`, `Mutex`, `RwLock`, `Condvar`, `thread::spawn`, loom |
 | Async | `topics/async.md` | `async`, `.await`, `impl Future`, `Poll<`, `Waker`, `tokio::` |
 | Library API | `topics/library-api.md` | a `pub` item in a published library crate |
-| Testing | `topics/testing.md` | opted-in repos: anything under `tests/` or `benches/`, `#[test]`, `#[cfg(test)]` |
-| Repo setup | `topics/repo.md` | opted-in repos: `Cargo.toml`, `deny.toml`, `clippy.toml`, toolchain files, CI workflows |
+| Testing | `topics/testing.md` | anything under `tests/` or `benches/`, `#[test]`, `#[cfg(test)]` |
+| Repo setup | `topics/repo.md` | `Cargo.toml`, `deny.toml`, `clippy.toml`, toolchain files, CI workflows |
 | Low-level profile | `topics/low-level.md` | any `.rs` edit in a crate with `low-level = true` under `[package.metadata.house-check]` |
 
 ## Machine enforcement (what runs without you)

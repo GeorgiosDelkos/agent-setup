@@ -177,7 +177,7 @@ new_crate() {
   printf '//! Crate.\n' >"$1/src/lib.rs"
 }
 LIB="$WORK/lib"
-new_crate "$LIB" $'publish = ["crates-io"]\n\n[package.metadata.house-check]\nbaseline = true\n'
+new_crate "$LIB" $'publish = ["crates-io"]\n'
 new_crate "$WORK/internal"
 new_crate "$WORK/private" $'publish = false\n'
 mkdir -p "$WORK/notrust/.github/workflows" "$LIB/.github/workflows"
@@ -295,22 +295,6 @@ expect "repo: workflow outside Rust passes" 0 style-gate.sh \
   "$(edit g3 "$WORK/notrust/.github/workflows/ci.yml" 'on: push')"
 run_hook style-loaded.sh "$(read_file g3 "$SKILL/topics/repo.md")"
 expect "repo: passes after topic read" 0 style-gate.sh "$(edit g3 "$LIB/Cargo.toml" '[lints]')"
-
-# Outside an opted-in repo the testing and repo topics are house convention and not required;
-# the core skill and the soundness topics still are.
-expect "not opted in: Cargo.toml passes without anything loaded" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/Cargo.toml" '[lints]')"
-expect "not opted in: workflow passes" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/.github/workflows/ci.yml" 'on: push')"
-run_hook style-loaded.sh "$(skill g8)"
-expect "not opted in: #[test] passes without the testing topic" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/src/lib.rs" $'#[test]\nfn a() {}')"
-expect "not opted in: tests/ path passes" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/tests/t.rs" 'fn a() {}')"
-expect "not opted in: unsafe still blocked" 2 style-gate.sh \
-  "$(edit g8 "$WORK/internal/src/lib.rs" 'unsafe { f() }')" "topics/unsafe.md"
-expect "not opted in: core still required for .rs" 2 style-gate.sh \
-  "$(edit g9 "$WORK/internal/src/lib.rs" 'fn a() {}')" "SKILL.md"
 
 # A relative Grok target_file resolves against the hook input's cwd.
 grok_rel() {
