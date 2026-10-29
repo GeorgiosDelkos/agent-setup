@@ -2,7 +2,8 @@
 # syntax, the column limit, workflow lint, and the hook test suite with real cargo clippy runs.
 #
 # macOS, because the hooks are written for the macOS system bash 3.2 and BSD tools, and the
-# tests delete with /usr/bin/trash (macOS 15 and later). The brew tools float at their
+# tests delete with /usr/bin/trash (macOS 15 and later). The image ships jq, rustup, clippy
+# and rustfmt. The brew tools float at their
 # current release: they lint, they do not build anything that ships.
 #
 # Draft PRs get no run (gh-actions-style): ready_for_review starts the one that counts. The
@@ -29,8 +30,6 @@ jobs:
           persist-credentials: false
       - name: Install lint tools
         run: brew install shellcheck shfmt actionlint zizmor
-      - name: Install Rust components
-        run: rustup component add clippy rustfmt
       - name: Check required system tools
         run: command -v trash jq perl shasum
       - name: check.sh
