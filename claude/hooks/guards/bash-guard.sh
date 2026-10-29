@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash / run_terminal_command): block recursive deletes (use `trash`, which can be
-# undone) and pushes that update main or master (use a feature branch and a PR). Reads
-# Claude's `tool_input.command`, which Grok also sends as a snake_case alias.
+# undone), git commands that throw away uncommitted work, pushes that update main or master
+# (use a feature branch and a PR), and admin merges that skip a PR's checks. Reads Claude's
+# `tool_input.command`, which Grok also sends as a snake_case alias.
 #
 # A guardrail against an agent's mistakes, not a sandbox: a script file, an interpreter or
 # `xargs` gets past any pattern match.
@@ -16,6 +17,27 @@ block() {
   exit 2
 }
 
+# The command with its data taken out, so the checks below match what runs, not what is
+# written: heredoc bodies are dropped, and a quoted string holding a space or a shell operator
+# (a commit message, a grep pattern) becomes Q. Other quotes only lose their quote marks, so
+# `"main"` stays a refspec, and a double-quoted `$(...)` stays code. A command that hands text
+# to a shell (`bash -c`, `eval`, a pipe or heredoc into a shell) is kept whole: there the
+# quoted text is what runs.
+code_text() {
+  perl -0777 -ne '
+    my $shell = qr/(?:ba|z|da)?sh(?:\s+-\w+)*/;
+    if (/(?:^|[^\w-])(?:$shell\s+-\w*c\b|eval\b|$shell\s*<<)|\|\s*$shell(?:\s|$)/) {
+      print;
+      exit;
+    }
+    sub data { my $text = shift; $text =~ /[\s;&|()<>]/ ? "Q" : $text }
+    sub double { my $text = shift; $text =~ /\$\(|`/ ? $text : data($text) }
+    s/<<-?\s*([\x27"]?)(\w+)\1([^\n]*)\n.*?^\t*\2[ \t]*$/<<HEREDOC$3/gms;
+    s/\x27([^\x27]*)\x27/data($1)/ge;
+    s/"((?:[^"\\]|\\.)*)"/double($1)/ge;
+    print;' <<<"$1"
+}
+
 # Recursive rm in any spelling (-r, -R, -rf, -fR, -v -r, --recursive) and find -delete. -f is
 # beside the point: it only skips prompts for write-protected files, so `rm -r` deletes as
 # much as `rm -rf`. `git rm` is exempt: it removes tracked files, which git can restore.
@@ -27,6 +49,38 @@ deletes_recursively() {
   local cmd
   cmd="$(sed -E "s/${git_rm}/git-rm\\2/g" <<<"$1")"
   grep -qE "$rm_r" <<<"$cmd" || grep -qE "$find_delete" <<<"$cmd"
+}
+
+# Why the first simple command in $1 that throws away uncommitted work does so, or nothing.
+# trash cannot bring any of it back: `git clean -f` deletes untracked files, `git reset
+# --hard` and a checkout or restore of the whole tree overwrite every uncommitted change. A
+# single path (`git checkout -- src/x.rs`) and `git restore --staged` pass.
+discards_work() {
+  local git='^[[:space:]]*git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+'
+  local force='[[:space:]](-[[:alpha:]]*f[[:alpha:]]*|--force)([[:space:]]|$)'
+  local dry_run='[[:space:]](-[[:alpha:]]*n[[:alpha:]]*|--dry-run)([[:space:]]|$)'
+  local whole_tree='[[:space:]](\.|\./|:/|\*)([[:space:]]|$)'
+  local staged_only='[[:space:]](--staged|-S)([[:space:]]|$)'
+  local worktree='[[:space:]](--worktree|-W)([[:space:]]|$)'
+  local segment
+  while IFS= read -r segment; do
+    if [[ "$segment" =~ ${git}clean([[:space:]]|$) && "$segment" =~ $force &&
+      ! "$segment" =~ $dry_run ]]; then
+      echo "git clean -f deletes untracked files for good: list them with git clean -n," \
+        "then trash the ones to delete"
+      return
+    fi
+    if [[ "$segment" =~ ${git}reset([[:space:]].*)?[[:space:]]--hard([[:space:]]|$) ]]; then
+      echo "git reset --hard overwrites uncommitted changes: git stash them first"
+      return
+    fi
+    if [[ "$segment" =~ ${git}(checkout|restore)[[:space:]] && "$segment" =~ $whole_tree ]] &&
+      ! [[ "$segment" =~ $staged_only && ! "$segment" =~ $worktree ]]; then
+      echo "a checkout or restore of the whole tree overwrites every uncommitted change:" \
+        "git stash them first, or name the files"
+      return
+    fi
+  done < <(perl -pe 's/(&&|\|\||[;|()])/\n/g' <<<"$1")
 }
 
 # Current branch of the repo at $1, or nothing (detached HEAD, not a repo).
@@ -99,14 +153,26 @@ pushed_branches() {
   done
 }
 
-if deletes_recursively "$command"; then
+code="$(code_text "$command")"
+if deletes_recursively "$code"; then
   block "use trash instead of a recursive rm or find -delete"
 fi
 
+reason="$(discards_work "$code")"
+if [[ -n "$reason" ]]; then
+  block "$reason"
+fi
+
 # Captured first: `grep -q` on a pipe would close it early and pipefail would hide a match.
-branches="$(pushed_branches "$command")"
+branches="$(pushed_branches "$code")"
 if grep -qxE 'main|master|\*' <<<"$branches"; then
   block "push to a feature branch and open a PR, never directly to main/master"
+fi
+
+admin_merge='(^|[;&|(][[:space:]]*)gh[[:space:]]+pr[[:space:]]+merge[[:space:]].*--admin'
+if grep -qE "$admin_merge" <<<"$code"; then
+  block "gh pr merge --admin skips the PR's required reviews and checks: leave the merge" \
+    "to the user"
 fi
 
 # example-console only (example-service PRs target main through its merge queue): a PR into main is

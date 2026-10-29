@@ -67,8 +67,9 @@ Every agent runs with full bypass permissions, on every machine:
   through the SDK, and Grok reads `defaultMode` from `~/.claude/settings.json` too.
 - `$SETUP/air/acp.json` starts Grok with `--always-approve`, so Air sessions match.
 
-Hooks still run under bypass: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`
-and pushes that update `main`/`master`. These are guardrails, not a sandbox: the deny rules
+Hooks still run under bypass: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
+git commands that discard uncommitted work, pushes that update `main`/`master`, and
+`gh pr merge --admin`. These are guardrails, not a sandbox: the deny rules
 for `Read(~/.ssh/**)` and the like cover the Read tool only, and any Bash command can still
 read those files. Only Claude Code's sandbox settings would close that.
 
@@ -91,7 +92,7 @@ read those files. Only Claude Code's sandbox settings would close that.
 | `review-done.sh` | SubagentStop, every subagent, timeout 120 | Records how many paths each subagent had recorded when it stopped, which review-gate judges (a running subagent's work waits for its stop). When the reviewer finishes, also records the time per repository and snapshots the reviewed files per repo for review-gate. |
 | `common.sh` | sourced | Shared helpers: input parsing, path resolution against the hook's `cwd`, per-agent state, edition and `max_width` lookup. |
 | `tests/run.sh` | manual | Fixture and hook-input tests for all of the above. Run after any hook change. |
-| `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`), and any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`. Tested in `rust/tests/run.sh`. |
+| `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`); `git clean -f`, `git reset --hard`, and a checkout or restore of the whole tree (stash first); any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`; and `gh pr merge --admin`. Quoted text (a commit message, a grep pattern) and heredoc bodies are data and never match, unless the command hands them to a shell (`bash -c`, `eval`, a pipe or heredoc into a shell). Tested in `rust/tests/run.sh`. |
 
 Claude Code's session scratchpad (`/tmp/claude-<uid>/<project>/<session>/scratchpad/`) is
 exempt: the style gate skips it, edits there are formatted but not recorded, and no stop
