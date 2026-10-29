@@ -1,249 +1,226 @@
 #!/usr/bin/env bash
-# Stop (main agent only): when this session changed enough Rust, block the stop once and
-# ask for a rust-style-reviewer run. The reviewer covers what no tool checks: design
-# principles, data structures, API shape, error design, docs.
+# PreToolUse (Bash): block `gh pr ready` and a non-draft `gh pr create` while the pull
+# request changes 20 or more lines of Rust that no rust-style-reviewer run has seen. The
+# reviewer covers what no tool checks: design principles, data structures, API shape, error
+# design, docs.
 #
-# Only repos this session changed count (changes.sh `session_caused`), so a Q&A session in
-# a dirty checkout passes. Changed files come from git, measured from changes.sh `diff_base`
-# (so commits made before stopping still count) plus the paths the session's agents recorded
-# (a subagent's only once it has stopped; see judged_lists). Per file, the changed lines
-# are the smaller of:
-#   - the session's own lines: changes from changes.sh `diff_base`, which leaves out commits
-#     that only arrived (a pull, a checkout of main after a merge),
-#   - lines changed since the snapshot review-done.sh took when the reviewer last finished,
-#   - lines changed by commits made after that review (changes.sh `review_base`).
-# The first keeps other people's work out; the second keeps fixes for a fresh review from
-# demanding another; the third does the same when a pull after the review moved the
-# snapshot's files.
+# The pull request is the boundary: it is the unit that gets reviewed and merged, and its
+# diff is plain git (merge-base with the base branch to the head commit), the same for the
+# main agent, a subagent in a worktree, a later session, or Grok. An earlier gate on Stop
+# had to work out which agent of which session wrote which lines, and kept breaking on
+# subagents that paused, resumed, or edited by shell. A draft PR passes: drafts are opened
+# so the review can be posted on them (AGENTS.md, Git). Pushes to a PR that is already
+# ready are not gated.
+#
+# Reviewed lines come from the snapshots review-done.sh takes when the reviewer finishes.
+# Per .rs file in the diff: with a snapshot, the lines that differ between it and the head
+# commit; without one, the file's lines added plus removed in the diff.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 read_hook_input
-need_tools block-stop jq git shasum
+command="$(hook_field '.tool_input.command' 2>/dev/null || true)"
+# Every other shell command leaves here, before any git or gh call.
+if [[ "$command" != *gh*pr* ]]; then
+  exit 0
+fi
+need_tools fail-open jq git perl shasum
 # shellcheck source-path=SCRIPTDIR source=changes.sh
 source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
 
 # Below this many changed lines (added + removed) a review costs more than it finds: clippy
-# and house-check already cover a small edit, and a typo fix should not trigger a full
-# design review.
+# and house-check already cover a small edit, and a typo fix should not need a design review.
 MIN_REVIEW_LINES=20
 
-# `count<TAB>file` for the files $3... under root $1: lines added plus removed since base $2
-# from one `git diff --numstat`; an untracked file, or any file outside git, counts every
-# line, since all of it is new.
-lines_since_base() {
-  local root="$1" base="$2"
-  shift 2
-  {
-    if is_git_root "$root"; then
-      git -C "$root" -c core.quotepath=off diff --numstat "$base" -- "$@" | sed 's/^/S\t/'
-      git -C "$root" -c core.quotepath=off ls-files --others --exclude-standard -- "$@" |
-        sed 's/^/U\t/'
-    else
-      printf 'N\n'
-    fi
-    printf 'F\t%s\n' "$@"
-  } | awk -F '\t' -v root="$root/" '
-    $1 == "N" { nongit = 1; next }
-    $1 == "S" { changed[root $4] = ($2 == "-" ? 0 : $2) + ($3 == "-" ? 0 : $3); next }
-    $1 == "U" { untracked[root $2] = 1; next }
-    $1 == "F" {
-      file = $2
-      n = 0
-      if (file in changed) n = changed[file]
-      else if (nongit || file in untracked) {
-        while ((getline line < file) > 0) n++
-        close(file)
-      }
-      printf "%d\t%s\n", n, file
-    }'
+# Unit separator: the field and word separator below. Unlike a tab it is not IFS whitespace,
+# so `read` keeps an empty field instead of shifting the rest left.
+US=$'\x1f'
+
+# The simple commands of shell text $1, one per line, their words joined by US. Quotes are
+# resolved as the shell would, heredoc bodies are dropped, and an operator inside quotes does
+# not end a command, so a `gh pr ready` written in a commit message or a PR comment is not
+# read as one that runs. Not a shell parser: no expansions, and an unclosed quote runs to
+# the end of the text.
+simple_commands() {
+  perl -0777 -ne '
+    s/<<-?[ \t]*([\x27"]?)(\w+)\1([^\n]*)\n.*?^\t*\2[ \t]*$/$3/gms;
+    my (@words, $word, $open);
+    my $end_word = sub { push @words, $word if $open; ($word, $open) = ("", 0) };
+    my $end_command = sub { $end_word->(); print join("\x1f", @words), "\n" if @words;
+      @words = () };
+    ($word, $open) = ("", 0);
+    while (length) {
+      if (s/^(?:&&|\|\||[;|()&\n])//) { $end_command->() }
+      elsif (s/^[ \t]+//) { $end_word->() }
+      elsif (s/^\x27([^\x27]*)(?:\x27|\z)//) { ($word, $open) = ($word . $1, 1) }
+      elsif (s/^"((?:[^"\\]|\\.)*)(?:"|\z)//s) { ($word, $open) = ($word . $1, 1) }
+      elsif (s/^\\(.)//s) { ($word, $open) = ($word . $1, 1) }
+      elsif (s/^([^\s\x27"\\;&|()]+)//) { ($word, $open) = ($word . $1, 1) }
+      else { s/^.//s }
+    }
+    $end_command->();' <<<"$1"
 }
 
-if is_subagent || stop_is_exempt; then
+# OWNER/REPO of a GitHub repository given as `gh -R` takes it (OWNER/REPO, HOST/OWNER/REPO,
+# or a URL), lowercased.
+repo_name() {
+  printf '%s' "$1" | sed -E 's#^[a-z]+://##; s#\.git$##; s#/$##' | awk -F/ '{
+    print tolower($(NF - 1) "/" $NF) }'
+}
+
+# The gated `gh pr` call in command $1, as `dir verb pr base head` joined by US: the directory
+# it runs in (after any `cd`), `ready` or `create`, the PR argument of `gh pr ready`, and the
+# `--base` and `--head` of `gh pr create`. Leading `VAR=value`, `command` and `env` words run
+# the same gh. Nothing when the command makes no such call; a draft create, `ready --undo`,
+# `--web` and `--dry-run` are skipped, and so is `-R` naming another repository, whose code is
+# not here to diff.
+gated_call() {
+  local words dir i word verb pr base head repo skip
+  dir="$(hook_field '.cwd')"
+  while IFS="$US" read -r -a words; do
+    while [[ ${#words[@]} -gt 0 ]] && [[ "${words[0]}" =~ ^[A-Za-z_][A-Za-z0-9_]*= ||
+      "${words[0]}" == command || "${words[0]}" == env ]]; do
+      words=("${words[@]:1}")
+    done
+    if [[ ${#words[@]} -eq 0 ]]; then
+      continue
+    fi
+    if [[ "${words[0]}" == cd ]]; then
+      word="${words[1]:-$HOME}"
+      dir="$(cd "$dir" 2>/dev/null && cd "${word/#\~/$HOME}" 2>/dev/null && pwd || true)"
+      continue
+    fi
+    if [[ ${#words[@]} -lt 3 || "${words[0]}" != gh || "${words[1]}" != pr ]] ||
+      [[ "${words[2]}" != ready && "${words[2]}" != create ]]; then
+      continue
+    fi
+    verb="${words[2]}" pr="" base="" head="" repo="" skip=""
+    for ((i = 3; i < ${#words[@]}; i++)); do
+      word="${words[i]}"
+      case "$word" in
+      -d | --draft | --undo | --web | -w | --dry-run) skip=1 ;;
+      -R | --repo) i=$((i + 1)) repo="${words[i]:-}" ;;
+      -B | --base) i=$((i + 1)) base="${words[i]:-}" ;;
+      -H | --head) i=$((i + 1)) head="${words[i]:-}" ;;
+      --repo=*) repo="${word#--repo=}" ;;
+      --base=*) base="${word#--base=}" ;;
+      --head=*) head="${word#--head=}" ;;
+      -*) ;;
+      *) if [[ "$verb" == ready && -z "$pr" ]]; then pr="$word"; fi ;;
+      esac
+    done
+    if [[ -n "$repo" ]] && [[ "$(repo_name "$repo")" != "$(this_repo "$dir")" ]]; then
+      skip=1
+    fi
+    if [[ -z "$skip" ]]; then
+      printf '%s\n' "$dir$US$verb$US$pr$US$base$US$head"
+      return 0
+    fi
+  done < <(simple_commands "$1")
+}
+
+# OWNER/REPO of the repository in directory $1, lowercased; nothing without gh.
+this_repo() {
+  local name
+  if command -v gh >/dev/null &&
+    name="$(cd "$1" 2>/dev/null && gh repo view --json nameWithOwner -q .nameWithOwner)"; then
+    repo_name "$name"
+  fi
+}
+
+# `head base-branch` of the pull request (joined by US), for root $1 and a gated call's verb,
+# PR, base and head:
+#   - `gh pr ready`: the PR's head commit and base branch from `gh pr view`, which a stacked
+#     PR needs (its base is not the default branch). When gh cannot say, HEAD and the
+#     default branch.
+#   - `gh pr create`: the `--head` branch when it exists here, else HEAD; the `--base` given,
+#     else the default branch.
+# Fails, saying so, when the PR's head commit is not in this clone: judging HEAD instead could
+# judge another branch.
+pr_range() {
+  local root="$1" verb="$2" pr="$3" base="$4" head="$5" view args=()
+  if [[ "$verb" == ready ]]; then
+    head=""
+    if [[ -n "$pr" ]]; then
+      args=("$pr")
+    fi
+    if command -v gh >/dev/null &&
+      view="$(cd "$root" && gh pr view ${args[@]+"${args[@]}"} \
+        --json headRefOid,baseRefName -q '.headRefOid + "\u001f" + .baseRefName' 2>/dev/null)"; then
+      head="${view%%"$US"*}"
+      base="${view#*"$US"}"
+      if ! git -C "$root" cat-file -e "$head^{commit}" 2>/dev/null; then
+        echo "review gate: the PR's head commit $head is not in this clone; fetch it to have" \
+          "the PR checked" >&2
+        return 1
+      fi
+    fi
+  elif [[ -n "$head" ]]; then
+    head="$(git -C "$root" rev-parse -q --verify "${head##*:}^{commit}" || true)"
+  fi
+  printf '%s\n' "${head:-$(git -C "$root" rev-parse HEAD)}$US$base"
+}
+
+# The ref to diff branch $2 of root $1 against: its origin copy when there is one.
+base_ref() {
+  local root="$1" branch="$2"
+  if [[ -z "$branch" ]]; then
+    default_branch "$root"
+  elif git -C "$root" rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+    printf 'origin/%s' "$branch"
+  else
+    printf '%s' "$branch"
+  fi
+}
+
+# `count<TAB>file` for every .rs file changed between commits $2 and $3 of root $1: the lines
+# not yet reviewed (see the header), never more than the file's own lines in the diff, so a
+# snapshot from an older review of the file cannot charge the PR for others' changes.
+unreviewed_lines() {
+  local root="$1" from="$2" to="$3" count file snapshot since
+  git -C "$root" -c core.quotepath=off diff --numstat --no-renames "$from" "$to" -- '*.rs' |
+    awk -F '\t' '{ print ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) "\t" $3 }' |
+    review_snapshots "$root" | while IFS=$'\t' read -r count file snapshot; do
+    if [[ -f "$snapshot" ]]; then
+      since="$(diff "$snapshot" <(git -C "$root" show "$to:$file" 2>/dev/null) |
+        grep -c '^[<>]' || true)"
+      if ((since < count)); then
+        count="$since"
+      fi
+    fi
+    printf '%s\t%s\n' "$count" "$file"
+  done
+}
+
+call="$(gated_call "$command")"
+if [[ -z "$call" ]]; then
+  exit 0
+fi
+IFS="$US" read -r dir verb pr base head <<<"$call"
+root="$(git_root "${dir:-.}")"
+if [[ -z "$root" ]]; then
+  exit 0
+fi
+if ! range="$(pr_range "$root" "$verb" "$pr" "$base" "$head")"; then
+  exit 0
+fi
+IFS="$US" read -r head base <<<"$range"
+ref="$(base_ref "$root" "$base")"
+if [[ -z "$ref" ]] || ! from="$(git -C "$root" merge-base "$head" "$ref" 2>/dev/null)"; then
   exit 0
 fi
 
-# The lists this stop judges: the main agent's whole `touched` list, and of each subagent
-# only the paths it had recorded at its last SubagentStop (the count review-done.sh writes
-# to its `finished` file, so settings.json runs it for every subagent), copied to a
-# `judged` file. A stop while a task the subagent started still runs is a pause, which
-# review-done.sh does not count. A subagent that is still running is mid-change: its
-# parent reviews the work once it is handed back, and asking on every parent stop
-# meanwhile only repeats a request that cannot be met yet. Only recorded paths wait: a
-# running subagent's edits in a git checkout the session works in show in git's changes
-# and count at once, so the wait matters for files outside git and for a subagent's own
-# worktree, found only through its paths. A subagent that never stops (killed, or the
-# session ends first) is never judged.
-judged_lists() {
-  local list finished count
-  while IFS= read -r list; do
-    if [[ "$list" == *.main.touched ]]; then
-      printf '%s\n' "$list"
-      continue
-    fi
-    finished="${list%.touched}.finished"
-    count="$(cat "$finished" 2>/dev/null || true)"
-    # A missing or unreadable count means the subagent has not stopped yet.
-    if [[ "$count" =~ ^[0-9]+$ ]]; then
-      head -n "$count" "$list" >"${list%.touched}.judged"
-      printf '%s\n' "${list%.touched}.judged"
-    fi
-  done < <(session_touched_lists)
-}
-
-lists=()
-while IFS= read -r list; do
-  lists+=("$list")
-done < <(judged_lists)
-
-# Diff base of root $1: the session baseline logic for a git root, nothing otherwise.
-base_of() {
-  if is_git_root "$1"; then
-    diff_base "$1"
-  fi
-}
-
-# Roots a resumed subagent is still changing, one per line. A subagent is mid-change when
-# the stop input lists it as a running background task (Claude Code's `background_tasks`,
-# which covers a subagent resumed by a follow-up message however it edits, shell scripts
-# included), or when its `touched` list grew past its last stop count (the only signal
-# Grok gives). Git shows its edits at once, so a root only such subagents recorded paths in
-# would be judged mid-change. A root the main agent recorded a path in is never waiting: its
-# changes may be the main agent's own. The root counts again at the subagent's next stop.
-waiting_roots() {
-  local list count main agent running
-  main="$RUST_HOOKS_STATE/$(session_id).main.touched"
-  running="$(jq -r '.background_tasks[]? | select(.type == "subagent" and .status == "running")
-    | .id // empty' <<<"$HOOK_INPUT")"
-  while IFS= read -r list; do
-    if [[ "$list" == *.main.touched ]]; then
-      continue
-    fi
-    count="$(cat "${list%.touched}.finished" 2>/dev/null || true)"
-    agent="${list%.touched}"
-    agent="${agent##*.}"
-    # A subagent that never stopped has no judged paths, so nothing of it is counted.
-    if ! [[ "$count" =~ ^[0-9]+$ ]]; then
-      continue
-    fi
-    if grep -qxF -- "$agent" <<<"$running"; then
-      cat "$list"
-    elif (($(wc -l <"$list") > count)); then
-      tail -n "+$((count + 1))" "$list"
-    fi
-  done < <(session_touched_lists) | sed 's|/[^/]*$||' | sort -u | while IFS= read -r dir; do
-    state_root_of "$dir"
-    echo
-  done | { grep -v '^$' || true; } | sort -u | while IFS= read -r root; do
-    if ! grep -qsF -- "$root/" "$main"; then
-      printf '%s\n' "$root"
-    fi
-  done
-}
-waiting="$(waiting_roots)"
-
-# `root<TAB>file` for every changed .rs file of the roots this session changed, each file
-# under its deepest root only.
-claimed="$(stop_roots ${lists[@]+"${lists[@]}"} | while IFS= read -r root; do
-  if grep -qxF -- "$root" <<<"$waiting"; then
-    continue
-  fi
-  if session_caused "$root" ${lists[@]+"${lists[@]}"}; then
-    changed_files "$root" "$(base_of "$root")" ${lists[@]+"${lists[@]}"} |
-      { grep '\.rs$' || true; } | awk -v root="$root" '{ print root "\t" $0 }'
-  fi
-done | deepest_root)"
-
-total=0
-files=""
-reviewed=""
-while IFS= read -r root; do
-  base="$(base_of "$root")"
-  root_files=()
-  while IFS= read -r file; do
-    root_files+=("$file")
-  done < <(awk -F '\t' -v root="$root" '$1 == root { print $2 }' <<<"$claimed")
-  # Snapshot lookups only when this repo has a review at all.
-  snapshots=""
-  if [[ -d "$(review_dir "$root")" ]]; then
-    snapshots="$(printf '%s\n' "${root_files[@]}" | review_snapshots "$root")"
-  fi
-  # The snapshots also differ by whatever arrived after the review (a pull, a checkout of
-  # main); counted from review_base, only commits made after the review add to a file.
-  after_review=""
-  if is_git_root "$root"; then
-    rbase="$(review_base "$root")"
-    if [[ -n "$rbase" ]]; then
-      after_review="$(lines_since_base "$root" "$rbase" "${root_files[@]}")"
-    fi
-  fi
-  while IFS=$'\t' read -r count file after snapshot; do
-    if [[ "$after" != - ]]; then
-      reviewed=1
-      if ((after < count)); then
-        count="$after"
-      fi
-    fi
-    if [[ -n "$snapshot" && -f "$snapshot" ]]; then
-      reviewed=1
-      current="$file"
-      if [[ ! -f "$current" ]]; then
-        current=/dev/null
-      fi
-      since_review="$(diff "$snapshot" "$current" | grep -c '^[<>]' || true)"
-      if ((since_review < count)); then
-        count="$since_review"
-      fi
-    fi
-    # A recorded file that was deleted outside git has nothing left to review.
-    if ((count == 0)); then
-      continue
-    fi
-    total=$((total + count))
-    files+="$file"$'\n'
-  done < <(lines_since_base "$root" "$base" "${root_files[@]}" |
-    SNAPSHOTS="$snapshots" AFTER="$after_review" awk -F '\t' '
-      BEGIN {
-        n = split(ENVIRON["SNAPSHOTS"], row, "\n")
-        for (i = 1; i <= n; i++) if (split(row[i], f, "\t") == 2) snap[f[1]] = f[2]
-        n = split(ENVIRON["AFTER"], row, "\n")
-        for (i = 1; i <= n; i++) if (split(row[i], f, "\t") == 2) after[f[2]] = f[1]
-      }
-      # The after-review count sits before the snapshot path, which may be empty: read
-      # splits on tabs as whitespace, so an empty field in the middle would shift the rest.
-      { printf "%s\t%s\t%s\t%s\n", $1, $2, ($2 in after ? after[$2] : "-"), snap[$2] }')
-done < <(cut -f 1 <<<"$claimed" | { grep -v '^$' || true; } | sort -u)
-
+lines="$(unreviewed_lines "$root" "$from" "$head")"
+total="$(awk -F '\t' '{ n += $1 } END { print n + 0 }' <<<"$lines")"
 if ((total < MIN_REVIEW_LINES)); then
   exit 0
 fi
-
-# Once per state of the changed files: a later stop with no further Rust change (a question
-# answered, a background task reported) passes instead of asking again every turn.
-blocked="$(agent_file review-blocked)"
-file_list=()
-while IFS= read -r file; do
-  if [[ -n "$file" ]]; then
-    file_list+=("$file")
-  fi
-done <<<"$files"
-state="$(fingerprint "${file_list[@]}")"
-if [[ -f "$blocked" && "$(cat "$blocked")" == "$state" ]]; then
-  exit 0
-fi
-printf '%s' "$state" >"$blocked"
-since="since this session started"
-if [[ -n "$reviewed" ]]; then
-  since="since the last review"
-fi
-echo "This session changed $total lines of Rust $since. Run the rust-style-reviewer agent" \
-  "on these files, then fix every blocker and major finding (or state why not); apply a" \
-  "minor one only when it makes the code smaller or clearer:" >&2
-# Thousands of files would bury the message; the first few name the area.
-head -n 50 <<<"$files" | sed 's/^/  /' >&2
-listed="$(grep -c . <<<"$files" || true)"
-if ((listed > 50)); then
-  echo "  ... and $((listed - 50)) more" >&2
-fi
+echo "BLOCKED: this pull request changes $total lines of Rust that no rust-style-reviewer" \
+  "run has seen. Run the rust-style-reviewer agent on it (git diff $ref...HEAD), fix every" \
+  "blocker and major finding (or state why not), commit and push, then retry. Apply a minor" \
+  "finding only when it makes the code smaller or clearer. Unreviewed:" >&2
+# Thousands of files would bury the message; the first few name the area. awk, not head:
+# head exits early and pipefail would turn the block into exit 141, which lets the call run.
+awk -F '\t' '$1 > 0 && ++n <= 50 { print "  " $2 " (" $1 " lines)" }' <<<"$lines" >&2
 exit 2

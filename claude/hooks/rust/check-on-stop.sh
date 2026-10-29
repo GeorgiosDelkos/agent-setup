@@ -3,16 +3,16 @@
 #
 # What is checked:
 #   - Main agent: every repo this session changed (changes.sh `session_caused`): git's
-#     changes since the session's baseline, untracked files, and the paths it recorded, so
-#     Bash edits and commits made before stopping are covered. A repo that was only read
-#     (a Q&A session in a dirty checkout) is skipped.
+#     changes since the branch's base (changes.sh `diff_base`), untracked files, and the
+#     paths it recorded, so Bash edits and commits made before stopping are covered. A repo
+#     that was only read (a Q&A session in a dirty checkout) is skipped.
 #   - Subagent: only the paths it recorded itself; it never answers for the parent's work.
 #     Nothing recorded, nothing checked.
 # Checks: clippy (run-clippy.sh, over the changed packages and their workspace dependents:
 # compiler errors always, from any of those packages for the main agent and in its own files
 # for a subagent; lint warnings on changed lines only), then, in a repo that opted in to the
 # house rules (house_opted_in), house-check.pl and the column limit on changed lines. Changed
-# lines are the hunks since the baseline; an untracked or non-git file counts as all changed.
+# lines are the hunks since that base; an untracked or non-git file counts as all changed.
 #
 # A state that was already checked is not checked again, and a second stop in a row always
 # passes. Exit 2 only for findings; a hook's own failure is reported loudly and exits 1, so

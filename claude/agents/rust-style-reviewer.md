@@ -1,6 +1,6 @@
 ---
 name: rust-style-reviewer
-description: Reviews a Rust diff against the global design principles (simplicity, data structures, call-site ergonomics) and the house rust-style rules that rustfmt, clippy and house-check cannot enforce (API shape, errors, panics, unsafe arguments, concurrency, async, docs, tests). Reports findings by rule ID and severity. Use after writing or changing Rust and before calling the work done or opening a PR; the review gate requires it once a session's Rust diff reaches 20 lines. Read-only; reports findings, never edits.
+description: Reviews a Rust diff against the global design principles (simplicity, data structures, call-site ergonomics) and the house rust-style rules that rustfmt, clippy and house-check cannot enforce (API shape, errors, panics, unsafe arguments, concurrency, async, docs, tests). Reports findings by rule ID and severity. Use after writing or changing Rust and before calling the work done or opening a PR; the review gate requires it before a pull request with 20 or more lines of Rust goes ready. Read-only; reports findings, never edits.
 tools: Read, Grep, Glob, Bash, Skill
 ---
 

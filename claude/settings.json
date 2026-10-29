@@ -70,6 +70,11 @@
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/guards/bash-guard.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/rust/review-gate.sh",
+            "timeout": 60
           }
         ]
       },
@@ -100,11 +105,6 @@
             "type": "command",
             "command": "bash ~/.claude/hooks/rust/check-on-stop.sh",
             "timeout": 600
-          },
-          {
-            "type": "command",
-            "command": "bash ~/.claude/hooks/rust/review-gate.sh",
-            "timeout": 120
           }
         ]
       }
