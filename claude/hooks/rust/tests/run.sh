@@ -1100,5 +1100,58 @@ guard "git -C into a non-repo passes" 0 "git -C $LIB push"
 git -C "$LIB" init -q -b main
 guard "git -C resolves the other repo's branch" 2 "git -C $LIB push"
 
+# Quoted text and heredoc bodies are data; text handed to a shell is code.
+guard "rm -r in a commit message passes" 0 "git commit -m \"stop using $rm_r in scripts\""
+guard "rm -r in a single-quoted grep pattern passes" 0 "grep -n '$rm_r''f' ."
+guard "rm -r in a heredoc body passes" 0 $'git commit -F - <<\'EOF\'\n'"$rm_r x"$'\nEOF'
+guard "code after a heredoc still checked" 2 $'cat <<EOF >f\nx\nEOF\n'"$rm_r x"
+guard "quoted path to rm -r still blocked" 2 "$rm_r \"my dir\""
+guard "bash -c with rm -r blocked" 2 "bash -c \"$rm_r x\""
+guard "pipe into sh with rm -r blocked" 2 "echo '$rm_r x' | sh"
+guard "command substitution in quotes blocked" 2 "echo \"\$($rm_r x)\""
+guard "push in a commit message passes" 0 "git commit -m 'then git push origin main'"
+guard "quoted refspec main still blocked" 2 "git push origin \"main\""
+
+# Commands that throw away uncommitted work: trash cannot bring it back.
+guard "git clean -fdx blocked" 2 "git clean -fdx"
+guard "git clean --force blocked" 2 "git -C $GREPO clean --force -d"
+guard "git clean -n passes" 0 "git clean -n -d"
+guard "git clean dry run with -f passes" 0 "git clean -fdn"
+guard "git reset --hard blocked" 2 "git fetch && git reset --hard origin/main"
+guard "git reset --soft passes" 0 "git reset --soft HEAD~1"
+guard "checkout of the whole tree blocked" 2 "git checkout -- ."
+guard "restore of the whole tree blocked" 2 "git restore :/"
+guard "checkout of one file passes" 0 "git checkout -- src/x.rs"
+guard "checkout of a branch passes" 0 "git checkout feature"
+guard "restore --staged of the tree passes" 0 "git restore --staged ."
+guard "restore --staged --worktree of the tree blocked" 2 "git restore --staged --worktree ."
+
+# The leftmost quote wins: an apostrophe inside "..." does not hide the code after it.
+guard "apostrophe in a message does not hide a recursive rm" 2 \
+  "git commit -m \"it's fixed\" && $rm_r""f target && echo 'ok'"
+guard "apostrophe in a message does not hide a push to main" 2 \
+  "git commit -m \"don't block\" && git push origin main && echo 'pushed'"
+guard "an escaped quote opens nothing" 2 "echo don\\'t && $rm_r""f target && echo 'ok'"
+guard "apostrophe then a quoted rm mention passes" 0 \
+  "git commit -m \"it's\" && grep 'x' f && git commit -m \"drop $rm_r""f usage\""
+# Mentions of a shell hand-off in data are data too; a real hand-off is still checked whole.
+guard "eval and rm -r in a message pass" 0 "git commit -m \"no eval, no $rm_r""f\""
+guard "bash -c in a heredoc message passes" 0 \
+  $'git commit -F - <<\'EOF\'\nStop using bash -c and '"$rm_r"$'f in scripts\nEOF'
+guard "a path named eval passes" 0 "grep -rn \"$rm_r""f\" src/eval/"
+guard "ssh with a remote rm -r blocked" 2 "ssh host '$rm_r""f /srv/app'"
+guard "bash --norc -c blocked" 2 "bash --norc -c '$rm_r build'"
+guard "a backslash continuation is one command" 2 $'git reset \\\n  --hard origin/feature'
+# git global options and env prefixes do not hide a discard; forced checkouts are discards.
+guard "git -c key=value reset --hard blocked" 2 "git -c core.quotepath=off reset --hard"
+guard "git --no-pager reset --hard blocked" 2 "git --no-pager reset --hard HEAD"
+guard "env prefix reset --hard blocked" 2 "GIT_TRACE=1 git reset --hard"
+guard "checkout -f blocked" 2 "git checkout -f feature"
+guard "switch --discard-changes blocked" 2 "git switch --discard-changes feature"
+guard "switch to a branch passes" 0 "git switch -c feature"
+
+guard "gh pr merge --admin blocked" 2 "gh pr merge 7 --squash --admin"
+guard "gh pr merge passes" 0 "gh pr merge 7 --squash"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
