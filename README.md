@@ -1,14 +1,15 @@
 # AgentSetup
 
 Shared Claude Code and Grok configuration: global rules, skills, agents, hooks, and
-settings. Synced through Sync Storage so every machine uses the same setup.
+settings. One folder, kept in step across machines by a file-sync service, so every machine
+uses the same setup.
 
-On a new machine, after this folder has synced:
+On a new machine, once the folder is there (synced, or cloned from this repo):
 
 ```sh
-bash ~/Synced-Storage/AgentSetup/install.sh
+bash <folder>/install.sh
 ```
 
-Run it through `bash`: Sync sync drops the executable bit.
+Run it through `bash`: file sync can drop the executable bit, which `install.sh` restores.
 
 Full layout, prerequisites, and verification: `agents/SETUP.md`.

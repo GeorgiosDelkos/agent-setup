@@ -190,16 +190,3 @@ if grep -qE "$admin_merge" <<<"$code"; then
   block "gh pr merge --admin skips the PR's required reviews and checks: leave the merge" \
     "to the user"
 fi
-
-# example-console only (example-service PRs target main through its merge queue): a PR into main is
-# only ever a promotion from dev (dev deploys to staging, main to production), so
-# `gh pr create ... --base main` must also say `--head dev`.
-base_main='gh[[:space:]]+pr[[:space:]]+create.*(--base|-B)[[:space:]=]+(main|master)([[:space:]]|$)'
-head_dev='(--head|-H)[[:space:]=]+dev([[:space:]]|$)'
-in_console=false
-if [[ "$cwd" == *example-console* || "$command" == *example/console* ]]; then
-  in_console=true
-fi
-if $in_console && grep -qE "$base_main" <<<"$command" && ! grep -qE "$head_dev" <<<"$command"; then
-  block "open PRs against dev; main only takes promotions (--head dev --base main)"
-fi

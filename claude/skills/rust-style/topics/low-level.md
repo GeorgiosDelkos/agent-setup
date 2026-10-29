@@ -2,7 +2,7 @@
 
 Read before editing a crate that sets `low-level = true` under
 `[package.metadata.house-check]` (or the workspace table). The edit hook blocks until you do.
-Tags and IDs as in `../SKILL.md`. The reference implementation is `example/reference-crate`.
+Tags and IDs as in `../SKILL.md`.
 
 This profile is for infrastructure where every dependency, panic and allocation is a
 decision: a cache, a codec, a protocol, a storage engine. It adds to the core rules; where an
@@ -76,4 +76,51 @@ keeps the core rules.
 
 ## Exemplars
 
-Removed from the published history.
+Written for this topic, not taken from a crate.
+
+A hit that takes no lock, and an outlined miss:
+
+```rust
+fn get(&mut self) -> &Snapshot {
+    let current = self.shared.version.load(Ordering::Acquire);
+    if current != self.seen {
+        self.reload(current);
+    }
+    &self.snapshot
+}
+
+/// The reload takes the lock, so it is kept out of line: the common path, a version that
+/// has not moved, stays one load and one compare.
+#[cold]
+#[inline(never)]
+fn reload(&mut self, current: u64) {
+```
+
+Validation that returns instead of panicking:
+
+```rust
+pub const fn checked(self) -> Result<Self, ConfigError> {
+    if self.capacity == 0 {
+        return Err(ConfigError::ZeroCapacity);
+    }
+    if self.max_entry_bytes > self.max_total_bytes {
+        return Err(ConfigError::EntryAboveTotal {
+            entry: self.max_entry_bytes,
+            total: self.max_total_bytes,
+        });
+    }
+    Ok(self)
+}
+```
+
+A panic in user code, turned into a documented state:
+
+```rust
+/// A panic in user code interrupted an earlier write.
+///
+/// A key's `Hash` or `Eq`, or a value's `Clone`, panicked between this writer's checks and
+/// its publish. The published data is intact, since a publish either finished or did not
+/// start, but the writer's own copy may hold half a change, so it refuses every later
+/// write. Drop it and open a new one, which starts from the published data.
+Poisoned,
+```

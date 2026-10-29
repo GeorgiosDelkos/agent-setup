@@ -23,9 +23,13 @@ step() {
   fi
 }
 
-shell_files=("$SETUP_DIR/install.sh" "$SETUP_DIR/check.sh" "$SETUP_DIR/claude/statusline.sh"
-  "$HOOKS"/*/*.sh "$HOOKS/rust/tests/run.sh"
-  "$SETUP_DIR"/claude/skills/*/*.sh "$SETUP_DIR"/claude/skills/*/scripts/*.sh)
+# Every tracked shell script. git, not a glob: the synced folder also holds ignored local files
+# (the local layer), which are not this repo's to lint, and a glob that matches nothing in CI
+# would pass its own pattern to shellcheck as a file name.
+shell_files=()
+while IFS= read -r file; do
+  shell_files+=("$SETUP_DIR/$file")
+done < <(git -C "$SETUP_DIR" ls-files '*.sh')
 
 # Workflows: this repo's own, and the Rust templates (every file there with a `jobs:` key;
 # codecov.yml and dependabot.yml are not workflows).

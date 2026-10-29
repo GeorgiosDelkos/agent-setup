@@ -61,44 +61,6 @@ merge_json() {
   echo "merged  $local_file (previous copy in $BACKUP_DIR)"
 }
 
-# Register the team-memory MCP server with Claude Code and Grok when the binary and its
-# config exist. The config holds bucket credentials and keys, so it is never synced through
-# this folder; it is copied to each machine by hand (see agents/SETUP.md). Existing
-# registrations are left untouched.
-register_Sync_mem() {
-  local bin="$HOME/.cargo/bin/team-memory"
-  local config="$HOME/.config/team-memory/team-memory.toml"
-  local grok_servers
-  if [[ ! -x "$bin" || ! -f "$config" ]]; then
-    echo "skip    team-memory (needs $bin and $config; see agents/SETUP.md)"
-    return 0
-  fi
-
-  if ! command -v claude >/dev/null; then
-    echo "skip    team-memory for Claude (claude CLI not found)"
-  elif claude mcp get team-memory >/dev/null 2>&1; then
-    echo "ok      team-memory (Claude)"
-  else
-    claude mcp add --scope user team-memory -e "TEAM_MEMORY_CONFIG=$config" -- "$bin"
-    echo "added   team-memory (Claude)"
-  fi
-
-  if ! command -v grok >/dev/null; then
-    echo "skip    team-memory for Grok (grok CLI not found)"
-    return 0
-  fi
-
-  # Read the whole list before matching. Piping into `grep -q` closes the pipe at the first
-  # match; grok then panics on the broken pipe and pipefail reports the match as a failure.
-  grok_servers="$(grok mcp list 2>/dev/null || true)"
-  if grep -qE '^[[:space:]]*team-memory:' <<<"$grok_servers"; then
-    echo "ok      team-memory (Grok)"
-  else
-    grok mcp add --scope user team-memory -e "TEAM_MEMORY_CONFIG=$config" -- "$bin"
-    echo "added   team-memory (Grok)"
-  fi
-}
-
 # Register Grok and Claude Code as ACP agents in JetBrains Air. The Claude adapter is pinned
 # and installed globally. The grok, node, and script paths are absolute because Air, started
 # from the Dock, may not see the shell's PATH (~/.grok/bin, nvm). Merged like settings.json: shared agents win, agents
@@ -148,16 +110,12 @@ setup_air() {
 
 # History lives in GitHub. The git directory stays outside this synced folder, because a .git
 # directory synced between machines can be corrupted by concurrent writes. The folder's `.git`
-# file points to ../../.local/share/agent-setup.git (relative, so it holds for any home
-# directory with ~/Synced-Storage/AgentSetup); create that git directory where it is missing.
-# The synced working files are left as they are: only the index is built from HEAD.
+# file points to ~/.local/share/agent-setup.git by absolute path: the sync never carries that
+# file, so each machine writes its own. Create that git directory where it is missing. The
+# synced working files are left as they are: only the index is built from HEAD.
 setup_git() {
   local git_dir="$HOME/.local/share/agent-setup.git"
   local remote="https://github.com/GeorgiosDelkos/agent-setup.git"
-  if [[ "$SETUP_DIR" != "$HOME/Synced-Storage/AgentSetup" ]]; then
-    echo "skip    git history (the .git file expects ~/Synced-Storage/AgentSetup)"
-    return 0
-  fi
   if ! command -v git >/dev/null; then
     echo "skip    git history (git not found)"
     return 0
@@ -171,10 +129,10 @@ setup_git() {
     fi
   fi
 
-  # Sync sync does not carry the .git file to other machines, so it is written here,
-  # once the git directory it points to exists.
+  # The sync does not carry the .git file to other machines, so it is written here, once the
+  # git directory it points to exists.
   if [[ ! -e "$SETUP_DIR/.git" ]]; then
-    printf 'gitdir: ../../.local/share/agent-setup.git\n' >"$SETUP_DIR/.git"
+    printf 'gitdir: %s\n' "$git_dir" >"$SETUP_DIR/.git"
     echo "wrote   $SETUP_DIR/.git"
   fi
 
@@ -282,18 +240,26 @@ main() {
   link "$SETUP_DIR/claude/agents/rust-style-reviewer.md" \
     "$HOME/.grok/agents/rust-style-reviewer.md"
 
-  if [[ "$(cat "$HOME/.claude/CLAUDE.md" 2>/dev/null)" != "@~/.config/agents/AGENTS.md" ]]; then
+  # The local layer (agents/SETUP.md, Local layer): rules that are not in the public repo.
+  local claude_md="@~/.config/agents/AGENTS.md"
+  if [[ -f "$SETUP_DIR/agents/AGENTS.local.md" ]]; then
+    link "$SETUP_DIR/agents/AGENTS.local.md" "$HOME/.grok/rules/AGENTS.local.md"
+    claude_md+=$'\n'"@~/.config/agents/AGENTS.local.md"
+  fi
+  if [[ "$(cat "$HOME/.claude/CLAUDE.md" 2>/dev/null)" != "$claude_md" ]]; then
     if [[ -e "$HOME/.claude/CLAUDE.md" ]]; then
       backup "$HOME/.claude/CLAUDE.md"
     fi
-    printf '@~/.config/agents/AGENTS.md\n' >"$HOME/.claude/CLAUDE.md"
+    printf '%s\n' "$claude_md" >"$HOME/.claude/CLAUDE.md"
     echo "wrote   $HOME/.claude/CLAUDE.md"
   else
     echo "ok      $HOME/.claude/CLAUDE.md"
   fi
 
   merge_json "$(cat "$SETUP_DIR/claude/settings.json")" "$HOME/.claude/settings.json"
-  register_Sync_mem
+  if [[ -f "$SETUP_DIR/install.local.sh" ]]; then
+    bash "$SETUP_DIR/install.local.sh"
+  fi
   setup_air
   setup_git
   check_sync

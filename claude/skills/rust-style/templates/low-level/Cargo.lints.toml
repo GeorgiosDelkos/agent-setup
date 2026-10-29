@@ -1,6 +1,5 @@
 # Low-level profile additions (topics/low-level.md). Merge these into the crate's lint tables
-# on top of ../Cargo.lints.toml: they replace the entries of the same name there. Taken from
-# example/reference-crate.
+# on top of ../Cargo.lints.toml: they replace the entries of the same name there.
 
 [lints.rust]
 # LLV-1: no unsafe in a zero-dependency crate unless the design doc argues for it.

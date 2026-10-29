@@ -28,7 +28,8 @@ goes in a template or a hook.
 
 ## Inventory
 
-Everything lives in the synced folder `~/Synced-Storage/AgentSetup/` (`$SETUP` below).
+Everything lives in one folder kept in step across machines by a file-sync service (`$SETUP`
+below; any location works).
 The usual locations are symlinks into it, created by `$SETUP/install.sh`, so an edit on one
 machine reaches every machine.
 
@@ -42,7 +43,7 @@ machine reaches every machine.
 | `~/.claude/statusline.sh` | `$SETUP/claude/statusline.sh` | Status line. |
 | `~/.grok/rules/AGENTS.md` | `$SETUP/agents/AGENTS.md` | Grok's global rules. |
 | `~/.grok/agents/rust-style-reviewer.md` | `$SETUP/claude/agents/…` | The reviewer, for Grok. |
-| `~/.claude/CLAUDE.md` | (file) | One line, `@~/.config/agents/AGENTS.md`. |
+| `~/.claude/CLAUDE.md` | (file) | `@~/.config/agents/AGENTS.md`, plus `@~/.config/agents/AGENTS.local.md` when the local layer has one. |
 | `~/.claude/settings.json` | (file, merged) | Hooks, permissions, plugins. Grok reads its hooks too. |
 | `~/Library/Application Support/JetBrains/Air/acp.json` | (file, merged from `$SETUP/air/acp.json`) | Grok and Claude Code as ACP agents in JetBrains Air. |
 | `~/Library/Application Support/JetBrains/Air/review/review-prompt.md` | `$SETUP/air/review-prompt.md` | Air's code-review task list, aligned with the review order in `AGENTS.md`. Air sends it as the user turn, so it outranks `AGENTS.md`. If Air replaces the link with a plain file, re-run `install.sh`. |
@@ -133,13 +134,13 @@ read those first.
 
    For JetBrains Air, also install Node (nvm), Claude Code, and Grok, and log in to both.
 
-2. Let Sync sync `~/Synced-Storage/AgentSetup/`, then run:
+2. Let the file sync bring `$SETUP` to the machine, then run:
 
    ```sh
-   bash ~/Synced-Storage/AgentSetup/install.sh
+   bash "$SETUP/install.sh"
    ```
 
-   Run it through `bash`: Sync sync drops the executable bit, which `install.sh` then
+   Run it through `bash`: file sync can drop the executable bit, which `install.sh` then
    restores on itself, the hooks, and the status line. settings.json also calls every hook and
    the status line through `bash`, so a file that a later sync rewrites without the bit
    still runs.
@@ -154,27 +155,21 @@ read those first.
 
 4. Start new sessions in both tools. The rules, skills, and hooks are read at startup.
 
-## Team memory (team-memory)
+## Local layer
 
-The memories live in Sync buckets, so every machine with the same config sees the same
-notes. Only the server binary and its config live on the machine. `install.sh` registers the
-server with Claude and Grok (user scope) once both exist, and leaves existing registrations
-alone.
+This repo is public, so anything company-specific or machine-specific stays out of it but
+still lives in `$SETUP`, synced to every machine like the rest. `.gitignore` lists it:
 
-1. Build the binary from a checkout of the team-memory repository, with semantic recall:
+- `agents/AGENTS.local.md`: rules imported after `AGENTS.md`. `install.sh` adds it to
+  `~/.claude/CLAUDE.md` and links it into `~/.grok/rules/` when it exists.
+- `agents/SETUP.local.md`: setup notes for what the local layer adds (MCP servers, private
+  tools).
+- `install.local.sh`: extra install steps, run by `install.sh` when it exists.
+- Company skills under `claude/skills/`, and skills other tools install there.
 
-   ```sh
-   cargo install --locked --path team-memory --features dashboard,embeddings,http-mcp
-   ```
-
-   Without `embeddings`, recall falls back to keyword matching.
-
-2. Copy `~/.config/team-memory/team-memory.toml` from an existing machine over a secure
-   channel (for example `scp`), then `chmod 600` it. It holds bucket credentials and team
-   encryption keys, so it never goes in this synced folder.
-
-3. Re-run `install.sh`. It reports `added team-memory` for each tool. Check with
-   `claude mcp get team-memory` (expect `Connected`) and `grok mcp list`.
+The local layer has no history: the sync carries its current state only. Keep anything
+that holds a secret out of `$SETUP` entirely, and copy it to each machine over a secure
+channel.
 
 ## JetBrains Air (ACP agents)
 
@@ -213,7 +208,7 @@ subscriptions have changed several times. If it stops being allowed, either:
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
-- Hooks and scripts: `bash ~/Synced-Storage/AgentSetup/check.sh` runs shellcheck, shfmt,
+- Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
   Perl syntax, the 100-column check and the hook test suite (`--quick` skips the suite).
   Every step must say `ok`.
 - End to end: in a scratch crate, ask either tool to add an `unsafe` function.
@@ -235,7 +230,7 @@ The steps are rule REPO-1 in `rust-style/topics/repo.md`. In short:
    column check in the stop hook. A zero-dependency infrastructure crate also sets
    `low-level = true`: the edit hook then requires `topics/low-level.md`, and the crate merges
    `templates/low-level/` (lint additions, `clippy.toml` additions, `rustfmt.toml`, design
-   doc skeleton). Reference: `example/reference-crate`.
+   doc skeleton). The low-level topic says what such a crate looks like.
 2. Copy `clippy.toml`, `deny.toml`, and `.pre-commit-config.yaml` from
    `~/.claude/skills/rust-style/templates/`. There is no `rustfmt.toml`: default rustfmt.
 3. Merge `Cargo.lints.toml` as `[workspace.lints]`, with `[lints] workspace = true` in each
@@ -248,12 +243,12 @@ The steps are rule REPO-1 in `rust-style/topics/repo.md`. In short:
 
 ## Version control
 
-History lives in the repo https://github.com/GeorgiosDelkos/agent-setup; Sync
+History lives in the repo https://github.com/GeorgiosDelkos/agent-setup; the file sync
 only carries the working files between machines. The git directory is outside the synced
 folder, at `~/.local/share/agent-setup.git`, because a `.git` directory synced between
-machines can be corrupted by concurrent writes. `AgentSetup/.git` is a one-line file,
-`gitdir: ../../.local/share/agent-setup.git`, so plain `git` works in the folder. Sync
-does not sync that file, so `install.sh` (`setup_git`) writes it on each machine, clones the
+machines can be corrupted by concurrent writes. `$SETUP/.git` is a one-line file,
+`gitdir: <home>/.local/share/agent-setup.git`, so plain `git` works in the folder. The sync
+does not carry that file, so `install.sh` (`setup_git`) writes it on each machine, clones the
 git directory where there is none, and leaves the synced files as they are. A run that
 stopped after the clone is finished by the next one.
 
@@ -262,17 +257,17 @@ stopped after the clone is finished by the next one.
   unreviewed changes piled up there before. So:
   1. Edit in a separate clone (`gh repo clone GeorgiosDelkos/agent-setup`), on a branch.
   2. `bash check.sh`, commit, open a draft PR; review, fix, `gh pr ready`, CI green, merge.
-  3. On one machine: `git -C ~/Synced-Storage/AgentSetup pull --ff-only`, then
-     `bash ~/Synced-Storage/AgentSetup/install.sh` when `settings.json` or a hook
-     registration changed. Sync carries the files to the other machines.
+  3. On one machine: `git -C "$SETUP" pull --ff-only`, then `bash "$SETUP/install.sh"` when
+     `settings.json` or a hook registration changed. The sync carries the files to the
+     other machines.
 - `install.sh` warns when the synced folder is off `main`, has changes not in git, or is
   behind the last fetched `origin/main`. Tools that install into `~/.claude/skills/` write
   into the synced folder too; such a skill shows up there as untracked until it is committed
   or removed.
 - On every other machine the files arrive through the sync while its git directory still
   points at the old commit, and `git pull` refuses to overwrite them. Sync the git directory
-  without touching the files: `git -C ~/Synced-Storage/AgentSetup fetch`, then
-  `git -C ~/Synced-Storage/AgentSetup reset -q origin/main` (a mixed reset: index and
+  without touching the files: `git -C "$SETUP" fetch`, then
+  `git -C "$SETUP" reset -q origin/main` (a mixed reset: index and
   HEAD only). `install.sh` says when this is needed.
 
 ## Maintenance

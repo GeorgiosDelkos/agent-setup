@@ -1,2 +1,12 @@
 .DS_Store
 *.orig
+
+# The local layer (agents/SETUP.md, Local layer): files that live in the synced folder on
+# every machine but stay out of this public repo, because they are company-specific or
+# installed by other tools.
+/agents/AGENTS.local.md
+/agents/SETUP.local.md
+/install.local.sh
+/claude/skills/daily-work-report/
+/claude/skills/s3-share/
+/claude/skills/rex/

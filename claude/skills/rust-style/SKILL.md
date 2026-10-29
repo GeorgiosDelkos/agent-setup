@@ -33,7 +33,7 @@ call site, readable with partial context):
   protocol) sets `low-level = true` under `[package.metadata.house-check]` and follows
   `topics/low-level.md` on top of these rules: zero crates, no panics in library code,
   validated configuration values, std-only tests, a design doc. Its rules win where they
-  name a core rule; every other crate keeps the core rules. Reference: `example/reference-crate`.
+  name a core rule; every other crate keeps the core rules.
 - **Whose repo.** In a repo that has opted in (`baseline = true` under
   `[workspace.metadata.house-check]`, REPO-1), every rule here applies. In any other repo,
   the repo's existing conventions win over every `[house]` rule: match the surrounding code
@@ -510,7 +510,40 @@ impl core::error::Error for CodegenError {
 
 ### House exemplars
 
-Removed from the published history.
+Short examples of the rules above, written for this skill. More in `topics/low-level.md`.
+
+A `Debug` that prints state, never the stored data (DOC-12):
+
+```rust
+impl<K, V> fmt::Debug for Cache<K, V> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Cache")
+            .field("len", &self.len())
+            .field("capacity", &self.capacity)
+            .finish_non_exhaustive()
+    }
+}
+```
+
+A critical section kept to one swap, with user code run after the guard (CON-6):
+
+```rust
+// Swap only. Dropping the old table runs `Drop` for every value, which is user code, so it
+// happens after the guard is released and the critical section stays one assignment.
+let old = std::mem::replace(&mut *guard, new_table);
+drop(guard);
+drop(old);
+```
+
+A suppression whose reason is the design (LNT-1):
+
+```rust
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the index is below `capacity`, which `new` caps at u32::MAX"
+)]
+let slot = index as u32;
+```
 
 ## Deep reference (`rfr-*` = *Rust for Rustaceans*)
 

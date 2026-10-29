@@ -3,7 +3,8 @@
 Shared by Claude Code and Grok. Defaults for every repo; the user's turn
 instruction and the repo's own AGENTS.md / CLAUDE.md win (deeper wins). Keep this
 file short: repo specifics go in the repo, language tooling goes in skills. How this setup
-is wired (skills, hooks, Claude and Grok): `~/.config/agents/SETUP.md`.
+is wired (skills, hooks, Claude and Grok): `~/.config/agents/SETUP.md`. Machine-local
+rules go in `AGENTS.local.md` beside it, which is imported after this file and not published.
 
 ## Design principles
 
@@ -169,11 +170,3 @@ authority, all under the design principles above:
   your own uncommitted work are pre-approved, unlike the ask-first rule for
   reviews in Communication. Cite rules by ID (`ERR-5`) in reviews and fix commits.
 
-## Team memory (team-memory)
-
-When the team-memory MCP server is available:
-
-- Recall before the first edit on a task, and again when the task shifts.
-- Remember only durable decisions, gotchas, conventions, and references. One fact per note,
-  keyword-rich summary. Nothing derivable from code or git.
-- Subagent prompts include: recall before changes, remember durable findings.
