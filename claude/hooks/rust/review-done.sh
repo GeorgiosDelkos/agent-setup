@@ -8,6 +8,11 @@
 # background, and PostToolUse fires at spawn time, before it has read anything. The agent
 # type field is `agent_type` in Claude Code and `subagentType` in Grok. A Grok reviewer runs
 # in its own session, so the repos are found from its cwd alone.
+#
+# Every changed file of those repos is snapshotted, whether the reviewer was asked about it or
+# not, and a reviewer that was cancelled counts like one that finished: the hook cannot tell
+# what the reviewer read. The gate is a reminder against forgetting the review, not proof
+# that one happened.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=common.sh

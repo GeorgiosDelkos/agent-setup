@@ -166,7 +166,7 @@ new_crate() {
   printf '//! Crate.\n' >"$1/src/lib.rs"
 }
 LIB="$WORK/lib"
-new_crate "$LIB" $'publish = ["crates-io"]\n\n[package.metadata.house-check]\nbaseline = true\n'
+new_crate "$LIB" $'publish = ["crates-io"]\n'
 new_crate "$WORK/internal"
 new_crate "$WORK/private" $'publish = false\n'
 mkdir -p "$WORK/notrust/.github/workflows" "$LIB/.github/workflows"
@@ -284,22 +284,6 @@ expect "repo: workflow outside Rust passes" 0 style-gate.sh \
   "$(edit g3 "$WORK/notrust/.github/workflows/ci.yml" 'on: push')"
 run_hook style-loaded.sh "$(read_file g3 "$SKILL/topics/repo.md")"
 expect "repo: passes after topic read" 0 style-gate.sh "$(edit g3 "$LIB/Cargo.toml" '[lints]')"
-
-# Outside an opted-in repo the testing and repo topics are house convention and not required;
-# the core skill and the soundness topics still are.
-expect "not opted in: Cargo.toml passes without anything loaded" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/Cargo.toml" '[lints]')"
-expect "not opted in: workflow passes" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/.github/workflows/ci.yml" 'on: push')"
-run_hook style-loaded.sh "$(skill g8)"
-expect "not opted in: #[test] passes without the testing topic" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/src/lib.rs" $'#[test]\nfn a() {}')"
-expect "not opted in: tests/ path passes" 0 style-gate.sh \
-  "$(edit g8 "$WORK/internal/tests/t.rs" 'fn a() {}')"
-expect "not opted in: unsafe still blocked" 2 style-gate.sh \
-  "$(edit g8 "$WORK/internal/src/lib.rs" 'unsafe { f() }')" "topics/unsafe.md"
-expect "not opted in: core still required for .rs" 2 style-gate.sh \
-  "$(edit g9 "$WORK/internal/src/lib.rs" 'fn a() {}')" "SKILL.md"
 
 # A relative Grok target_file resolves against the hook input's cwd.
 grok_rel() {
@@ -583,6 +567,84 @@ expect "gate: --base measures from the base branch" 0 review-gate.sh \
 commit_all "$GATE" "unreviewed"
 expect "gate: unreviewed work on the stacked branch blocked" 2 review-gate.sh \
   "$(pr_cmd v2 "$GATE" 'gh pr create --base wt-branch --title x')" "src/other.rs (30 lines)"
+
+# --base is honoured even though `gh pr create` has no PR argument: measured from the default
+# branch the PR would show the 30 unreviewed lines of its base as well.
+GB="$WORK/gate-base"
+new_cloned_repo "$GB"
+git -C "$GB" checkout -q -b lower
+lines "$GB/src/lower.rs" 0 30
+commit_all "$GB" "lower PR, not reviewed here"
+git -C "$GB" push -q -u origin lower
+git -C "$GB" checkout -q -b upper
+lines "$GB/src/upper.rs" 0 3
+commit_all "$GB" "upper PR"
+expect "gate: --base measured from that branch, not the default" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --base lower --fill')"
+expect "gate: --base=branch too" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --base=lower --fill')"
+expect "gate: without --base the default branch counts" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --fill')" "src/lower.rs (30 lines)"
+
+# Quoted text and heredoc bodies are not commands; wrappers and skipped calls do not hide one.
+expect "gate: gh pr ready in a commit message passes" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" "git commit -m 'note; gh pr ready after review'")"
+expect "gate: gh pr ready in a heredoc body passes" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" $'gh pr comment 1 --body-file - <<\'X\'\ngh pr ready\nX')"
+expect "gate: a quoted -d in the title is not --draft" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" "gh pr create --title 'Drop the -d flag' --body x")" "rust-style-reviewer"
+expect "gate: a skipped call does not end the scan" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --draft --fill && gh pr create --fill')" "src/lower.rs"
+expect "gate: an env prefix still runs gh" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'GH_TOKEN=x command gh pr create --fill')" "src/lower.rs"
+mkdir -p "$WORK/dir with space"
+expect "gate: a quoted cd target is followed" 2 review-gate.sh \
+  "$(pr_cmd v3 "$WORK/dir with space" "cd \"$GB\" && gh pr create --fill")" "src/lower.rs"
+
+# A renamed file is reviewed like any other: after the reviewer, only its content counts.
+GR="$WORK/gate-rename"
+new_cloned_repo "$GR"
+lines "$GR/src/old.rs" 0 40
+commit_all "$GR" "old file"
+git -C "$GR" push -q origin main
+git -C "$GR" checkout -q -b rename
+git -C "$GR" mv src/old.rs src/new.rs
+commit_all "$GR" "rename"
+expect "gate: an unreviewed rename counts" 2 review-gate.sh "$(pr_cmd v4 "$GR" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop v4 "$GR" '{"agent_id": "r4", "agent_type": "rust-style-reviewer"}')"
+expect "gate: a reviewed rename passes" 0 review-gate.sh "$(pr_cmd v4 "$GR" 'gh pr ready')"
+
+# An old snapshot cannot charge a PR for more lines than its own diff.
+GS="$WORK/gate-stale"
+new_cloned_repo "$GS"
+git -C "$GS" checkout -q -b first
+lines "$GS/src/x.rs" 0 25
+commit_all "$GS" "first"
+run_hook review-done.sh \
+  "$(subagent_stop v5 "$GS" '{"agent_id": "r5", "agent_type": "rust-style-reviewer"}')"
+git -C "$GS" checkout -q main
+lines "$GS/src/x.rs" 0 60
+commit_all "$GS" "others' work, merged"
+git -C "$GS" push -q origin main
+git -C "$GS" checkout -q -b second
+lines "$GS/src/x.rs" 60 1
+commit_all "$GS" "second"
+expect "gate: a stale snapshot does not exceed the PR's own diff" 0 review-gate.sh \
+  "$(pr_cmd v5 "$GS" 'gh pr ready')"
+
+# Many files: one pass over the snapshots, and a long listing still blocks (exit 2, not 141).
+GM="$WORK/gate-many"
+new_cloned_repo "$GM"
+git -C "$GM" checkout -q -b many
+long="$(printf 'very_long_module_name_%.0s' {1..8})"
+for ((n = 0; n < 1200; n++)); do printf 'pub fn g() {}\n' >"$GM/src/${long}_$n.rs"; done
+commit_all "$GM" "many files"
+started="$(date +%s)"
+expect "gate: 1200 unreviewed files block" 2 review-gate.sh "$(pr_cmd v6 "$GM" 'gh pr ready')" \
+  "changes 1200 lines"
+elapsed=$(($(date +%s) - started))
+check "gate: 1200 files in under 20 s (took ${elapsed}s)" "$([[ $elapsed -lt 20 ]] && echo yes)"
 
 SETTINGS="$HOOKS/../../settings.json"
 check "settings: the review gate runs on Bash, not on Stop" "$(jq -e '
@@ -1021,6 +1083,30 @@ guard "checkout of one file passes" 0 "git checkout -- src/x.rs"
 guard "checkout of a branch passes" 0 "git checkout feature"
 guard "restore --staged of the tree passes" 0 "git restore --staged ."
 guard "restore --staged --worktree of the tree blocked" 2 "git restore --staged --worktree ."
+
+# The leftmost quote wins: an apostrophe inside "..." does not hide the code after it.
+guard "apostrophe in a message does not hide a recursive rm" 2 \
+  "git commit -m \"it's fixed\" && $rm_r""f target && echo 'ok'"
+guard "apostrophe in a message does not hide a push to main" 2 \
+  "git commit -m \"don't block\" && git push origin main && echo 'pushed'"
+guard "an escaped quote opens nothing" 2 "echo don\\'t && $rm_r""f target && echo 'ok'"
+guard "apostrophe then a quoted rm mention passes" 0 \
+  "git commit -m \"it's\" && grep 'x' f && git commit -m \"drop $rm_r""f usage\""
+# Mentions of a shell hand-off in data are data too; a real hand-off is still checked whole.
+guard "eval and rm -r in a message pass" 0 "git commit -m \"no eval, no $rm_r""f\""
+guard "bash -c in a heredoc message passes" 0 \
+  $'git commit -F - <<\'EOF\'\nStop using bash -c and '"$rm_r"$'f in scripts\nEOF'
+guard "a path named eval passes" 0 "grep -rn \"$rm_r""f\" src/eval/"
+guard "ssh with a remote rm -r blocked" 2 "ssh host '$rm_r""f /srv/app'"
+guard "bash --norc -c blocked" 2 "bash --norc -c '$rm_r build'"
+guard "a backslash continuation is one command" 2 $'git reset \\\n  --hard origin/feature'
+# git global options and env prefixes do not hide a discard; forced checkouts are discards.
+guard "git -c key=value reset --hard blocked" 2 "git -c core.quotepath=off reset --hard"
+guard "git --no-pager reset --hard blocked" 2 "git --no-pager reset --hard HEAD"
+guard "env prefix reset --hard blocked" 2 "GIT_TRACE=1 git reset --hard"
+guard "checkout -f blocked" 2 "git checkout -f feature"
+guard "switch --discard-changes blocked" 2 "git switch --discard-changes feature"
+guard "switch to a branch passes" 0 "git switch -c feature"
 
 guard "gh pr merge --admin blocked" 2 "gh pr merge 7 --squash --admin"
 guard "gh pr merge passes" 0 "gh pr merge 7 --squash"
