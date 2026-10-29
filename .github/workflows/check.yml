@@ -1,0 +1,36 @@
+# Runs check.sh, the same script every change runs locally: shell lint and format, Perl
+# syntax, the column limit, workflow lint, and the hook test suite with real cargo clippy runs.
+#
+# macOS, because the hooks are written for the macOS system bash 3.2 and BSD tools, and the
+# tests delete with /usr/bin/trash (macOS 15 and later). The image ships jq, rustup, clippy
+# and rustfmt. The brew tools float at their current release: they lint, they do not build
+# anything that ships, and a new lint that turns CI red is a finding worth seeing.
+#
+# Draft PRs get no run (gh-actions-style): ready_for_review starts the one that counts. The
+# job has no `needs:`, so its skipped result on a draft is safe as a required check.
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: check
+jobs:
+  check:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install lint tools
+        run: brew install shellcheck shfmt actionlint zizmor
+      - name: Check required system tools
+        run: command -v trash jq perl shasum
+      - name: check.sh
+        run: bash check.sh

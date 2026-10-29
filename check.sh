@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Check this setup after any change: shell lint and format, Perl syntax, the 100-column limit
-# on the hooks, and the hook test suite (fixtures plus real cargo clippy runs, a few minutes).
+# on the hooks, workflow lint (this repo's CI and the Rust CI templates), and the hook test
+# suite (fixtures plus real cargo clippy runs, a few minutes). CI runs the same script.
 #
 # Usage: bash check.sh            everything
 #        bash check.sh --quick    skip the test suite
@@ -23,7 +24,15 @@ step() {
 }
 
 shell_files=("$SETUP_DIR/install.sh" "$SETUP_DIR/check.sh" "$SETUP_DIR/claude/statusline.sh"
-  "$HOOKS"/*/*.sh "$HOOKS/rust/tests/run.sh")
+  "$HOOKS"/*/*.sh "$HOOKS/rust/tests/run.sh"
+  "$SETUP_DIR"/claude/skills/*/*.sh "$SETUP_DIR"/claude/skills/*/scripts/*.sh)
+
+# Workflows: this repo's own, and the Rust templates (every file there with a `jobs:` key;
+# codecov.yml and dependabot.yml are not workflows).
+workflow_files=("$SETUP_DIR"/.github/workflows/*.yml)
+while IFS= read -r file; do
+  workflow_files+=("$file")
+done < <(grep -l '^jobs:' "$SETUP_DIR"/claude/skills/rust-style/templates/ci/*.yml)
 
 # shellcheck disable=SC2329 # invoked indirectly, through step
 long_lines() {
@@ -44,6 +53,8 @@ step shellcheck shellcheck -x "${shell_files[@]}"
 step shfmt shfmt -d -i 2 "${shell_files[@]}"
 step "perl syntax" perl_syntax
 step "100 columns" long_lines
+step actionlint actionlint "${workflow_files[@]}"
+step zizmor zizmor --offline --quiet "${workflow_files[@]}" "$SETUP_DIR/.github/dependabot.yml"
 if [[ "${1:-}" != --quick ]]; then
   step "hook tests" bash "$HOOKS/rust/tests/run.sh"
 fi
