@@ -4,7 +4,7 @@
 # too (not formatted), so check-on-stop.sh runs clippy and house-check over the change.
 #
 # Two lists per agent: `edited` is cleared by check-on-stop.sh once clean; `touched` is never
-# cleared and feeds review-gate.sh, which must still see files whose clippy run passed. The
+# cleared and feeds review-done.sh, which snapshots files whose clippy run passed too. The
 # first edit in a repo also records the session's baseline there (changes.sh).
 #
 # The file is formatted through stdin, so rustfmt sees only this file: it cannot follow

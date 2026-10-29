@@ -67,8 +67,8 @@ hook_field() {
 }
 
 # Claude Code's per-session scratchpad, /tmp/claude-<uid>/<project>/<session>/scratchpad/
-# (/private/tmp on macOS): throwaway code that no style gate, stop check or review gate should
-# judge. The ERE form is for filtering path lists.
+# (/private/tmp on macOS): throwaway code that no style gate, stop check or review
+# snapshot should judge. The ERE form is for filtering path lists.
 SCRATCH_RE='/tmp/claude-[0-9]+/[^/]+/[^/]+/scratchpad/'
 
 is_scratch_path() {
@@ -130,9 +130,9 @@ physical_path() {
   printf '%s/%s' "$(cd "$(dirname "$1")" && pwd -P)" "$(basename "$1")"
 }
 
-# The `touched` lists of every agent of this session (never cleared by the stop checks, so
-# the review gate still sees files whose clippy run already passed). Prints existing list
-# files, one per line, for changes.sh to read.
+# The `touched` lists of every agent of this session (never cleared by the stop check, so the
+# reviewer's snapshot still sees files whose clippy run already passed). Prints existing
+# list files, one per line, for changes.sh to read.
 session_touched_lists() {
   local list
   for list in "$RUST_HOOKS_STATE/$(session_id)".*.touched; do

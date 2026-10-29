@@ -153,19 +153,8 @@ stop() {
   fi
   jq -nc --arg s "$1" --argjson extra "$extra" '{session_id: $s, hook_event_name: "Stop"} + $extra'
 }
-# Waits for the next second. The hooks tell the session's commits from earlier ones by
-# reflog time, in whole seconds, and count a tie as the session's; a test that commits and
-# then starts a session (or reviews) in the same second would see that tie.
-next_second() {
-  local now
-  now="$(date +%s)"
-  while (($(date +%s) == now)); do
-    sleep 0.1
-  done
-}
 # The session's first prompt in repo $2: records its baseline (session-baseline.sh).
 prompt() {
-  next_second
   run_hook session-baseline.sh "$(jq -nc --arg s "$1" --arg c "$2" \
     '{session_id: $s, hook_event_name: "UserPromptSubmit", cwd: $c, prompt: "go"}')"
 }
@@ -389,16 +378,13 @@ check "missing jq: stop blocks once with the fix" \
 run_hook check-on-stop.sh "$(stop m1 '{"stop_hook_active": true}')" "$NOJQ"
 check "missing jq: second stop passes" "$([[ $code -eq 1 ]] && echo yes)" "exit $code: $out"
 
-# Review gate: changed set since the session's baseline plus every agent's recorded paths,
-# session-caused repos only, threshold, snapshot at the reviewer's SubagentStop, Claude and
-# Grok stop fields.
+# Shared git fixtures for the base, review-gate and stop-check tests.
 lines() { for ((i = $2; i < $2 + $3; i++)); do printf 'pub fn f%d() {}\n' "$i"; done >>"$1"; }
 commit_all() {
   git -C "$1" add -A
   git -C "$1" -c user.name=t -c user.email=t@t commit -qm "${2:-snapshot}"
 }
-# commit_all an hour ago: work from before the session, which the hooks tell from the
-# session's own by its reflog time.
+# commit_all an hour ago: work from before the session.
 old_commit() {
   local then="@$(($(date +%s) - 3600)) +0000"
   GIT_AUTHOR_DATE="$then" GIT_COMMITTER_DATE="$then" commit_all "$@"
@@ -409,13 +395,22 @@ new_repo() {
   git -C "$1" init -q -b main
   old_commit "$1" init
 }
-# Others' work arriving in repo $1 as branch $2: what commands $3... do in a separate clone
-# (cwd the clone), committed there and pushed back, as a teammate's push or a GitHub merge
+# Repo $1 with a bare origin at $1.git that its main tracks, so origin/main is the default
+# branch, as in a real clone.
+new_cloned_repo() {
+  new_repo "$1"
+  git init -q --bare -b main "$1.git"
+  git -C "$1" remote add origin "$1.git"
+  git -C "$1" push -q -u origin main
+  git -C "$1" remote set-head origin main
+}
+# Others' work arriving on origin's branch $2 of repo $1: commands $3... run in a separate
+# clone (cwd the clone), committed there and pushed, as a teammate's push or a GitHub merge
 # arrives.
 arrive() {
   local repo="$1" branch="$2" clone="$1-elsewhere"
   shift 2
-  git clone -q "$repo" "$clone"
+  git clone -q "$repo.git" "$clone"
   (cd "$clone" && "$@")
   if [[ -n "$(git -C "$clone" status --porcelain)" ]]; then
     commit_all "$clone" "others' work"
@@ -436,333 +431,175 @@ subagent_stop() {
   jq -nc --arg s "$1" --arg c "$2" --argjson extra "$3" \
     '{session_id: $s, hook_event_name: "SubagentStop", cwd: $c} + $extra'
 }
-REPO="$WORK/repo"
-new_repo "$REPO"
-prompt r1 "$REPO"
-lines "$REPO/src/lib.rs" 5 3
-run_hook fmt-on-edit.sh "$(edit r1 "$REPO/src/lib.rs" 'x')"
-expect "review: small diff passes" 0 review-gate.sh "$(rstop r1 "$REPO")"
-lines "$REPO/src/lib.rs" 8 20
-expect "review: large diff blocked" 2 review-gate.sh "$(rstop r1 "$REPO")" \
-  "since this session started"
-check "review: message lists the file" "$([[ "$out" == *"$REPO/src/lib.rs"* ]] && echo yes)" "$out"
-expect "review: a later turn with no new Rust change passes" 0 review-gate.sh "$(rstop r1 "$REPO")"
-# Forgets the last block of session $1, so the same state is judged again.
-unblock() { : >"$STATE_TMP/claude-rust-hooks/$1.main.review-blocked"; }
-expect "review: stop_hook_active passes" 0 review-gate.sh \
-  "$(rstop r1 "$REPO" '{"stop_hook_active": true}')"
-expect "review: grok stopHookActive passes" 0 review-gate.sh \
-  "$(rstop r1 "$REPO" '{"stopHookActive": true}')"
-expect "review: grok shutdown passes" 0 review-gate.sh \
-  "$(rstop r1 "$REPO" '{"reason": "shutdown"}')"
-unblock r1
-expect "review: grok end_turn checked" 2 review-gate.sh \
-  "$(rstop r1 "$REPO" '{"reason": "end_turn"}')"
-expect "review: Claude subagent skipped" 0 review-gate.sh "$(rstop r1 "$REPO" '{"agent_id": "a1"}')"
-expect "review: grok subagent skipped" 0 review-gate.sh \
-  "$(rstop r1 "$REPO" '{"subagentType": "x"}')"
-run_hook review-done.sh "$(subagent_stop r1 "$REPO" '{"agent_id": "a2", "agent_type": "Explore"}')"
-unblock r1
-expect "review: other agent type does not count" 2 review-gate.sh "$(rstop r1 "$REPO")"
-run_hook review-done.sh \
-  "$(subagent_stop r1 "$REPO" '{"agent_id": "a3", "agent_type": "rust-style-reviewer"}')"
-expect "review: passes after reviewer (Claude agent_type)" 0 review-gate.sh "$(rstop r1 "$REPO")"
-lines "$REPO/src/lib.rs" 28 3
-expect "review: 3-line fix after review passes" 0 review-gate.sh "$(rstop r1 "$REPO")"
-lines "$REPO/src/lib.rs" 31 25
-expect "review: 25 lines after review block" 2 review-gate.sh "$(rstop r1 "$REPO")" \
-  "since the last review"
-run_hook review-done.sh \
-  "$(subagent_stop grok-child "$REPO" '{"subagentType": "rust-style-reviewer"}')"
-expect "review: grok reviewer in its own session counts for the repo" 0 review-gate.sh \
-  "$(rstop r1 "$REPO")"
-lines "$REPO/src/later.rs" 0 25
-expect "review: unrecorded (Bash) untracked file counts" 2 review-gate.sh "$(rstop r1 "$REPO")" \
-  "src/later.rs"
 
-REPO2="$WORK/repo2"
-new_repo "$REPO2"
-prompt r5 "$REPO2"
-lines "$REPO2/src/lib.rs" 5 25
-expect "review: unrecorded (Bash) edit to a tracked file counts" 2 review-gate.sh \
-  "$(rstop r5 "$REPO2")" "$REPO2/src/lib.rs"
+# The base (changes.sh diff_base): the branch's diff against the default branch, what the
+# pull request and CI judge. base_lines SESSION REPO prints the .rs lines added plus removed
+# since it, untracked files included, as the stop check counts them.
+base_lines() {
+  (
+    TMPDIR="$STATE_TMP"
+    HOME="$FAKE_HOME"
+    # shellcheck source=/dev/null # the hooks under test, sourced to call diff_base directly
+    source "$HOOKS/common.sh"
+    # shellcheck disable=SC2034 # read by the sourced helpers
+    HOOK_INPUT="$(jq -nc --arg s "$1" '{session_id: $s}')"
+    # shellcheck source=/dev/null # as above
+    source "$HOOKS/changes.sh"
+    base="$(diff_base "$2")"
+    {
+      git -C "$2" diff --numstat "$base" -- '*.rs' | awk '{ print $1 + $2 }'
+      git -C "$2" ls-files --others --exclude-standard -- '*.rs' |
+        while IFS= read -r file; do wc -l <"$2/$file"; done
+    } | awk '{ n += $1 } END { print n + 0 }'
+  )
+}
+# expect_lines NAME WANT SESSION REPO
+expect_lines() {
+  local got
+  got="$(base_lines "$3" "$4")"
+  check "base: $1 ($got lines, want $2)" "$([[ "$got" == "$2" ]] && echo yes)"
+}
 
-# B1: committing before the stop hides nothing.
-REPO3="$WORK/repo3"
-new_repo "$REPO3"
-prompt r6 "$REPO3"
-lines "$REPO3/src/lib.rs" 5 25
-commit_all "$REPO3" "agent commit"
-expect "review: committed changes still count" 2 review-gate.sh "$(rstop r6 "$REPO3")" \
-  "$REPO3/src/lib.rs"
+LOCAL="$WORK/base-local"
+new_repo "$LOCAL"
+prompt b1 "$LOCAL"
+expect_lines "work from before the session on a local main" 0 b1 "$LOCAL"
+lines "$LOCAL/src/lib.rs" 5 25
+commit_all "$LOCAL" "session work"
+expect_lines "local main: commits before the stop still count" 25 b1 "$LOCAL"
+lines "$LOCAL/src/new.rs" 0 4
+expect_lines "local main: untracked files count" 29 b1 "$LOCAL"
 
-# B1: after a rebase the baseline is no longer an ancestor of HEAD; measure from the
-# merge-base with the default branch (25 lines), neither from HEAD (0) nor from the stale
-# baseline (45).
-REPO4="$WORK/repo4"
-new_repo "$REPO4"
-git -C "$REPO4" checkout -q -b feature
-lines "$REPO4/src/lib.rs" 5 20
-commit_all "$REPO4" "feature work"
-prompt r7 "$REPO4"
-git -C "$REPO4" reset -q --hard main
-lines "$REPO4/src/lib.rs" 100 25
-commit_all "$REPO4" "rewritten"
-run_hook fmt-on-edit.sh "$(edit r7 "$REPO4/src/lib.rs" 'x')"
-expect "review: rebased baseline falls back to the merge-base (25 lines)" 2 review-gate.sh \
-  "$(rstop r7 "$REPO4")" "changed 25 lines"
-REPO4B="$WORK/repo4b"
-new_repo "$REPO4B"
-git -C "$REPO4B" checkout -q -b feature
-lines "$REPO4B/src/lib.rs" 5 40
-commit_all "$REPO4B" "feature work"
-prompt r8 "$REPO4B"
-git -C "$REPO4B" reset -q --hard main
-lines "$REPO4B/src/lib.rs" 100 5
-commit_all "$REPO4B" "rewritten small"
-run_hook fmt-on-edit.sh "$(edit r8 "$REPO4B/src/lib.rs" 'x')"
-expect "review: stale baseline not used after a rebase (5 lines)" 0 review-gate.sh \
-  "$(rstop r8 "$REPO4B")"
+FEAT="$WORK/base-feature"
+new_cloned_repo "$FEAT"
+git -C "$FEAT" checkout -q -b feature
+lines "$FEAT/src/lib.rs" 5 10
+commit_all "$FEAT" "earlier work on the branch"
+prompt b2 "$FEAT"
+lines "$FEAT/src/lib.rs" 15 15
+commit_all "$FEAT" "session work"
+expect_lines "feature branch: the whole branch diff counts" 25 b2 "$FEAT"
+git -C "$FEAT" reset -q --hard main
+lines "$FEAT/src/lib.rs" 100 7
+commit_all "$FEAT" "rewritten"
+expect_lines "feature branch: after a reset only the new branch counts" 7 b2 "$FEAT"
 
-# Commits that only arrive are not the session's: a fast-forward to work merged elsewhere,
-# or a checkout of main after the session's pull request merged. Its own commits still
-# count, through the merge, and a merge it finishes by hand counts only the hand-written
-# part.
-ARR_FF="$WORK/arr-ff"
-new_repo "$ARR_FF"
-git -C "$ARR_FF" checkout -q -b upstream
-lines "$ARR_FF/src/lib.rs" 5 40
-old_commit "$ARR_FF" "merged elsewhere"
-git -C "$ARR_FF" checkout -q main
-prompt r9 "$ARR_FF"
-git -C "$ARR_FF" merge -q --ff-only upstream
-expect "review: a fast-forward to others' work passes" 0 review-gate.sh "$(rstop r9 "$ARR_FF")"
-lines "$ARR_FF/src/own.rs" 0 25
-commit_all "$ARR_FF" "own work"
-expect "review: own commit after a fast-forward counts (25 lines)" 2 review-gate.sh \
-  "$(rstop r9 "$ARR_FF")" "changed 25 lines"
+PULL="$WORK/base-pull"
+new_cloned_repo "$PULL"
+prompt b3 "$PULL"
+arrive "$PULL" main lines src/lib.rs 5 40
+git -C "$PULL" pull -q --ff-only
+expect_lines "a pull of others' work counts nothing" 0 b3 "$PULL"
+lines "$PULL/src/lib.rs" 45 5
+expect_lines "uncommitted work on an up-to-date main counts" 5 b3 "$PULL"
 
-ARR_PR="$WORK/arr-pr"
-new_repo "$ARR_PR"
-git -C "$ARR_PR" checkout -q -b feature
-prompt r10 "$ARR_PR"
-lines "$ARR_PR/src/lib.rs" 5 3
-commit_all "$ARR_PR" "own fix"
-# Elsewhere: 40 lines of others' work on main, then the feature branch merged into it, as
-# GitHub merges a pull request.
+MERGED="$WORK/base-merged"
+new_cloned_repo "$MERGED"
+prompt b4 "$MERGED"
+git -C "$MERGED" checkout -q -b feature
+lines "$MERGED/src/lib.rs" 5 30
+commit_all "$MERGED" "own work"
+git -C "$MERGED" push -q -u origin feature
+# Elsewhere: others' work on main, then the feature branch merged into it, as GitHub merges
+# a pull request.
 merge_feature() {
-  git checkout -q main
+  git fetch -q origin feature
   lines src/other.rs 0 40
   commit_all . "others' work"
-  git -c user.name=t -c user.email=t@t merge -q --no-ff origin/feature -m "Merge pull request"
+  git -c user.name=t -c user.email=t@t merge -q --no-ff FETCH_HEAD -m "Merge pull request"
 }
-arrive "$ARR_PR" main merge_feature
-git -C "$ARR_PR" checkout -q main
-expect "review: checkout of main after the merge passes (3 own lines)" 0 review-gate.sh \
-  "$(rstop r10 "$ARR_PR")"
-lines "$ARR_PR/src/lib.rs" 8 20
-expect "review: own commit inside the merge still counts (23 lines)" 2 review-gate.sh \
-  "$(rstop r10 "$ARR_PR")" "changed 23 lines"
+arrive "$MERGED" main merge_feature
+git -C "$MERGED" checkout -q main
+git -C "$MERGED" pull -q --ff-only
+expect_lines "main after the session's PR merged counts nothing" 0 b4 "$MERGED"
 
-ARR_HAND="$WORK/arr-hand"
-new_repo "$ARR_HAND"
-git -C "$ARR_HAND" checkout -q -b other
-perl -pi -e 's/f0\(/other0(/' "$ARR_HAND/src/lib.rs"
-lines "$ARR_HAND/src/big.rs" 0 40
-old_commit "$ARR_HAND" "other side"
-git -C "$ARR_HAND" checkout -q main
-perl -pi -e 's/f0\(/main0(/' "$ARR_HAND/src/lib.rs"
-old_commit "$ARR_HAND" "main side"
-prompt r11 "$ARR_HAND"
-git -C "$ARR_HAND" merge -q other >/dev/null 2>&1 || true
-git -C "$ARR_HAND" checkout -q --ours src/lib.rs
-git -C "$ARR_HAND" add -A
-git -C "$ARR_HAND" -c user.name=t -c user.email=t@t commit -q --no-edit
-expect "review: a merge finished by hand counts the resolution only" 0 review-gate.sh \
-  "$(rstop r11 "$ARR_HAND")"
-
-# After a review, work that arrives in a reviewed file moves its snapshot diff but is not
-# the session's: a small fix on top passes.
-ARR_REV="$WORK/arr-rev"
-new_repo "$ARR_REV"
-prompt r12 "$ARR_REV"
-lines "$ARR_REV/src/lib.rs" 5 25
-commit_all "$ARR_REV" "own work"
-next_second
+# The review gate: `gh pr ready` and a non-draft `gh pr create` need a rust-style-reviewer
+# run over the pull request's Rust.
+pr_cmd() {
+  jq -nc --arg s "$1" --arg c "$2" --arg cmd "$3" \
+    '{session_id: $s, cwd: $c, tool_name: "Bash", tool_input: {command: $cmd}}'
+}
+GATE="$WORK/gate"
+new_cloned_repo "$GATE"
+prompt v1 "$GATE"
+git -C "$GATE" checkout -q -b feature
+lines "$GATE/src/lib.rs" 5 25
+commit_all "$GATE" "feature"
+expect "gate: other commands pass" 0 review-gate.sh "$(pr_cmd v1 "$GATE" 'git status')"
+expect "gate: draft create passes" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr create --draft --title x')"
+expect "gate: ready blocked" 2 review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready')" \
+  "changes 25 lines of Rust"
+check "gate: message lists the file" "$([[ "$out" == *"src/lib.rs (25 lines)"* ]] && echo yes)" \
+  "$out"
+expect "gate: non-draft create blocked" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr create --title x --body y')" "rust-style-reviewer"
+expect "gate: cd into the repo first is followed" 2 review-gate.sh \
+  "$(pr_cmd v1 "$WORK" "cd $GATE && gh pr ready")" "25 lines"
+expect "gate: another repository (-R) passes" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready 3 -R other/repo')"
+expect "gate: ready --undo passes" 0 review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready --undo')"
+expect "gate: outside git passes" 0 review-gate.sh "$(pr_cmd v1 "$WORK/notrust" 'gh pr ready')"
+run_hook review-done.sh "$(subagent_stop v1 "$GATE" '{"agent_id": "e1", "agent_type": "Explore"}')"
+expect "gate: another agent type is no review" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 run_hook review-done.sh \
-  "$(subagent_stop r12 "$ARR_REV" '{"agent_id": "rv", "agent_type": "rust-style-reviewer"}')"
-arrive "$ARR_REV" upstream lines src/lib.rs 30 40
-git -C "$ARR_REV" merge -q --ff-only upstream
-lines "$ARR_REV/src/lib.rs" 70 3
-expect "review: arrivals after a review do not count against it (3 lines)" 0 review-gate.sh \
-  "$(rstop r12 "$ARR_REV")"
-lines "$ARR_REV/src/lib.rs" 73 25
-expect "review: own work after the review still counts (28 lines)" 2 review-gate.sh \
-  "$(rstop r12 "$ARR_REV")" "changed 28 lines"
+  "$(subagent_stop v1 "$GATE" '{"agent_id": "r1", "agent_type": "rust-style-reviewer"}')"
+expect "gate: passes after the reviewer" 0 review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+lines "$GATE/src/lib.rs" 30 3
+commit_all "$GATE" "review fix"
+expect "gate: a small fix after the review passes" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+lines "$GATE/src/lib.rs" 33 25
+commit_all "$GATE" "more work"
+expect "gate: 28 lines since the review blocked" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')" "changes 28 lines"
+run_hook review-done.sh \
+  "$(subagent_stop grok-child "$GATE" '{"subagentType": "rust-style-reviewer"}')"
+expect "gate: a Grok reviewer in its own session counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+printf '# Notes\n%.0s' {1..30} >"$GATE/NOTES.md"
+commit_all "$GATE" "docs"
+expect "gate: non-Rust changes do not count" 0 review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 
-# Undercounting is the failure that matters: the session's commits stay counted when git
-# expires old reflog entries, when a later change deletes or edits the file a session
-# commit created, when the work was committed in a linked worktree (a subagent's) and
-# merged in, and when gc prunes the cached base.
-ARR_KEEP="$WORK/arr-keep"
-new_repo "$ARR_KEEP"
-prompt r13 "$ARR_KEEP"
-lines "$ARR_KEEP/src/own.rs" 0 30
-commit_all "$ARR_KEEP" "own file"
-git -C "$ARR_KEEP" reflog expire --expire=30.minutes.ago --all
-expect "review: own commit counts after old reflog entries expire (30 lines)" 2 \
-  review-gate.sh "$(rstop r13 "$ARR_KEEP")" "changed 30 lines"
-arrive "$ARR_KEEP" edited perl -pi -e 's/f0\(/edited0(/' src/own.rs
-git -C "$ARR_KEEP" merge -q --ff-only edited
-unblock r13
-expect "review: own file edited by others still counts (30 lines)" 2 review-gate.sh \
-  "$(rstop r13 "$ARR_KEEP")" "changed 30 lines"
-git -C "$ARR_KEEP" gc -q --prune=now
-unblock r13
-expect "review: a base pruned by gc is rebuilt (30 lines)" 2 review-gate.sh \
-  "$(rstop r13 "$ARR_KEEP")" "changed 30 lines"
+# A review in a subagent's worktree covers the branch in every checkout of the repository.
+git -C "$GATE" worktree add -q -b wt-branch "$WORK/gate-wt" main
+lines "$WORK/gate-wt/src/wt.rs" 0 30
+commit_all "$WORK/gate-wt" "worktree work"
+run_hook review-done.sh \
+  "$(subagent_stop v2 "$WORK/gate-wt" '{"agent_id": "r2", "agent_type": "rust-style-reviewer"}')"
+git -C "$GATE" worktree remove "$WORK/gate-wt"
+git -C "$GATE" checkout -q wt-branch
+expect "gate: a review in a worktree counts for the main checkout" 0 review-gate.sh \
+  "$(pr_cmd v2 "$GATE" 'gh pr ready')"
 
-ARR_WT="$WORK/arr-wt"
-new_repo "$ARR_WT"
-prompt r14 "$ARR_WT"
-git -C "$ARR_WT" worktree add -q -b sub "$WORK/arr-wt-sub" main
-lines "$WORK/arr-wt-sub/src/sub.rs" 0 25
-commit_all "$WORK/arr-wt-sub" "subagent work"
-git -C "$ARR_WT" worktree remove "$WORK/arr-wt-sub"
-git -C "$ARR_WT" merge -q --ff-only sub
-expect "review: work committed in a worktree and merged in counts (25 lines)" 2 \
-  review-gate.sh "$(rstop r14 "$ARR_WT")" "changed 25 lines"
-# M2: a Q&A session in a dirty repo changed nothing and passes both stop hooks.
+# --base: a stacked PR is measured against the branch it targets.
+git -C "$GATE" checkout -q -b stacked
+lines "$GATE/src/wt.rs" 30 5
+commit_all "$GATE" "stacked"
+lines "$GATE/src/other.rs" 0 30
+expect "gate: --base measures from the base branch" 0 review-gate.sh \
+  "$(pr_cmd v2 "$GATE" 'gh pr create --base wt-branch --title x')"
+commit_all "$GATE" "unreviewed"
+expect "gate: unreviewed work on the stacked branch blocked" 2 review-gate.sh \
+  "$(pr_cmd v2 "$GATE" 'gh pr create --base wt-branch --title x')" "src/other.rs (30 lines)"
+
+SETTINGS="$HOOKS/../../settings.json"
+check "settings: the review gate runs on Bash, not on Stop" "$(jq -e '
+  ([.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[].command
+    | select(test("review-gate"))] | length == 1)
+  and ([.hooks.Stop[].hooks[].command | select(test("review-gate"))] | length == 0)' \
+  "$SETTINGS" >/dev/null && echo yes)"
+
+# M2: a Q&A session in a dirty repo changed nothing and passes the stop check.
 REPO5="$WORK/repo5"
 new_repo "$REPO5"
 lines "$REPO5/src/lib.rs" 5 30
 printf '// TODO: dirty before the session\n' >>"$REPO5/src/lib.rs"
 prompt q1 "$REPO5"
-expect "review: Q&A session in a dirty repo passes" 0 review-gate.sh "$(rstop q1 "$REPO5")"
 expect "check: Q&A session in a dirty repo passes" 0 check-on-stop.sh "$(rstop q1 "$REPO5")"
-expect "review: Q&A session without a prompt hook passes too" 0 review-gate.sh \
-  "$(rstop q2 "$REPO5")"
 
-# M3: an old review's snapshot does not count other people's later commits.
-REPO6="$WORK/repo6"
-new_repo "$REPO6"
-prompt o1 "$REPO6"
-lines "$REPO6/src/lib.rs" 5 3
-run_hook fmt-on-edit.sh "$(edit o1 "$REPO6/src/lib.rs" 'x')"
-run_hook review-done.sh \
-  "$(subagent_stop o1 "$REPO6" '{"agent_id": "a4", "agent_type": "rust-style-reviewer"}')"
-commit_all "$REPO6" "o1 work"
-lines "$REPO6/src/lib.rs" 8 30
-commit_all "$REPO6" "someone else"
-prompt o2 "$REPO6"
-lines "$REPO6/src/lib.rs" 38 3
-run_hook fmt-on-edit.sh "$(edit o2 "$REPO6/src/lib.rs" 'x')"
-expect "review: old snapshot ignores other people's commits" 0 review-gate.sh \
-  "$(rstop o2 "$REPO6")"
-
-mkdir -p "$WORK/plain"
-lines "$WORK/plain/small.rs" 0 10
-run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/small.rs" 'x' sub1)"
-expect "review: small non-git file passes" 0 review-gate.sh "$(stop r3)"
-lines "$WORK/plain/x.rs" 0 25
-run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/x.rs" 'x' sub2)"
-expect "review: a running subagent's edits wait" 0 review-gate.sh "$(stop r3)"
-sub2_done="$(subagent_stop r3 "$WORK" '{"agent_id": "sub2", "agent_type": "general-purpose"}')"
-run_hook review-done.sh "$sub2_done"
-expect "review: subagent's non-git edits count once it stops" 2 review-gate.sh "$(stop r3)" \
-  "plain/x.rs"
-lines "$WORK/plain/resumed.rs" 0 25
-run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/resumed.rs" 'x' sub2)"
-expect "review: edits after a resume wait for the next stop" 0 review-gate.sh "$(stop r3)"
-run_hook review-done.sh "$sub2_done"
-expect "review: edits after a resume count at the next stop" 2 review-gate.sh "$(stop r3)" \
-  "plain/resumed.rs"
-# A subagent resumed after a stop (a SendMessage follow-up) edits a git root of its own,
-# a worktree: git shows the new edits at once, but they wait for its next stop.
-WT="$WORK/worktree"
-new_repo "$WT"
-lines "$WT/src/lib.rs" 5 25
-run_hook fmt-on-edit.sh "$(edit wt1 "$WT/src/lib.rs" 'x' sub5)"
-sub5_done="$(subagent_stop wt1 "$WORK" '{"agent_id": "sub5", "agent_type": "general-purpose"}')"
-run_hook review-done.sh "$sub5_done"
-expect "review: a worktree subagent's work counts at its stop" 2 review-gate.sh "$(stop wt1)" \
-  "worktree/src/lib.rs"
-lines "$WT/src/lib.rs" 30 25
-run_hook fmt-on-edit.sh "$(edit wt1 "$WT/src/lib.rs" 'x' sub5)"
-expect "review: its edits after a resume wait, even in git" 0 review-gate.sh "$(stop wt1)"
-run_hook review-done.sh "$sub5_done"
-expect "review: they count again at its next stop" 2 review-gate.sh "$(stop wt1)" \
-  "worktree/src/lib.rs"
-# A resumed subagent that edits by shell records no new paths, so its list does not grow;
-# the stop input's running background tasks still say it is mid-change.
-WT2="$WORK/worktree2"
-new_repo "$WT2"
-lines "$WT2/src/lib.rs" 5 25
-run_hook fmt-on-edit.sh "$(edit wt2 "$WT2/src/lib.rs" 'x' sub6)"
-run_hook review-done.sh \
-  "$(subagent_stop wt2 "$WORK" '{"agent_id": "sub6", "agent_type": "general-purpose"}')"
-unblock wt2
-lines "$WT2/src/lib.rs" 30 25
-sub6_task() {
-  jq -nc --arg s "$1" '{background_tasks: [{id: "sub6", type: "subagent", status: $s}]}'
-}
-expect "review: a running subagent's shell edits wait" 0 review-gate.sh \
-  "$(stop wt2 "$(sub6_task running)")"
-expect "review: they count once it no longer runs" 2 review-gate.sh \
-  "$(stop wt2 "$(sub6_task completed)")" "worktree2/src/lib.rs"
-# A subagent's work counts only once review-done.sh has recorded its stop, so it must run
-# for every subagent, not only the reviewer.
-SETTINGS="$HOOKS/../../settings.json"
-check "settings: review-done.sh runs for every subagent" "$(jq -e '[.hooks.SubagentStop[]
-  | select(any(.hooks[]; .command | test("review-done")))
-  | .matcher] == [""]' "$SETTINGS" >/dev/null && echo yes)"
-# A garbled stop count reads as not stopped yet, not as an error.
-printf 'x\n' >"$STATE_TMP/claude-rust-hooks/r3.sub2.finished"
-lines "$WORK/plain/garbled.rs" 0 25
-run_hook fmt-on-edit.sh "$(edit r3 "$WORK/plain/garbled.rs" 'x' sub2)"
-expect "review: a garbled stop count waits" 0 review-gate.sh "$(stop r3)"
-check "review: a garbled stop count is not an error" "$([[ -z "$out" ]] && echo yes)" "$out"
-expect "review: session without edits passes" 0 review-gate.sh "$(rstop r4 "$WORK/notrust")"
-# A subagent that stops while a task it started still runs has only paused: its work waits.
-# The session-wide task list holds the subagent itself and tasks it did not start; neither
-# makes it a pause.
-lines "$WORK/plain/paused.rs" 0 25
-run_hook fmt-on-edit.sh "$(edit pause1 "$WORK/plain/paused.rs" 'x' sub3)"
-printf '%s\n' '{"note": "agent sub3 launched background task bg42"}' >"$WORK/sub3.jsonl"
-sub3_stop() {
-  subagent_stop pause1 "$WORK" "$(jq -nc --arg t "$WORK/sub3.jsonl" --argjson tasks "$1" \
-    '{agent_id: "sub3", agent_type: "general-purpose", agent_transcript_path: $t,
-      background_tasks: $tasks}')"
-}
-run_hook review-done.sh "$(sub3_stop '[{"id": "sub3", "type": "subagent", "status": "running"},
-  {"id": "bg42", "type": "shell", "status": "running"},
-  {"id": "bg99", "type": "shell", "status": "running"}]')"
-expect "review: a subagent paused on its own background task waits" 0 review-gate.sh \
-  "$(stop pause1)"
-run_hook review-done.sh "$(sub3_stop '[{"id": "sub3", "type": "subagent", "status": "running"},
-  {"id": "bg42", "type": "shell", "status": "completed"},
-  {"id": "bg99", "type": "shell", "status": "running"}]')"
-expect "review: its work counts once its own tasks are done" 2 review-gate.sh "$(stop pause1)" \
-  "plain/paused.rs"
-
-# A git repo inside a non-git directory that also holds a recorded file: each file is
-# counted once, under the repo, and a recorded file deleted since is not listed.
-NEST="$WORK/nest"
-mkdir -p "$NEST"
-new_repo "$NEST/inner"
-lines "$NEST/stray.rs" 0 2
-run_hook fmt-on-edit.sh "$(edit n1 "$NEST/stray.rs" 'x')"
-lines "$NEST/inner/src/lib.rs" 5 25
-run_hook fmt-on-edit.sh "$(edit n1 "$NEST/inner/src/lib.rs" 'x')"
-lines "$NEST/gone.rs" 0 30
-run_hook fmt-on-edit.sh "$(edit n1 "$NEST/gone.rs" 'x')"
-trash "$NEST/gone.rs"
-expect "review: nested repo counted once" 2 review-gate.sh "$(stop n1)" "changed 27 lines"
-check "review: nested file listed once, deleted file not listed" \
-  "$([[ "$(grep -c 'inner/src/lib.rs' <<<"$out")" -eq 1 && "$out" != *gone.rs* ]] && echo yes)" \
-  "$out"
-
-# Claude's session scratchpad is exempt: no style gate, nothing recorded, no review.
+# Claude's session scratchpad is exempt: no style gate, nothing recorded, no stop check.
 SCRATCH="$WORK/tmp/claude-501/proj/sess/scratchpad/crate"
 new_repo "$SCRATCH"
 prompt s1 "$SCRATCH"
@@ -772,18 +609,7 @@ lines "$SCRATCH/src/lib.rs" 5 30
 run_hook fmt-on-edit.sh "$(edit s1 "$SCRATCH/src/lib.rs" 'x')"
 check "scratch: edit not recorded" \
   "$([[ ! -s "$STATE_TMP/claude-rust-hooks/s1.main.edited" ]] && echo yes)"
-expect "scratch: review gate ignores scratch changes" 0 review-gate.sh "$(rstop s1 "$SCRATCH")"
 expect "scratch: stop check ignores scratch changes" 0 check-on-stop.sh "$(rstop s1 "$SCRATCH")"
-
-# Performance: 1500 changed files, one git call per root rather than per file.
-BIG="$WORK/big"
-new_repo "$BIG"
-prompt p1 "$BIG"
-for ((n = 0; n < 1500; n++)); do printf 'pub fn g() {}\n' >"$BIG/src/f$n.rs"; done
-started="$(date +%s)"
-expect "review: 1500 changed files" 2 review-gate.sh "$(rstop p1 "$BIG")" "1500 lines"
-elapsed=$(($(date +%s) - started))
-check "review: 1500 files in under 20 s (took ${elapsed}s)" "$([[ $elapsed -lt 20 ]] && echo yes)"
 
 # check-on-stop: runs cargo clippy on throwaway crates.
 # An opted-in crate (house rules on, with its own pedantic lint table) unless $3 is `plain`.

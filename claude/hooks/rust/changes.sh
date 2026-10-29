@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
-# What changed, for the stop-time hooks (check-on-stop.sh, review-gate.sh, review-done.sh)
-# and the hooks that take a session's baseline. Sourced after common.sh, not executed.
+# What changed, for the stop check (check-on-stop.sh), the review gate and its record
+# (review-gate.sh, review-done.sh), and the hooks that take a session's baseline. Sourced
+# after common.sh, not executed.
 #
 # Edits made through Bash (heredocs, sed -i, cargo add) never reach the edit-tool hooks, so
 # in git the changed set is git's view of the repo plus the paths the edit hooks recorded.
 # Outside git only recorded paths are known.
 #
-# Changes are measured against a base that holds everything except this session's own work
-# (diff_base): HEAD with the commits the session made undone, so committing before stopping
-# hides nothing, while commits that only arrived (a pull, a checkout of main after a pull
-# request merged, a fast-forward) count for nothing. The session's baseline for the repo is
-# recorded when the session first touches it (its first prompt, edit, or stop there): the
-# commit HEAD was at, a hash of the repo's state, and the time. The state hash tells a repo
-# this session changed from a repo that was merely dirty when the session started; the time
-# tells which reflog entries are the session's.
+# The change is the branch: everything since the merge-base with the default branch, which
+# is what the pull request and CI judge (diff_base). A pull, or a checkout of main after a
+# merge, moves the merge-base with it and counts for nothing. This replaced a walk of the
+# reflogs that undid "the session's own commits"; it needed a model of subagents pausing,
+# resuming and editing by shell, and kept breaking on the next case. The cost accepted:
+# commits made on the branch before this session count as changed too.
+#
+# The session's baseline for a repo, recorded when the session first touches it (its first
+# prompt, edit, or stop there), holds the commit HEAD was at and a hash of the repo's state.
+# The hash tells a repo this session changed from one that was merely dirty when it started;
+# the commit is the base on a repo without a default branch to measure from.
 #
 # List-file arguments are read with `cat /dev/null "$@"`: a bare `cat` with no arguments
 # would read the hook's stdin.
@@ -99,8 +103,7 @@ repo_state() {
   } | shasum -a 256 | cut -d ' ' -f 1
 }
 
-# This session's baseline record for root $1:
-# `<commit or empty tree><TAB><repo_state><TAB><unix time>`.
+# This session's baseline record for root $1: `<commit or empty tree><TAB><repo_state>`.
 baseline_file() {
   session_file "baseline-$(printf '%s' "$1" | shasum -a 256 | cut -c 1-32)"
 }
@@ -113,16 +116,7 @@ ensure_baseline() {
     return 0
   fi
   head="$(git -C "$root" rev-parse -q --verify HEAD)" || head="$EMPTY_TREE"
-  printf '%s\t%s\t%s\n' "$head" "$(repo_state "$root")" "$(date +%s)" >"$file"
-}
-
-# Unix time root $1's baseline was recorded: its third field, or the file's modification
-# time for a baseline written before the field existed.
-baseline_time() {
-  local file
-  file="$(baseline_file "$1")"
-  awk -F '\t' 'NF >= 3 { print $3; found = 1 } END { exit !found }' "$file" ||
-    perl -e 'print +(stat shift)[9]' "$file"
+  printf '%s\t%s\n' "$head" "$(repo_state "$root")" >"$file"
 }
 
 # The repo's default branch: origin's HEAD, else a local main or master, else nothing.
@@ -140,195 +134,24 @@ default_branch() {
   done
 }
 
-# Every reflog of git root $1's repository, one path per line: the HEAD of each worktree and
-# every ref. A commit made in a linked worktree (a subagent's) is logged only there and on
-# its branch, so reading one checkout's HEAD log would miss it once it is merged in.
-reflog_files() {
-  local common
-  common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)"
-  {
-    find "$common/logs" -type f 2>/dev/null
-    find "$common/worktrees" -path '*/logs/*' -type f 2>/dev/null
-  } || true
-}
-
-# Commits made in git root $1's repository at or after unix time $2 that HEAD contains,
-# newest first: the reflog entries, of any worktree or ref, that record a commit made here.
-# A commit, an amend or a hand-finished merge always counts; a cherry-pick, revert or rebase
-# step only when its commit was authored at or after $2, so replaying older work does not
-# count as writing it. Moves that only arrive at a commit (checkout, pull, fetch, push,
-# merge, reset, rebase start and finish) are not listed. Reflog times follow
-# GIT_COMMITTER_DATE. A commit in the same second as $2 counts: the error left is counting
-# too much, never too little. Fails when the repository keeps no reflog.
-commits_since() {
-  local root="$1" since="$2" logs file commit kind
-  logs="$(reflog_files "$root")"
-  if [[ -z "$logs" ]]; then
-    return 1
-  fi
-  # Reflog line: `<old> <new> <name> <email> <time> <zone><TAB><message>`.
-  while IFS= read -r file; do
-    cat "$file"
-  done <<<"$logs" | awk -F '\t' -v since="$since" '
-    {
-      n = split($1, field, " ")
-      if (field[n - 1] + 0 < since + 0) next
-      if ($2 ~ /^commit/) kind = "own"
-      else if ($2 ~ /^(cherry-pick|revert)/ ||
-        $2 ~ /^(rebase|pull --rebase)[^:]*\((pick|reword|edit|squash|fixup|continue)\)/)
-        kind = "replay"
-      else next
-      # An amend logs "own" and a later rebase of the same commit "replay": keep "own".
-      if (!(field[2] in seen) || kind == "own") seen[field[2]] = kind
-    }
-    END { for (c in seen) print c "\t" seen[c] }' |
-    while IFS=$'\t' read -r commit kind; do
-      git -C "$root" merge-base --is-ancestor "$commit" HEAD 2>/dev/null || continue
-      if [[ "$kind" == replay ]] &&
-        (($(git -C "$root" log -1 --format=%at "$commit") < since)); then
-        continue
-      fi
-      printf '%s\n' "$commit"
-    done | { git -C "$root" rev-list --no-walk=sorted --stdin 2>/dev/null || true; }
-}
-
-# A commit in root $1 whose tree is tree-ish $2. merge-tree and diff take commits; the fixed
-# metadata makes the same tree give the same commit object each time. The trees and blobs
-# the undo writes are new for each new HEAD, and `git gc` prunes them all, since nothing
-# references them.
-tree_commit() {
-  GIT_AUTHOR_NAME=rust-hooks GIT_AUTHOR_EMAIL=rust-hooks GIT_AUTHOR_DATE='@0 +0000' \
-    GIT_COMMITTER_NAME=rust-hooks GIT_COMMITTER_EMAIL=rust-hooks \
-    GIT_COMMITTER_DATE='@0 +0000' \
-    git -C "$1" commit-tree "$2^{tree}" -m 'rust-hooks diff base' </dev/null
-}
-
-# Tree that undoes a commit in root $1: the three-way merge of base $2 (the commit), ours $3
-# (the tree so far) and theirs $4 (what the commit was made from), every conflict settled
-# for theirs. A later change to the same lines or files would otherwise keep the undone
-# lines in the base, between markers or in a file kept whole, and hide them; settling for
-# theirs removes them, at the cost of counting the later change there too. -X theirs
-# settles conflicting hunks; a conflict it cannot (modify/delete, rename, file/directory)
-# takes theirs' version of the whole path.
-merge_trees() {
-  local root="$1" theirs="$4" scratch code=0 tree path entry mode oid
-  scratch="$(mktemp -d)"
-  git -C "$root" merge-tree --write-tree -z --name-only -X theirs --merge-base="$2" \
-    "$(tree_commit "$root" "$3")" "$(tree_commit "$root" "$theirs")" >"$scratch/out" ||
-    code=$?
-  if ((code > 1)); then
-    rm -f "$scratch/out"
-    rmdir "$scratch"
-    return 1
-  fi
-  # -z output: the tree, then each conflicted path, each ended by NUL; an empty one ends
-  # the list.
-  {
-    IFS= read -r -d '' tree
-    if ((code == 1)); then
-      GIT_INDEX_FILE="$scratch/index" git -C "$root" read-tree "$tree"
-      while IFS= read -r -d '' path && [[ -n "$path" ]]; do
-        GIT_INDEX_FILE="$scratch/index" git -C "$root" ls-files -z -- "$path" |
-          GIT_INDEX_FILE="$scratch/index" git -C "$root" update-index -z --force-remove \
-            --stdin
-        git -C "$root" ls-tree -r -z "$theirs^{tree}" -- "$path" |
-          while IFS= read -r -d '' entry; do
-            # `<mode> <type> <oid><TAB><path>`
-            read -r mode _ oid <<<"${entry%%$'\t'*}"
-            GIT_INDEX_FILE="$scratch/index" git -C "$root" update-index --add --cacheinfo \
-              "$mode,$oid,${entry#*$'\t'}"
-          done
-      done
-      tree="$(GIT_INDEX_FILE="$scratch/index" git -C "$root" write-tree)"
-    fi
-  } <"$scratch/out"
-  rm -f "$scratch/out" "$scratch/index"
-  rmdir "$scratch"
-  printf '%s' "$tree"
-}
-
-# Tree-ish commit $2 of root $1 was made from: its parent; for a merge, the tree git's own
-# merge of its first two parents gives, so that undoing the merge undoes only what was
-# written by hand (an octopus merge's further parents count as written); the empty tree for
-# a root commit. An amend counts whole, so amending a commit from before the session counts
-# that commit too.
-made_from() {
-  local root="$1" commit="$2" out code=0
-  if git -C "$root" rev-parse -q --verify "$commit^2" >/dev/null; then
-    out="$(git -C "$root" merge-tree --write-tree "$commit^1" "$commit^2")" || code=$?
-    ((code <= 1)) || return 1
-    head -n 1 <<<"$out"
-  elif git -C "$root" rev-parse -q --verify "$commit^1" >/dev/null; then
-    printf '%s' "$commit^1"
-  else
-    printf '%s' "$EMPTY_TREE"
-  fi
-}
-
-# HEAD of git root $1 with the commits on stdin (newest first) undone, as a commit; HEAD
-# itself when there are none. Fails when an undo fails.
-undo_commits() {
-  local root="$1" head base commit from
-  head="$(git -C "$root" rev-parse HEAD)"
-  base="$head"
-  while IFS= read -r commit; do
-    if [[ -z "$commit" ]]; then
-      continue
-    fi
-    from="$(made_from "$root" "$commit")" || return 1
-    base="$(merge_trees "$root" "$commit" "$base" "$from")" || return 1
-  done
-  if [[ "$base" == "$head" ]]; then
-    printf '%s' "$base"
-  else
-    tree_commit "$root" "$base"
-  fi
-}
-
-# HEAD of git root $1 with the commits made at or after unix time $2 undone (commits_since),
-# as a commit, cached in session file $3. The cache holds while HEAD and the reflogs are
-# unchanged and the cached commit still exists: nothing references it, so `git gc` may
-# prune it. Fails, saying why on stderr, when the repository keeps no reflog or an undo
-# fails.
-base_since() {
-  local root="$1" since="$2" cache="$3" key commits base file
-  key="$since $(git -C "$root" rev-parse HEAD) $(reflog_files "$root" |
-    while IFS= read -r file; do wc -c <"$file"; done | awk '{ n += $1 } END { print n + 0 }')"
-  if [[ -f "$cache" && "$(cut -f 1 "$cache")" == "$key" ]]; then
-    base="$(cut -f 2 "$cache")"
-    if git -C "$root" cat-file -e "$base^{commit}" 2>/dev/null; then
-      printf '%s' "$base"
-      return 0
-    fi
-  fi
-  if ! commits="$(commits_since "$root" "$since")"; then
-    internal_error "$root keeps no reflog, so its own commits cannot be told from others'"
-    return 1
-  fi
-  if ! base="$(undo_commits "$root" <<<"$commits")"; then
-    internal_error "could not undo this session's commits in $root"
-    return 1
-  fi
-  printf '%s\t%s\n' "$key" "$base" >"$cache"
-  printf '%s' "$base"
-}
-
-# Commit (or empty tree) that git root $1's changes are measured from: HEAD with the
-# commits this session made undone (base_since the baseline). Commits that only arrived
-# stay in the base, among them the session's own work squash- or rebase-merged on GitHub
-# and pulled, since those are new commits made elsewhere; a merge commit keeps them
-# counted. When the walk fails (no reflog, an undo that fails): the baseline while it is
-# an ancestor of HEAD; after a rebase or reset moved it away, the merge-base of HEAD with
-# the default branch; else HEAD.
+# Commit (or empty tree) that git root $1's changes are measured from: the merge-base of
+# HEAD with the default branch. With a remote default branch (origin/main) that is the base
+# even when it is HEAD itself: on an up-to-date main only uncommitted work counts, and a pull
+# adds nothing. A local default branch has no remote to pull from, so when the merge-base is
+# HEAD (the session commits on main itself) the session's baseline is used while it is an
+# ancestor of HEAD, and commits made before the stop still count. Else HEAD.
 diff_base() {
-  local root="$1" base branch merge_base
+  local root="$1" branch base head
   ensure_baseline "$root"
-  if ! git -C "$root" rev-parse -q --verify HEAD >/dev/null; then
+  if ! head="$(git -C "$root" rev-parse -q --verify HEAD)"; then
     printf '%s' "$EMPTY_TREE"
     return 0
   fi
-  if base_since "$root" "$(baseline_time "$root")" \
-    "$(session_file "diff-base-$(printf '%s' "$root" | shasum -a 256 | cut -c 1-32)")"; then
+
+  branch="$(default_branch "$root")"
+  if [[ -n "$branch" ]] && base="$(git -C "$root" merge-base HEAD "$branch" 2>/dev/null)" &&
+    { [[ "$branch" == */* ]] || [[ "$base" != "$head" ]]; }; then
+    printf '%s' "$base"
     return 0
   fi
 
@@ -338,12 +161,7 @@ diff_base() {
     printf '%s' "$base"
     return 0
   fi
-  branch="$(default_branch "$root")"
-  if [[ -n "$branch" ]] && merge_base="$(git -C "$root" merge-base HEAD "$branch")"; then
-    printf '%s' "$merge_base"
-  else
-    git -C "$root" rev-parse HEAD
-  fi
+  printf '%s' "$head"
 }
 
 # True when this session changed root $1: it recorded a path there (list files $2...), or,
@@ -458,40 +276,21 @@ fingerprint() {
   done | shasum -a 256 | cut -d ' ' -f 1
 }
 
-# Review state of root $1: the directory of snapshots taken at its last rust-style-reviewer
-# run. Its existence means a review happened.
+# Review record of git root $1's repository: a directory of snapshots of the .rs files as the
+# last rust-style-reviewer run saw them. One per repository (its common git directory), not
+# per worktree or session: a review in a subagent's worktree, or in an earlier session, covers
+# the same files in every checkout.
 review_dir() {
-  printf '%s/review-%s' "$RUST_HOOKS_STATE" "$(printf '%s' "$1" | shasum -a 256 | cut -c 1-32)"
-}
-
-# `path<TAB>snapshot` for every path on stdin: its snapshot file in the review state of root
-# $1, keyed by a hash of the path. One perl process for all paths: a shasum per path takes
-# tens of seconds over thousands of files.
-review_snapshots() {
-  REVIEW_DIR="$(review_dir "$1")" perl -MDigest::SHA=sha256_hex -ne \
-    'chomp; print "$_\t$ENV{REVIEW_DIR}/", substr(sha256_hex($_), 0, 32), "\n"'
-}
-
-# File holding the unix time of the last rust-style-reviewer run in git root $1's
-# repository. One per repository, not per worktree: a review in a subagent's worktree covers
-# the commits made before it in every checkout of the repository.
-review_time_file() {
   local common
   common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)"
-  printf '%s/review-time-%s' "$RUST_HOOKS_STATE" \
+  printf '%s/review-%s' "$RUST_HOOKS_STATE" \
     "$(printf '%s' "$common" | shasum -a 256 | cut -c 1-32)"
 }
 
-# Commit git root $1's changes since the last rust-style-reviewer run are measured from:
-# HEAD with the commits made after the review undone (base_since). Nothing when no review
-# of the repository was recorded, or the walk fails.
-review_base() {
-  local root="$1" file
-  file="$(review_time_file "$root")"
-  if [[ ! -f "$file" ]]; then
-    return 0
-  fi
-  base_since "$root" "$(cat "$file")" \
-    "$(session_file "review-base-$(printf '%s' "$root" | shasum -a 256 | cut -c 1-32)")" ||
-    true
+# `path<TAB>snapshot` for every repo-relative path on stdin: its snapshot file in the review
+# record of root $1, keyed by a hash of the path. One perl process for all paths: a shasum
+# per path takes tens of seconds over thousands of files.
+review_snapshots() {
+  REVIEW_DIR="$(review_dir "$1")" perl -MDigest::SHA=sha256_hex -ne \
+    'chomp; print "$_\t$ENV{REVIEW_DIR}/", substr(sha256_hex($_), 0, 32), "\n"'
 }

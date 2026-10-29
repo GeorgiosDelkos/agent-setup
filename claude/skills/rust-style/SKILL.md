@@ -60,22 +60,24 @@ opted in (`baseline = true`, REPO-1); elsewhere, follow the repo's own tests and
 - **Edit hook**: rustfmt on every `.rs` write (default style, edition from `Cargo.toml`);
   blocks the first Rust edit until this skill is loaded, and each topic edit until its
   topic file is read.
-- **Stop hook** (`check-on-stop.sh`): finds what this session changed (files the edit
-  tools recorded plus git changes since the session's baseline, so shell edits and commits
-  count too) and runs clippy over the changed packages and their workspace dependents with
-  the repo's own lint table and `clippy.toml`, plus a minimal set (leftover `dbg!`/`todo!`,
-  undocumented `unsafe`). It never injects the house template, so what it checks is what
-  `cargo clippy` and CI check; an opted-in repo commits the template (REPO-1) and is told
-  when it has not. In an opted-in repo it then runs `house-check` (the line-level rules
-  tagged `[check]` below) and the column limit. Compiler errors in the checked packages block; lint and
-  house-check findings block only on lines you changed, so touching a legacy file does not
-  mean rewriting it. It blocks once per change with the findings.
+- **Stop hook** (`check-on-stop.sh`): finds what changed in the repos this session touched
+  (files the edit tools recorded plus the branch's git changes since the merge-base with
+  the default branch, so shell edits and commits count too) and runs clippy over the
+  changed packages and their workspace dependents with the repo's own lint table and
+  `clippy.toml`, plus a minimal set (leftover `dbg!`/`todo!`, undocumented `unsafe`). It
+  never injects the house template, so what it checks is what `cargo clippy` and CI check;
+  an opted-in repo commits the template (REPO-1) and is told when it has not. In an
+  opted-in repo it then runs `house-check` (the line-level rules tagged `[check]` below)
+  and the column limit. Compiler errors in the checked packages block; lint and
+  house-check findings block only on lines the branch changed, so touching a legacy file
+  does not mean rewriting it. It blocks once per change with the findings.
 - **house-check escape**: a finding that is wrong for one line is silenced on that line (or
   the line above) with `// house-check: allow(UNS-SPELL): <reason>`. The reason is
   required; an empty one is itself a finding.
-- **Review gate**: once the repo's Rust changes reach 20 lines since the session's baseline
-  or since the last review, the main agent runs the `rust-style-reviewer` agent, waits for it to finish, and
-  fixes its findings before stopping.
+- **Review gate**: `gh pr ready`, and `gh pr create` without `--draft`, are blocked while
+  the pull request has 20 or more lines of Rust that no `rust-style-reviewer` run has seen.
+  Run the reviewer on the branch, wait for it to finish, fix its findings, push, then
+  retry. Small fixes after a review do not need another one.
 - **Repo layer**: `templates/` holds the lint table, `clippy.toml`, `deny.toml`, the
   library crate header, `ci/` workflows (from `jonhoo/rust-ci-conf` plus house gates) and
   a prek config. `topics/repo.md` says how to adopt them. Never apply them without asking:
