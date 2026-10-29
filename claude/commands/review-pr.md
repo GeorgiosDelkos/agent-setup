@@ -1,64 +1,69 @@
-# Review and Fix PR
+---
+description: Review a GitHub PR with fresh-context agents, post the review, fix the findings, and push.
+argument-hint: <pr-number>
+---
 
-@description Review an existing PR with parallel agents, fix findings, and push.
-@arguments $PR_NUMBER: GitHub PR number to review and fix
+# Review and fix PR #$ARGUMENTS
 
-Read PR #$PR_NUMBER thoroughly using `gh pr view`. Understand the
-full context: description, linked issues, commit history, and the
-diff against the base branch. Check out the PR branch locally.
+With no PR number given, use the current branch's PR (`gh pr view --json number`), and stop
+and ask if there is none.
 
-Execute every step below sequentially. Do not stop or ask for
-confirmation at any step.
+Read PR #$ARGUMENTS with `gh pr view $ARGUMENTS` and `gh pr diff $ARGUMENTS`: the
+description, linked issues, commit history, and the diff against its base branch. Check out
+the PR branch locally (`gh pr checkout $ARGUMENTS`).
+
+Run the steps below in order without stopping between them. The rules in
+`~/.config/agents/AGENTS.md` still hold: stop and ask before an interface, data model, or
+architecture change the PR did not already make, and before any destructive write. Fixing
+and pushing are writes to someone else's branch unless the PR is the user's own (its author
+is `gh api user -q .login`) or `fix-issue` opened it: for anyone else's PR, stop after
+posting the review (step 2) and ask before fixing.
 
 ## 1. Review
 
-Use `/compound-engineering:ce-code-review` to perform a full
-multi-agent code review of PR #$PR_NUMBER. Review against the design
-principles in `~/.config/agents/AGENTS.md` first: could it be
-simpler, are the data structures right for the access pattern, does
-the call site read well. Unneeded complexity is at least P2.
-Produce a list of
-findings ranked by severity (P1 = blocks merge, P2 = important,
-P3 = nice to have, P4 = informational).
+Review with agents that have not seen your reasoning, so the review is not anchored on it:
 
-## 2. Fix findings
+- One general-purpose agent per independent area of the diff (one is enough for a small PR).
+  Give each the PR number, the files to read, and the review order from `AGENTS.md`
+  (design principles first: could it be simpler, are the data structures right for the
+  access pattern, does the call site read well; then correctness, quality, tests,
+  performance). Do not give it your view of the change.
+- The `rust-style-reviewer` agent as well when the diff touches Rust.
 
-Address all P1-P3 findings. For each finding, either:
+Verify every finding yourself against the code before keeping it. Rank the survivors:
+P1 blocks merge, P2 important, P3 nice to have, P4 informational. Unneeded complexity is at
+least P2.
 
-- **Fix it** -- apply the change, or
-- **Dismiss it** -- explain why it's a false positive or not worth
-  the churn (e.g. a stylistic disagreement or an impossible edge
-  case). Document the reasoning inline.
+## 2. Post the review
 
-P4 findings are informational -- note them but do not fix unless
-trivial.
+Post the findings on the PR before fixing anything (`gh pr comment $ARGUMENTS`): severity,
+`file:line`, the problem, and the fix.
 
-## 3. Verify
+## 3. Fix findings
 
-Run the project's full quality pipeline:
+Address every P1 to P3 finding:
 
-1. Build (compile/bundle if the project has a build step)
-2. Run the full test suite -- iterate on failures until green
-3. Run linting, formatting, and type-checking -- fix any issues
+- **Fix it**, or
+- **Dismiss it**, with the reason: a false positive, or churn not worth it (a stylistic
+  disagreement, an impossible edge case).
 
-Refer to the project's CLAUDE.md or package.json/Makefile/etc.
-for the correct commands.
+P4 findings are noted, and fixed only when the fix is small and makes the code clearer.
 
-## 4. Commit and push
+## 4. Verify
 
-- Commit the fixes as a separate commit (do not squash into the
-  original -- preserve review history)
-- Use commit message: `fix: resolve code review findings for
-  PR #$PR_NUMBER`
-- Push the branch (regular push, not force-push)
-- Delete any todo files in `todos/` that were created by the
-  review and are now resolved
+Run the project's quality pipeline: build, the full test suite (iterate until green), then
+lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAUDE.md`,
+`Makefile`, `package.json`, or CI workflows.
 
-## 5. Post summary
+## 5. Commit and push
 
-Add a comment on PR #$PR_NUMBER summarizing what was done:
+- Commit the fixes on top of the PR, never squashed into it, so the review history stays.
+  Subject in the imperative, at most 72 characters; the body maps each finding to its fix.
+- Push the branch with a regular push, never a force push.
+- If the PR is a draft you opened, mark it ready (`gh pr ready $ARGUMENTS`), which starts
+  CI on the reviewed head.
 
-- Total findings by severity (e.g. "3 P2, 5 P3")
-- How many were fixed vs dismissed (with brief reasoning for
-  any dismissals)
-- Confirmation that the quality pipeline passes
+## 6. Post the fixes
+
+Comment on PR #$ARGUMENTS with a "Fixes" list mapping each finding to its commit, or to
+the reason it was dismissed, and confirm that the quality pipeline passes.
