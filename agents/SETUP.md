@@ -276,8 +276,9 @@ stopped after the clone is finished by the next one.
   HEAD only). `install.sh` says when this is needed.
 - The history was rewritten once, on 2026-10-29, to take company content out of the public
   repo. A git directory from before that has unrelated history: run the same `fetch` and
-  mixed `reset`, never `pull`, which would delete the now-untracked local-layer files from
-  the synced folder and so from every machine.
+  mixed `reset`. Never `pull` (it fails, or stops in a conflicted rebase), and never
+  `reset --hard` or `checkout`, which delete the files tracked before the rewrite (the
+  company skills, now in the local layer) from the synced folder and so from every machine.
 
 ## Maintenance
 

@@ -108,6 +108,23 @@ setup_air() {
   merge_json "$shared" "$air_dir/acp.json"
 }
 
+# True when the folder's `.git` pointer file names git directory $1. Read from the file, not
+# from git, so it holds before that directory exists (a first run, or one trashed to start
+# over), and compared as physical paths, since a symlink in $HOME would make equal paths
+# differ as strings.
+points_to() {
+  local want="$1" pointer here there
+  pointer="$(sed -n 's/^gitdir: //p' "$SETUP_DIR/.git")"
+  if [[ "$pointer" != /* ]]; then
+    pointer="$SETUP_DIR/$pointer"
+  fi
+  mkdir -p "$(dirname "$want")"
+  # A pointer into a missing directory resolves to nothing, which matches no git directory.
+  here="$(cd "$(dirname "$pointer")" 2>/dev/null && pwd -P || true)/$(basename "$pointer")"
+  there="$(cd "$(dirname "$want")" && pwd -P)/$(basename "$want")"
+  [[ "$here" == "$there" ]]
+}
+
 # History lives in GitHub. The git directory stays outside this synced folder, because a .git
 # directory synced between machines can be corrupted by concurrent writes. The folder's `.git`
 # file points to ~/.local/share/agent-setup.git by absolute path: the sync never carries that
@@ -122,8 +139,7 @@ setup_git() {
   fi
   # A regular clone (a .git directory, or a pointer to another git directory) already has
   # its history; setting up the shared git directory there would reset the clone's index.
-  if [[ -d "$SETUP_DIR/.git" ]] || { [[ -e "$SETUP_DIR/.git" ]] &&
-    [[ "$(git -C "$SETUP_DIR" rev-parse --absolute-git-dir 2>/dev/null)" != "$git_dir" ]]; }; then
+  if [[ -d "$SETUP_DIR/.git" ]] || { [[ -f "$SETUP_DIR/.git" ]] && ! points_to "$git_dir"; }; then
     echo "skip    git history ($SETUP_DIR is a clone with its own git directory)"
     return 0
   fi
