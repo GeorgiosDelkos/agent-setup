@@ -540,9 +540,9 @@ A suppression whose reason is the design (LNT-1):
 ```rust
 #[expect(
     clippy::cast_possible_truncation,
-    reason = "the index is below `capacity`, which `new` caps at u32::MAX"
+    reason = "only the low bits of the hash pick the bucket"
 )]
-let slot = index as u32;
+let bucket = hash as u32 & self.mask;
 ```
 
 ## Deep reference (`rfr-*` = *Rust for Rustaceans*)

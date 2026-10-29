@@ -25,7 +25,7 @@ keeps the core rules.
   (`templates/low-level/Cargo.lints.toml` denies or warns on them; tests may, by
   `clippy.toml`). Replaces PAN-2, PAN-3 and PAN-6 in this crate:
   - misuse and misconfiguration return an error from the constructor or `checked()`
-    (`ConfigError::EntryAboveTotal { entry, total }`), never an `assert!`;
+    (`ConfigError::ZeroCapacity`), never an `assert!`;
   - an invariant is made a type or a control-flow fact the compiler checks (a slice pattern,
     `let ... else` returning an error, a newtype built only by its validator), not an
     `expect` that states it;
@@ -42,8 +42,8 @@ keeps the core rules.
   constructors that take it call `checked` themselves. Replaces API-6 in this crate. Private
   fields let a later release add a cap without breaking callers.
 - **LLV-4** Pure getters carry a bare `#[must_use]` (`must_use_candidate` stays on); types
-  whose drop has an effect carry `#[must_use = "dropping the Applier releases the store's
-  writer claim"]`. Extends API-8.
+  whose drop has an effect carry `#[must_use = "dropping the Writer releases the writer
+  claim"]`. Extends API-8.
 - **LLV-5** Hot read paths are measured and shaped: the common case is `#[inline]` and
   takes no lock, the slow case is a separate `#[cold] #[inline(never)]` function, and the
   docs say which path takes which lock. Work that can run user code (`Drop` of `K`/`V`)
@@ -61,8 +61,8 @@ keeps the core rules.
 
 ## Tests
 
-- **LLV-8** Tests use std only. Randomised tests run a seeded in-tree RNG (`src/test_rng.rs`,
-  `tests/support/fuzz.rs`) against a simple model (`BTreeMap`), print the seed on failure, and
+- **LLV-8** Tests use std only. Randomised tests run a seeded in-tree RNG (a small test-only
+  module) against a simple model (`BTreeMap`), print the seed on failure, and
   are sized so Miri finishes in seconds. Replaces the proptest and arbtest suggestions of
   TST-7 and TST-8; the libFuzzer targets live in the excluded `fuzz/` workspace. Helpers in
   `tests/` that unwrap take a file-level `#![allow(clippy::expect_used, clippy::panic, reason
@@ -81,6 +81,7 @@ Written for this topic, not taken from a crate.
 A hit that takes no lock, and an outlined miss:
 
 ```rust
+#[inline]
 fn get(&mut self) -> &Snapshot {
     let current = self.shared.version.load(Ordering::Acquire);
     if current != self.seen {
