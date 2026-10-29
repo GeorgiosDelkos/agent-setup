@@ -54,7 +54,7 @@ step shfmt shfmt -d -i 2 "${shell_files[@]}"
 step "perl syntax" perl_syntax
 step "100 columns" long_lines
 step actionlint actionlint "${workflow_files[@]}"
-step zizmor zizmor --offline --quiet "${workflow_files[@]}"
+step zizmor zizmor --offline --quiet "${workflow_files[@]}" "$SETUP_DIR/.github/dependabot.yml"
 if [[ "${1:-}" != --quick ]]; then
   step "hook tests" bash "$HOOKS/rust/tests/run.sh"
 fi
