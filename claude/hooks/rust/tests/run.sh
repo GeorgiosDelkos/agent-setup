@@ -584,6 +584,84 @@ commit_all "$GATE" "unreviewed"
 expect "gate: unreviewed work on the stacked branch blocked" 2 review-gate.sh \
   "$(pr_cmd v2 "$GATE" 'gh pr create --base wt-branch --title x')" "src/other.rs (30 lines)"
 
+# --base is honoured even though `gh pr create` has no PR argument: measured from the default
+# branch the PR would show the 30 unreviewed lines of its base as well.
+GB="$WORK/gate-base"
+new_cloned_repo "$GB"
+git -C "$GB" checkout -q -b lower
+lines "$GB/src/lower.rs" 0 30
+commit_all "$GB" "lower PR, not reviewed here"
+git -C "$GB" push -q -u origin lower
+git -C "$GB" checkout -q -b upper
+lines "$GB/src/upper.rs" 0 3
+commit_all "$GB" "upper PR"
+expect "gate: --base measured from that branch, not the default" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --base lower --fill')"
+expect "gate: --base=branch too" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --base=lower --fill')"
+expect "gate: without --base the default branch counts" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --fill')" "src/lower.rs (30 lines)"
+
+# Quoted text and heredoc bodies are not commands; wrappers and skipped calls do not hide one.
+expect "gate: gh pr ready in a commit message passes" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" "git commit -m 'note; gh pr ready after review'")"
+expect "gate: gh pr ready in a heredoc body passes" 0 review-gate.sh \
+  "$(pr_cmd v3 "$GB" $'gh pr comment 1 --body-file - <<\'X\'\ngh pr ready\nX')"
+expect "gate: a quoted -d in the title is not --draft" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" "gh pr create --title 'Drop the -d flag' --body x")" "rust-style-reviewer"
+expect "gate: a skipped call does not end the scan" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'gh pr create --draft --fill && gh pr create --fill')" "src/lower.rs"
+expect "gate: an env prefix still runs gh" 2 review-gate.sh \
+  "$(pr_cmd v3 "$GB" 'GH_TOKEN=x command gh pr create --fill')" "src/lower.rs"
+mkdir -p "$WORK/dir with space"
+expect "gate: a quoted cd target is followed" 2 review-gate.sh \
+  "$(pr_cmd v3 "$WORK/dir with space" "cd \"$GB\" && gh pr create --fill")" "src/lower.rs"
+
+# A renamed file is reviewed like any other: after the reviewer, only its content counts.
+GR="$WORK/gate-rename"
+new_cloned_repo "$GR"
+lines "$GR/src/old.rs" 0 40
+commit_all "$GR" "old file"
+git -C "$GR" push -q origin main
+git -C "$GR" checkout -q -b rename
+git -C "$GR" mv src/old.rs src/new.rs
+commit_all "$GR" "rename"
+expect "gate: an unreviewed rename counts" 2 review-gate.sh "$(pr_cmd v4 "$GR" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop v4 "$GR" '{"agent_id": "r4", "agent_type": "rust-style-reviewer"}')"
+expect "gate: a reviewed rename passes" 0 review-gate.sh "$(pr_cmd v4 "$GR" 'gh pr ready')"
+
+# An old snapshot cannot charge a PR for more lines than its own diff.
+GS="$WORK/gate-stale"
+new_cloned_repo "$GS"
+git -C "$GS" checkout -q -b first
+lines "$GS/src/x.rs" 0 25
+commit_all "$GS" "first"
+run_hook review-done.sh \
+  "$(subagent_stop v5 "$GS" '{"agent_id": "r5", "agent_type": "rust-style-reviewer"}')"
+git -C "$GS" checkout -q main
+lines "$GS/src/x.rs" 0 60
+commit_all "$GS" "others' work, merged"
+git -C "$GS" push -q origin main
+git -C "$GS" checkout -q -b second
+lines "$GS/src/x.rs" 60 1
+commit_all "$GS" "second"
+expect "gate: a stale snapshot does not exceed the PR's own diff" 0 review-gate.sh \
+  "$(pr_cmd v5 "$GS" 'gh pr ready')"
+
+# Many files: one pass over the snapshots, and a long listing still blocks (exit 2, not 141).
+GM="$WORK/gate-many"
+new_cloned_repo "$GM"
+git -C "$GM" checkout -q -b many
+long="$(printf 'very_long_module_name_%.0s' {1..8})"
+for ((n = 0; n < 1200; n++)); do printf 'pub fn g() {}\n' >"$GM/src/${long}_$n.rs"; done
+commit_all "$GM" "many files"
+started="$(date +%s)"
+expect "gate: 1200 unreviewed files block" 2 review-gate.sh "$(pr_cmd v6 "$GM" 'gh pr ready')" \
+  "changes 1200 lines"
+elapsed=$(($(date +%s) - started))
+check "gate: 1200 files in under 20 s (took ${elapsed}s)" "$([[ $elapsed -lt 20 ]] && echo yes)"
+
 SETTINGS="$HOOKS/../../settings.json"
 check "settings: the review gate runs on Bash, not on Stop" "$(jq -e '
   ([.hooks.PreToolUse[] | select(.matcher == "Bash") | .hooks[].command

@@ -119,15 +119,17 @@ ensure_baseline() {
   printf '%s\t%s\n' "$head" "$(repo_state "$root")" >"$file"
 }
 
-# The repo's default branch: origin's HEAD, else a local main or master, else nothing.
+# The repo's default branch: origin's HEAD, else origin's main or master, else a local main or
+# master, else nothing. origin comes first: a repo pushed after `git init` has no origin/HEAD,
+# and its local main may be stale.
 default_branch() {
   local root="$1" branch
   if branch="$(git -C "$root" symbolic-ref -q --short refs/remotes/origin/HEAD)"; then
     printf '%s' "$branch"
     return 0
   fi
-  for branch in main master; do
-    if git -C "$root" rev-parse -q --verify "refs/heads/$branch" >/dev/null; then
+  for branch in origin/main origin/master main master; do
+    if git -C "$root" rev-parse -q --verify "$branch^{commit}" >/dev/null; then
       printf '%s' "$branch"
       return 0
     fi
@@ -199,7 +201,7 @@ changed_files() {
   shift 2
   {
     if is_git_root "$root"; then
-      git -C "$root" -c core.quotepath=off diff --name-only "$base" --
+      git -C "$root" -c core.quotepath=off diff --name-only --no-renames "$base" --
       git -C "$root" -c core.quotepath=off ls-files --others --exclude-standard
     fi | awk -v root="$root/" '{ print root $0 }'
     cat /dev/null "$@" 2>/dev/null | awk -v root="$root/" 'index($0, root) == 1' || true
@@ -287,10 +289,12 @@ review_dir() {
     "$(printf '%s' "$common" | shasum -a 256 | cut -c 1-32)"
 }
 
-# `path<TAB>snapshot` for every repo-relative path on stdin: its snapshot file in the review
-# record of root $1, keyed by a hash of the path. One perl process for all paths: a shasum
-# per path takes tens of seconds over thousands of files.
+# Each line on stdin with `<TAB>snapshot` appended: the snapshot file, in the review record of
+# root $1, of the repo-relative path that is the line's last tab-separated field, keyed by a
+# hash of the path. One perl process for all paths: a shasum per path takes tens of seconds
+# over thousands of files.
 review_snapshots() {
   REVIEW_DIR="$(review_dir "$1")" perl -MDigest::SHA=sha256_hex -ne \
-    'chomp; print "$_\t$ENV{REVIEW_DIR}/", substr(sha256_hex($_), 0, 32), "\n"'
+    'chomp; my $path = (split /\t/)[-1];
+    print "$_\t$ENV{REVIEW_DIR}/", substr(sha256_hex($path), 0, 32), "\n"'
 }
