@@ -248,7 +248,7 @@ The steps are rule REPO-1 in `rust-style/topics/repo.md`. In short:
 
 ## Version control
 
-History lives in the private repo https://github.com/GeorgiosDelkos/agent-setup; Sync
+History lives in the repo https://github.com/GeorgiosDelkos/agent-setup; Sync
 only carries the working files between machines. The git directory is outside the synced
 folder, at `~/.local/share/agent-setup.git`, because a `.git` directory synced between
 machines can be corrupted by concurrent writes. `AgentSetup/.git` is a one-line file,
@@ -269,9 +269,11 @@ stopped after the clone is finished by the next one.
   behind the last fetched `origin/main`. Tools that install into `~/.claude/skills/` write
   into the synced folder too; such a skill shows up there as untracked until it is committed
   or removed.
-- On a machine where the synced files arrived before its git directory saw the commits,
-  `git fetch && git status` shows them as matching once `git pull` runs; the content is
-  already there.
+- On every other machine the files arrive through the sync while its git directory still
+  points at the old commit, and `git pull` refuses to overwrite them. Sync the git directory
+  without touching the files: `git -C ~/Synced-Storage/AgentSetup fetch`, then
+  `git -C ~/Synced-Storage/AgentSetup reset -q origin/main` (a mixed reset: index and
+  HEAD only). `install.sh` says when this is needed.
 
 ## Maintenance
 
