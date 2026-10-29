@@ -106,7 +106,8 @@ between the lines* (Rust Munich 2026).
 
 - Behavior changes need tests. Test behavior, not implementation.
 - Cover edges and errors. Mock only boundaries (slow, external, non-deterministic).
-- Break the code once to confirm the test fails.
+- Break the code once to confirm the test fails. For logic changes, run the language's
+  mutation tool over the diff (the language skill names it) and kill or explain survivors.
 - Property tests for parsers, serialization, and algorithms.
 - Docs, formatting, and pure renames need no new tests.
 
@@ -118,9 +119,11 @@ between the lines* (Rust Munich 2026).
 - Open PRs as drafts (`gh pr create --draft`). Post the review, push its fixes, then
   `gh pr ready`. CI written to `gh-actions-style` skips drafts, so the ready run is the one
   that counts; elsewhere the draft still runs CI.
-- Every PR I open gets its review posted ON the PR (`gh pr comment`: findings, severity,
-  file:line) and every finding fixed and pushed, with a "Fixes" comment mapping finding to
-  commit. A review only in my report, or a bot comment, does not count. A PR is ready to
+- Every PR I open gets a review from an agent with fresh context, given the diff and the
+  task but not my reasoning, posted ON the PR (`gh pr comment`: findings, severity,
+  file:line). Each finding is fixed and pushed, or dismissed with its reason on the PR; a
+  "Fixes" comment maps each one to its commit or reason. A review only in my report, or a
+  bot comment, does not count. A PR is ready to
   merge only when review, fixes, and green CI are all on GitHub. Subagents follow this too.
 - No Co-Authored-By or AI attribution. Use the user's git identity.
 - Delete with `trash`, never `rm -rf`.

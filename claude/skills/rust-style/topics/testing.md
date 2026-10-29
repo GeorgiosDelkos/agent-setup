@@ -55,6 +55,16 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
 
   [house: parsing tests alone miss how real logs break]
 
+## Test strength
+
+- **TST-19** A test suite is judged by the bugs it catches, not by coverage: coverage says a
+  line ran, not that a wrong result would fail a test. Before calling a change tested, run
+  `cargo mutants --in-diff <diff>` over it (`git diff main.. > /tmp/x.diff`) and kill or
+  explain every missed mutant: add the assertion that fails, or say why the mutant is
+  equivalent. `templates/ci/mutants.yml` runs the same check on each PR; keep it unless the
+  suite takes more than a few minutes. [house: line coverage passes tests that assert
+  nothing; mutation testing does not]
+
 ## Golden files and fixtures
 
 - **TST-10** Output-heavy code is tested against checked-in expected files, regenerated

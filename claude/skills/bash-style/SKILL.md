@@ -13,6 +13,12 @@ Global rules live in `~/.config/agents/AGENTS.md`. This skill adds only shell ru
 - Quote every expansion. Use `"$@"`, never `$*`.
 - Fix every shellcheck finding. If one can't be fixed, use an inline
   `# shellcheck disable=SCxxxx` with the reason on the same line.
+- `[[ ]]` over `[ ]`, `local` for every function variable, `"$(...)"` over backticks.
+- Temporary files in `mktemp -d`, removed by a `trap '...' EXIT` set right after it, so an
+  early exit still cleans up.
 - Delete with `trash`, never `rm -rf`.
+- A script with logic beyond a straight line of commands gets tests: `bats-core` cases that
+  run it against fixtures in a temporary directory and assert on exit code, stdout, and the
+  files it leaves. Lint and format checks are not tests.
 - If a script grows past roughly 100 lines or needs real data structures, propose
   rewriting it in Python (uv script) or Rust.

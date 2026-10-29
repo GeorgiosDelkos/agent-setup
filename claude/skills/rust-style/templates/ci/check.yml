@@ -1,5 +1,5 @@
 # Copy to .github/workflows/check.yml. Derived from jonhoo/rust-ci-conf @ de512da1e85b with
-# house additions (rust-style SYNTHESIS.md section 5.3). Runs whenever a PR is opened or updated,
+# house additions. Runs whenever a PR is opened or updated,
 # or a commit is pushed to main:
 # - fmt: checks that the code is formatted according to rustfmt
 # - clippy: no warnings on stable (blocking); beta is non-blocking early warning of new lints

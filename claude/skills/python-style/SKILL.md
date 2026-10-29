@@ -36,10 +36,35 @@ config wins.
 - Type-annotate every public function. Docstrings on public APIs, in the format the repo
   already uses.
 
+## Testing
+
+The global rules (AGENTS.md, Testing) apply; this is how in Python.
+
+- pytest, tests under `tests/`, `uv run pytest -q`. Strict settings in `pyproject.toml`, so
+  a typo in a marker or a new warning fails instead of passing quietly:
+
+  ```toml
+  [tool.pytest.ini_options]
+  addopts = ["-ra", "--strict-markers", "--strict-config"]
+  xfail_strict = true
+  filterwarnings = ["error"]
+  ```
+
+- Each test builds its own state with fixtures (`tmp_path`, `monkeypatch`); none depends on
+  another having run first.
+- Mock only boundaries (network, clock, subprocess, the file system when `tmp_path` will not
+  do), at the call into them. Never mock the module under test.
+- `hypothesis` for parsers, serialization and algorithms: round trips, and comparison
+  against a simple model.
+- Coverage (`pytest-cov` with `--cov-branch`) shows untested code; it is a floor, not the
+  goal. Before calling a change tested, run `mutmut` on the changed modules and kill or
+  explain each surviving mutant.
+
 ## Supply chain
 
-- Applications: commit `uv.lock` and pin exact versions (`==`). Libraries: declare the oldest
-  compatible version (`>=`), and let the lockfile pin for development.
+- Applications: commit `uv.lock`, which pins every version. `pyproject.toml` keeps the lower
+  bounds `uv add` writes (`>=`); no `==` there (AGENTS.md, Dependencies). Libraries: declare
+  the oldest compatible version (`>=`), and let the lockfile pin for development.
 - `pip-audit` before deploying.
 
 ## New repo setup

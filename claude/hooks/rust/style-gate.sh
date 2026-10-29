@@ -4,9 +4,8 @@
 # toolchain, or CI config of a Rust repo that opted in to the house rules, needs the core
 # rust-style skill. On top of that, each topic file under rust-style/topics/ is required when
 # the edit's new text or path touches its area; the testing and repo topics only in an
-# opted-in repo, since elsewhere the repo's own conventions win (triggers from
-# research/SYNTHESIS.md 5.1). One message lists everything still missing, so the agent loads
-# it all in one round.
+# opted-in repo, since elsewhere the repo's own conventions win. One message lists
+# everything still missing, so the agent loads it all in one round.
 #
 # The block is a JSON deny on stdout (`hookSpecificOutput.permissionDecision`), the canonical
 # form for both Claude Code and Grok: Grok turns only the first stderr line into the deny
