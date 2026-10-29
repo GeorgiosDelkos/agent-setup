@@ -904,12 +904,15 @@ check "scope: unrelated broken member not checked" \
 
 # Tests ran: a test command records the run for the session; other commands do not.
 tests_stamp="$STATE_TMP/claude-rust-hooks/t1.tests-ran"
-for cmd in 'cargo build' 'git status' 'echo cargo-test' 'cargo testx'; do
+for cmd in 'cargo build' 'git status' 'echo cargo-test' 'cargo testx' 'cargo test --no-run' \
+  'cargo nextest list'; do
   run_hook tests-ran.sh "$(bash_cmd t1 "$cmd")"
   check "tests-ran: '$cmd' is no test run" "$([[ ! -e "$tests_stamp" ]] && echo yes)"
 done
 for cmd in 'cargo test' 'cargo t -p c' 'RUST_LOG=debug cargo nextest run' \
-  'cargo +nightly miri test' 'cargo mutants --in-diff x.diff' 'cd c && cargo test --doc'; do
+  'cargo +nightly miri test' 'cargo mutants --in-diff x.diff' 'cd c && cargo test --doc' \
+  'cargo -q test' 'cargo --locked nextest run' 'cargo hack test --each-feature' \
+  'cargo llvm-cov nextest' 'cargo insta test'; do
   trash "$tests_stamp" 2>/dev/null || true
   run_hook tests-ran.sh "$(bash_cmd t1 "$cmd")"
   check "tests-ran: '$cmd' is a test run" "$([[ -e "$tests_stamp" ]] && echo yes)"
@@ -931,6 +934,19 @@ ran_tests t2
 expect "untested: a test run after the change passes" 0 check-on-stop.sh "$(cstop t2 "$TR")"
 printf '\n[profile.dev]\nopt-level = 1\n' >>"$TR/Cargo.toml"
 expect "untested: a manifest-only change does not ask" 0 check-on-stop.sh "$(cstop t2 "$TR")"
+# A second repo's baseline is written after the edit that first touches it; the session's
+# start stamp, from its first prompt, still counts that edit.
+TR2="$WORK/tests-ran-2"
+new_crate_repo "$TR2" "" plain
+prompt t3 "$TR"
+printf '\n/// Halves.\n#[must_use]\npub fn half(a: u8) -> u8 {\n    a / 2\n}\n' >>"$TR2/src/lib.rs"
+run_hook fmt-on-edit.sh "$(edit t3 "$TR2/src/lib.rs" 'x')"
+expect "untested: the first edit in a second repo asks" 2 check-on-stop.sh \
+  "$(cstop t3 "$TR2")" "No test run since this Rust changed"
+check "settings: tests-ran also runs after a failing command" "$(jq -e '
+  [.hooks.PostToolUseFailure[] | select(.matcher == "Bash") | .hooks[].command
+    | select(test("tests-ran"))] | length == 1' "$HOOKS/../../settings.json" >/dev/null &&
+  echo yes)"
 
 # ---- 4. bash guard ---------------------------------------------------------------------------
 
