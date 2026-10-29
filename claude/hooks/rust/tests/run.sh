@@ -10,7 +10,10 @@ set -euo pipefail
 
 HOOKS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIXTURES="$HOOKS/tests/fixtures"
-TEMPLATE="$HOME/.claude/skills/rust-style/templates/Cargo.lints.toml"
+# The checkout's own skill tree, not the installed one under $HOME: a change to a template
+# is tested in the same commit that makes it.
+TEMPLATES="$(cd "$HOOKS/../../skills/rust-style/templates" && pwd)"
+TEMPLATE="$TEMPLATES/Cargo.lints.toml"
 WORK="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/rust-hooks-test.XXXXXX")" && pwd -P)"
 trap 'trash "$WORK"' EXIT
 pass=0
@@ -88,8 +91,11 @@ SKILL="$FAKE_HOME/.claude/skills/rust-style"
 mkdir -p "$SKILL/topics"
 for topic in unsafe concurrency async library-api testing repo low-level; do
   touch "$SKILL/topics/$topic.md"
+  # The gate skips a topic file that is not installed, so a renamed one would go unread.
+  check "topic $topic.md exists in the checkout" \
+    "$([[ -f "$TEMPLATES/../topics/$topic.md" ]] && echo yes)"
 done
-ln -s "$HOME/.claude/skills/rust-style/templates" "$SKILL/templates"
+ln -s "$TEMPLATES" "$SKILL/templates"
 
 # Runs hook $1 with JSON $2 (and PATH $3 when given). Sets $code, $out (stderr) and
 # $stdout. A JSON deny on stdout (style-gate.sh) counts as a block: code 2, and $out carries
