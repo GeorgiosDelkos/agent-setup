@@ -1,7 +1,7 @@
 #!/usr/bin/env perl
-# house-check: line-level rust-style rules that clippy cannot express
-# (research/SYNTHESIS.md 5.2). Called by check-on-stop.sh with the files an agent changed;
-# the caller keeps only findings on changed lines.
+# house-check: line-level rust-style rules that clippy cannot express. Called by
+# check-on-stop.sh with the files an agent changed; the caller keeps only findings on changed
+# lines.
 #
 # Usage: house-check.pl FILE...    (.rs files and Cargo.toml; anything else is ignored)
 # Output: `path:line: [ID] (rust-style RULE) message` per finding on stdout.

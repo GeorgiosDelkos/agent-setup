@@ -3,8 +3,8 @@
 # this agent has the house style in context. Any .rs edit, or an edit to a Rust repo's
 # manifest, lint, toolchain, or CI config, needs the core rust-style skill. On top of that,
 # each topic file under rust-style/topics/ is required when the edit's new text or path
-# touches its area (triggers from research/SYNTHESIS.md 5.1). One message lists everything
-# still missing, so the agent loads it all in one round.
+# touches its area. One message lists everything still missing, so the agent loads it all in
+# one round.
 #
 # The block is a JSON deny on stdout (`hookSpecificOutput.permissionDecision`), the canonical
 # form for both Claude Code and Grok: Grok turns only the first stderr line into the deny

@@ -22,8 +22,9 @@ call site, readable with partial context):
 - **Tags.** `[ref: T C J B]` means the references do this: T Tokio (with bytes, loom), C
   Cranelift (with regalloc2), J Jon Gjengset's crates, B *Rust for Rustaceans* or the API
   Guidelines. `[house: reason]` means the rule is stricter than, or differs from, at least
-  one reference, and says why. Evidence for every tag, with file:line in the reference
-  repos: the behave-rs research (`research/*.md`, decisions in `research/SYNTHESIS.md`).
+  one reference, and says why. The file:line evidence behind the tags came from the
+  behave-rs research, which is not published with this setup: read a tag as a claim to
+  check against the reference repos when a rule is in doubt, not as a citation.
 - **Ceremony scales with the audience.** Core rules apply to all Rust. Published-library
   rules live in `topics/library-api.md` and in rules marked *published libraries*. A crate
   is published only when its manifest says so (`publish = ["crates-io"]` or `true`, directly

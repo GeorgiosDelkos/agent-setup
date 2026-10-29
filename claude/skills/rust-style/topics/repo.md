@@ -94,6 +94,8 @@ workflows. Tags and IDs as in `../SKILL.md`. For depth: `rfr-project-structure`,
   - every crate: fmt, clippy (stable blocking with warnings as errors, beta advisory), tests
     (`cargo nextest run` plus `cargo test --doc`, `--locked`), scheduled nightly and
     `cargo update` runs with `-D deprecated`, `cargo deny` on manifest changes and daily;
+  - every crate whose suite runs in a few minutes: `cargo mutants` over the PR diff
+    (`mutants.yml`, TST-19);
   - published libraries: macOS and Windows, docs (`cargo docs-rs`, warnings as errors),
     `cargo semver-checks`, `cargo hack --feature-powerset --depth 2 check`, MSRV, minimal
     versions;
