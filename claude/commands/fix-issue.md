@@ -5,6 +5,8 @@ argument-hint: <issue-number>
 
 # Fix issue #$ARGUMENTS
 
+With no issue number given, stop and ask for one.
+
 Read issue #$ARGUMENTS with `gh issue view $ARGUMENTS --comments`: the problem,
 acceptance criteria, linked PRs, and the discussion. Follow linked issues, referenced PRs,
 and external docs until you understand it.
@@ -13,7 +15,11 @@ Run the steps below in order without stopping between them. The rules in
 `~/.config/agents/AGENTS.md` still hold: stop and ask when the issue is ambiguous, or when
 the fix needs an interface, data model, or architecture decision the issue does not settle.
 
-## 1. Plan
+## 1. Branch and plan
+
+Branch prefix from the issue type: `fix/` for bugs, `feat/` for features, `refactor/` for
+refactors, `docs/` for documentation (`fix/` when unclear). Create the branch
+`{prefix}issue-$ARGUMENTS` from the up-to-date default branch before changing anything.
 
 Write the plan to `plan-issue-$ARGUMENTS.md` in the repo root:
 
@@ -37,11 +43,8 @@ Run the project's quality pipeline: build, the full test suite (iterate until gr
 lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAUDE.md`,
 `Makefile`, `package.json`, or CI workflows.
 
-## 5. Branch, commit, and push
+## 5. Commit and push
 
-- Branch prefix from the issue type: `fix/` for bugs, `feat/` for features, `refactor/` for
-  refactors, `docs/` for documentation (`fix/` when unclear).
-  Branch `{prefix}issue-$ARGUMENTS`.
 - Delete `plan-issue-$ARGUMENTS.md` with `trash`: a working file, not part of the change.
 - Commit with an imperative subject of at most 72 characters and a body that says why,
   ending with `Refs #$ARGUMENTS`.

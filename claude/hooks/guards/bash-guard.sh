@@ -21,20 +21,27 @@ block() {
 # written: heredoc bodies are dropped, and a quoted string holding a space or a shell operator
 # (a commit message, a grep pattern) becomes Q. Other quotes only lose their quote marks, so
 # `"main"` stays a refspec, and a double-quoted `$(...)` stays code. A command that hands text
-# to a shell (`bash -c`, `eval`, a pipe or heredoc into a shell) is kept whole: there the
-# quoted text is what runs.
+# to a shell (`bash -c`, `eval`, `ssh`, a pipe or heredoc into a shell) is kept whole: there
+# the quoted text is what runs. Backslash line continuations are joined first.
 code_text() {
   perl -0777 -ne '
-    my $shell = qr/(?:ba|z|da)?sh(?:\s+-\w+)*/;
-    if (/(?:^|[^\w-])(?:$shell\s+-\w*c\b|eval\b|$shell\s*<<)|\|\s*$shell(?:\s|$)/) {
-      print;
-      exit;
-    }
     sub data { my $text = shift; $text =~ /[\s;&|()<>]/ ? "Q" : $text }
     sub double { my $text = shift; $text =~ /\$\(|`/ ? $text : data($text) }
-    s/<<-?\s*([\x27"]?)(\w+)\1([^\n]*)\n.*?^\t*\2[ \t]*$/<<HEREDOC$3/gms;
-    s/\x27([^\x27]*)\x27/data($1)/ge;
-    s/"((?:[^"\\]|\\.)*)"/double($1)/ge;
+    s/\\\n/ /g;
+    my $original = $_;
+    s/<<-?[ \t]*([\x27"]?)(\w+)\1([^\n]*)\n.*?^\t*\2[ \t]*$/<<HEREDOC$3/gms;
+    # One left-to-right pass, so the leftmost quote wins: an apostrophe inside "..." does not
+    # pair with a later single quote, and an escaped quote outside quotes opens nothing.
+    s/\\.|\x27([^\x27]*)\x27|"((?:[^"\\]|\\.)*)"/
+      defined $1 ? data($1) : defined $2 ? double($2) : $&/gse;
+    # Checked on the stripped text, so a message that mentions eval or bash -c is still data.
+    my $shell = qr/(?:ba|z|da)?sh(?:\s+--?[\w-]+)*/;
+    my $start = qr/(?:^|[;&|(]\s*|\s)/;
+    my $runs = qr/(?:^|[;&|(]\s*)(?:eval|ssh)\s/;
+    if (/$start(?:$shell\s+-\w*c\b|$shell\s*<<)|$runs|\|\s*$shell(?:\s|$)/) {
+      print $original;
+      exit;
+    }
     print;' <<<"$1"
 }
 
@@ -56,12 +63,16 @@ deletes_recursively() {
 # --hard` and a checkout or restore of the whole tree overwrite every uncommitted change. A
 # single path (`git checkout -- src/x.rs`) and `git restore --staged` pass.
 discards_work() {
-  local git='^[[:space:]]*git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+'
+  # Leading VAR=value words, then git with any global options (-C dir, -c key=value, --long).
+  local git='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git'
+  git+='(([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)|([[:space:]]+--[a-z-]+(=[^[:space:]]*)?))*'
+  git+='[[:space:]]+'
   local force='[[:space:]](-[[:alpha:]]*f[[:alpha:]]*|--force)([[:space:]]|$)'
   local dry_run='[[:space:]](-[[:alpha:]]*n[[:alpha:]]*|--dry-run)([[:space:]]|$)'
   local whole_tree='[[:space:]](\.|\./|:/|\*)([[:space:]]|$)'
   local staged_only='[[:space:]](--staged|-S)([[:space:]]|$)'
   local worktree='[[:space:]](--worktree|-W)([[:space:]]|$)'
+  local discard='[[:space:]](-f|--force|--discard-changes)([[:space:]]|$)'
   local segment
   while IFS= read -r segment; do
     if [[ "$segment" =~ ${git}clean([[:space:]]|$) && "$segment" =~ $force &&
@@ -71,13 +82,18 @@ discards_work() {
       return
     fi
     if [[ "$segment" =~ ${git}reset([[:space:]].*)?[[:space:]]--hard([[:space:]]|$) ]]; then
-      echo "git reset --hard overwrites uncommitted changes: git stash them first"
+      echo "git reset --hard overwrites uncommitted changes: use git reset --keep, which" \
+        "refuses to, or ask the user"
       return
     fi
     if [[ "$segment" =~ ${git}(checkout|restore)[[:space:]] && "$segment" =~ $whole_tree ]] &&
       ! [[ "$segment" =~ $staged_only && ! "$segment" =~ $worktree ]]; then
       echo "a checkout or restore of the whole tree overwrites every uncommitted change:" \
         "git stash them first, or name the files"
+      return
+    fi
+    if [[ "$segment" =~ ${git}(checkout|switch)[[:space:]] && "$segment" =~ $discard ]]; then
+      echo "a forced checkout or switch throws away uncommitted changes: git stash them first"
       return
     fi
   done < <(perl -pe 's/(&&|\|\||[;|()])/\n/g' <<<"$1")
