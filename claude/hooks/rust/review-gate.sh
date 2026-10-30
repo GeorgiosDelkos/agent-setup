@@ -13,8 +13,11 @@
 # ready are not gated.
 #
 # Reviewed lines come from the snapshots review-done.sh takes when the reviewer finishes.
-# Per .rs file in the diff: with a snapshot, the lines that differ between it and the head
-# commit; without one, the file's lines added plus removed in the diff.
+# A file keeps a snapshot per reviewed version (changes.sh review_dir), so reviews of one
+# file on parallel branches do not replace each other. Per .rs file in the diff: none when a
+# snapshot holds its version at the head commit; else the fewest lines that differ between
+# any of its snapshots and the head commit; without one, its lines added plus removed in the
+# diff.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=common.sh
@@ -32,6 +35,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
 # Below this many changed lines (added + removed) a review costs more than it finds: clippy
 # and house-check already cover a small edit, and a typo fix should not need a design review.
 MIN_REVIEW_LINES=20
+
+# git's blob id of an empty file (`git hash-object /dev/null`).
+EMPTY_BLOB=e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 
 # Unit separator: the field and word separator below. Unlike a tab it is not IFS whitespace,
 # so `read` keeps an empty field instead of shifting the rest left.
@@ -178,19 +184,65 @@ base_ref() {
 # not yet reviewed (see the header), never more than the file's own lines in the diff, so a
 # snapshot from an older review of the file cannot charge the PR for others' changes.
 unreviewed_lines() {
-  local root="$1" from="$2" to="$3" count file snapshot since
-  git -C "$root" -c core.quotepath=off diff --numstat --no-renames "$from" "$to" -- '*.rs' |
-    awk -F '\t' '{ print ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) "\t" $3 }' |
-    review_snapshots "$root" | while IFS=$'\t' read -r count file snapshot; do
-    if [[ -f "$snapshot" ]]; then
-      since="$(diff "$snapshot" <(git -C "$root" show "$to:$file" 2>/dev/null) |
-        grep -c '^[<>]' || true)"
+  local root="$1" from="$2" to="$3" fields count file snapshot content changes status since
+  # --raw gives each file's blob id at $3, printed before the --numstat lines. A deleted file
+  # has the all-zero id; its reviewed state is the empty snapshot.
+  git -C "$root" -c core.quotepath=off diff --raw --numstat --no-abbrev --no-renames \
+    "$from" "$to" -- '*.rs' | awk -F '\t' -v empty="$EMPTY_BLOB" '
+      /^:/ { split($1, raw, " "); blob[$2] = raw[4] ~ /^0+$/ ? empty : raw[4]; next }
+      { print ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) "\t" blob[$3] "\t" $3 }' |
+    review_keys "$root" | snapshot_candidates | while IFS=$'\t' read -r -a fields; do
+    count="${fields[0]}" file="${fields[1]}" content=""
+    for snapshot in "${fields[@]:2}"; do
+      # Read once per file, not per snapshot. The trailing `.` keeps trailing newlines,
+      # which command substitution would strip.
+      if [[ -z "$content" ]]; then
+        content="$(
+          git -C "$root" show "$to:$file" 2>/dev/null || true
+          echo .
+        )"
+      fi
+      # diff exits 2 when the snapshot is gone (pruned since the listing): no evidence.
+      status=0
+      changes="$(diff "$snapshot" <(printf '%s' "${content%.}"))" || status=$?
+      if ((status > 1)); then
+        continue
+      fi
+      since="$(grep -c '^[<>]' <<<"$changes" || true)"
       if ((since < count)); then
         count="$since"
       fi
-    fi
+      if ((count == 0)); then
+        break
+      fi
+    done
     printf '%s\t%s\n' "$count" "$file"
   done
+}
+
+# Each `count<TAB>blob<TAB>file<TAB>key` line on stdin (review_keys output) as
+# `count<TAB>file`, followed by `<TAB>snapshot` for each snapshot of the file to diff: none
+# when one holds the exact blob (count 0 then), else all of them. One directory listing for
+# all files: a glob per file costs tens of seconds on a large review record, and a hook past
+# its timeout lets the call run.
+snapshot_candidates() {
+  perl -we '
+    use strict;
+    my (%names, $listed);
+    while (my $line = <STDIN>) {
+      chomp $line;
+      my ($count, $blob, $file, $key) = split /\t/, $line;
+      my ($dir, $hash) = $key =~ m{^(.*)/([^/]+)\z} or die "review gate: bad key $key\n";
+      if (!$listed++ && opendir my $list, $dir) {
+        /^([0-9a-f]{32})\.[0-9a-f]+\z/ and push @{ $names{$1} }, $_ for readdir $list;
+      }
+      my @mine = @{ $names{$hash} || [] };
+      if (grep { $_ eq "$hash.$blob" } @mine) {
+        print "0\t$file\n";
+      } else {
+        print join("\t", $count, $file, map { "$dir/$_" } @mine), "\n";
+      }
+    }'
 }
 
 call="$(gated_call "$command")"
