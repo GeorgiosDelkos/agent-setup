@@ -195,7 +195,7 @@ deepest_root() {
 
 # Changed .rs and Cargo.toml paths under root $1 (absolute, possibly deleted): in git, the
 # changes since base $2 plus untracked files; unioned with the paths recorded in the list
-# files $3.... One per line, sorted. Scratchpad paths are kept (see SCRATCH_RE).
+# files $3.... One per line, sorted. Scratchpad paths are kept (callers apply scratch_exempt).
 changed_files() {
   local root="$1" base="$2"
   shift 2

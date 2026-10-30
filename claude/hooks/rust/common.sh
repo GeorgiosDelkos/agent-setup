@@ -67,13 +67,27 @@ hook_field() {
 }
 
 # Claude Code's per-session scratchpad, /tmp/claude-<uid>/<project>/<session>/scratchpad/
-# (/private/tmp on macOS): throwaway code that no style gate or stop check should judge. The
-# review record (review-done.sh) still snapshots it: a worktree there can hold a real branch.
-# The ERE form is for filtering path lists.
+# (/private/tmp on macOS). Read only through scratch_exempt.
 SCRATCH_RE='/tmp/claude-[0-9]+/[^/]+/[^/]+/scratchpad/'
 
-is_scratch_path() {
-  [[ "$1" =~ $SCRATCH_RE ]]
+# True when path $1 is throwaway scratch that no style gate or stop check judges: under the
+# scratchpad and not in a git work tree whose HEAD is on a branch. A branch there can become
+# a pull request: the main session builds merge batches in scratchpad worktrees, and
+# scratchpad/batch-e on batch/2026-10-30-e skipped clippy, the test reminder, and the style
+# gate before it was opened as one (hcfs, 2026-10-30). A plain directory and a detached HEAD
+# (a checkout to read old code) stay exempt. The review record (review-done.sh) snapshots
+# every worktree whatever this says. $1 may not exist yet (a Write of a new file); the
+# nearest existing directory at or above it is asked. One git call, and only for scratchpad
+# paths.
+scratch_exempt() {
+  local dir="$1"
+  if [[ ! "$dir" =~ $SCRATCH_RE ]]; then
+    return 1
+  fi
+  while [[ ! -d "$dir" ]]; do
+    dir="$(dirname "$dir")"
+  done
+  ! git -C "$dir" symbolic-ref -q HEAD >/dev/null 2>&1
 }
 
 # Path the tool acts on. Claude: file_path. Grok: target_file. Grok's Cursor preset: path.

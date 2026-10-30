@@ -14,6 +14,7 @@
 # house rules (house_opted_in), house-check.pl and the column limit on changed lines. Changed
 # lines are the hunks since that base; an untracked or non-git file counts as all changed.
 # Last, Rust files this session modified after its last test run (tests-ran.sh) ask for one.
+# A root under the session scratchpad is skipped unless it is on a git branch (scratch_exempt).
 #
 # A state that was already checked is not checked again, and a second stop in a row always
 # passes. Exit 2 only for findings; a hook's own failure is reported loudly and exits 1, so
@@ -53,11 +54,13 @@ files_to_check() {
     return 0
   fi
   stop_roots "$edited" | while IFS= read -r root; do
-    if ! session_caused "$root" ${lists[@]+"${lists[@]}"} "$edited"; then
+    # Per root, not per file: a root is one work tree, so its files share its branch state.
+    if scratch_exempt "$root/" ||
+      ! session_caused "$root" ${lists[@]+"${lists[@]}"} "$edited"; then
       continue
     fi
     base="$(diff_base "$root" 2>/dev/null || true)"
-    changed_files "$root" "$base" "$edited" | { grep -vE "$SCRATCH_RE" || true; } |
+    changed_files "$root" "$base" "$edited" |
       while IFS= read -r file; do
         if [[ -f "$file" ]]; then
           printf '%s\t%s\n' "$root" "$file"

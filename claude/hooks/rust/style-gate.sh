@@ -93,7 +93,7 @@ rust_topics() {
 }
 
 path="$(tool_path)"
-if is_scratch_path "$path"; then
+if scratch_exempt "$path"; then
   exit 0
 fi
 if [[ "$path" == *.rs ]]; then
