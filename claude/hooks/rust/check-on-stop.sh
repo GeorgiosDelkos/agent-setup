@@ -57,11 +57,12 @@ files_to_check() {
       continue
     fi
     base="$(diff_base "$root" 2>/dev/null || true)"
-    changed_files "$root" "$base" "$edited" | while IFS= read -r file; do
-      if [[ -f "$file" ]]; then
-        printf '%s\t%s\n' "$root" "$file"
-      fi
-    done
+    changed_files "$root" "$base" "$edited" | { grep -vE "$SCRATCH_RE" || true; } |
+      while IFS= read -r file; do
+        if [[ -f "$file" ]]; then
+          printf '%s\t%s\n' "$root" "$file"
+        fi
+      done
   done | deepest_root
 }
 

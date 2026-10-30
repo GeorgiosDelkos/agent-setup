@@ -664,6 +664,20 @@ run_hook review-done.sh \
 expect "gate: a review from the main checkout covers another worktree" 0 review-gate.sh \
   "$(pr_cmd p3 "$WORK/gate-par-c" 'gh pr create --fill')"
 
+# A worktree under the session scratchpad holds a real branch: the gate counts its diff, so
+# the review must record it too.
+GSP="$WORK/tmp/claude-501/proj/sess/scratchpad/gate-par-s"
+mkdir -p "$(dirname "$GSP")"
+git -C "$GP" worktree add -q -b par-s "$GSP" main
+lines "$GSP/src/s.rs" 0 30
+commit_all "$GSP" "branch s"
+expect "gate: a scratchpad worktree's branch counts" 2 review-gate.sh \
+  "$(pr_cmd p8 "$GSP" 'gh pr create --fill')" "src/s.rs (30 lines)"
+run_hook review-done.sh \
+  "$(subagent_stop p8 "$GP" '{"agent_id": "rs", "agent_type": "rust-style-reviewer"}')"
+expect "gate: a review covers a worktree under the scratchpad" 0 review-gate.sh \
+  "$(pr_cmd p8 "$GSP" 'gh pr create --fill')"
+
 # A reviewed deletion passes: its snapshot is the empty file.
 GD="$WORK/gate-delete"
 new_cloned_repo "$GD"

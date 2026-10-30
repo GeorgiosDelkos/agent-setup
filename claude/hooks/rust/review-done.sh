@@ -15,6 +15,12 @@
 # asked about it or not, and a reviewer that was cancelled counts like one that finished: the
 # hook cannot tell what the reviewer read. The gate is a reminder against forgetting the
 # review, not proof that one happened.
+#
+# A worktree under Claude's session scratchpad is snapshotted too. The scratch exemption
+# covers editing and the stop check; the gate measures the pull request's diff wherever it
+# is checked out.
+# Filtered here, a reviewed branch in a scratchpad worktree recorded nothing and the gate
+# kept asking for a review (hcfs scratchpad/batch-e, 2026-10-30).
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=common.sh
