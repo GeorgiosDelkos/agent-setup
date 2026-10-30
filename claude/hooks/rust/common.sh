@@ -71,23 +71,30 @@ hook_field() {
 SCRATCH_RE='/tmp/claude-[0-9]+/[^/]+/[^/]+/scratchpad/'
 
 # True when path $1 is throwaway scratch that no style gate or stop check judges: under the
-# scratchpad and not in a git work tree whose HEAD is on a branch. A branch there can become
-# a pull request: the main session builds merge batches in scratchpad worktrees, and
-# scratchpad/batch-e on batch/2026-10-30-e skipped clippy, the test reminder, and the style
-# gate before it was opened as one (hcfs, 2026-10-30). A plain directory and a detached HEAD
-# (a checkout to read old code) stay exempt. The review record (review-done.sh) snapshots
-# every worktree whatever this says. $1 may not exist yet (a Write of a new file); the
-# nearest existing directory at or above it is asked. One git call, and only for scratchpad
-# paths.
+# scratchpad and not in a git work tree there whose HEAD is a commit on a branch. A branch
+# there can become a pull request: the main session builds merge batches in scratchpad
+# worktrees, and scratchpad/batch-e on batch/2026-10-30-e skipped clippy, the test reminder,
+# and the style gate before it was opened as one (hcfs, 2026-10-30). Exempt stay: a plain
+# directory, a detached HEAD (a checkout to read old code), a branch with no commit yet (the
+# repo `cargo new` makes), and a repo whose top level is above the scratchpad (a git-tracked
+# TMPDIR must not un-exempt every scratch file). The review record (review-done.sh)
+# snapshots every worktree whatever this says. $1 may not exist yet (a Write of a new file);
+# the nearest existing directory at or above it is asked. One git call, and only for
+# scratchpad paths.
 scratch_exempt() {
-  local dir="$1"
+  local dir="$1" out top branch
   if [[ ! "$dir" =~ $SCRATCH_RE ]]; then
     return 1
   fi
   while [[ ! -d "$dir" ]]; do
     dir="$(dirname "$dir")"
   done
-  ! git -C "$dir" symbolic-ref -q HEAD >/dev/null 2>&1
+  # The top level, then the branch name or `HEAD` when detached. Fails outside git and on an
+  # unborn branch.
+  out="$(git -C "$dir" rev-parse --show-toplevel --abbrev-ref HEAD 2>/dev/null)" || return 0
+  top="${out%%$'\n'*}"
+  branch="${out#*$'\n'}"
+  [[ "$branch" == HEAD || ! "$top/" =~ $SCRATCH_RE ]]
 }
 
 # Path the tool acts on. Claude: file_path. Grok: target_file. Grok's Cursor preset: path.

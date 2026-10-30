@@ -99,8 +99,10 @@ read those files. Only Claude Code's sandbox settings would close that.
 | `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`); `git clean -f`, `git reset --hard`, and a checkout or restore of the whole tree (stash first); any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`; and `gh pr merge --admin`. Quoted text (a commit message, a grep pattern) and heredoc bodies are data and never match, unless the command hands them to a shell (`bash -c`, `eval`, a pipe or heredoc into a shell). Tested in `rust/tests/run.sh`. |
 
 Claude Code's session scratchpad (`/tmp/claude-<uid>/<project>/<session>/scratchpad/`) is
-exempt: the style gate skips it, edits there are formatted but not recorded, and neither the
-stop check nor a review snapshot counts them.
+exempt unless a path there is in a git work tree on a branch with a commit, which may become a
+pull request (`scratch_exempt` in `common.sh`): the style gate skips an exempt path, edits there
+are formatted but not recorded, and the stop check does not count them. Review snapshots cover
+every worktree, exempt or not.
 
 State is per agent, kept in `$TMPDIR/claude-rust-hooks/<session>.<agent>.*`:
 

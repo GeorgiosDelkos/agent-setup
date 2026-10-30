@@ -812,6 +812,20 @@ lines "$SCRATCHPAD/plain/src/lib.rs" 0 5
 scratch_case s1 "$SCRATCHPAD/plain"
 expect_exempt "a plain directory"
 
+# `cargo new` runs `git init`: a branch with no commit is still scratch.
+mkdir -p "$SCRATCHPAD/unborn/src"
+lines "$SCRATCHPAD/unborn/src/lib.rs" 0 5
+git -C "$SCRATCHPAD/unborn" init -q -b main
+scratch_case s4 "$SCRATCHPAD/unborn"
+expect_exempt "a repo with no commit"
+
+# A repo above the scratchpad does not make it a branch checkout.
+OUTER="$WORK/outer"
+new_repo "$OUTER"
+mkdir -p "$OUTER/tmp/claude-501/proj/sess/scratchpad/x/src"
+expect "scratch: a repo above the scratchpad keeps it exempt" 0 style-gate.sh \
+  "$(edit s5 "$OUTER/tmp/claude-501/proj/sess/scratchpad/x/src/lib.rs" 'fn a() {}')"
+
 # Worktrees of a repo outside the scratchpad, as the main session makes them.
 SCRATCH_BASE="$WORK/scratch-base"
 new_repo "$SCRATCH_BASE"

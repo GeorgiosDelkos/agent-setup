@@ -44,6 +44,7 @@ done < <(session_touched_lists)
 # `root<TAB>file` for every existing file to check, sorted.
 files_to_check() {
   local root base file
+  # A subagent's list never holds an exempt path: fmt-on-edit.sh does not record one.
   if is_subagent; then
     sort -u "$edited" 2>/dev/null | while IFS= read -r file; do
       if [[ -f "$file" ]]; then
@@ -54,7 +55,8 @@ files_to_check() {
     return 0
   fi
   stop_roots "$edited" | while IFS= read -r root; do
-    # Per root, not per file: a root is one work tree, so its files share its branch state.
+    # Per root, not per file: a root is a git top level or a crate or directory outside git,
+    # so every file under it shares its answer.
     if scratch_exempt "$root/" ||
       ! session_caused "$root" ${lists[@]+"${lists[@]}"} "$edited"; then
       continue
