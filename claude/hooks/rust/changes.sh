@@ -195,7 +195,8 @@ deepest_root() {
 
 # Changed .rs and Cargo.toml paths under root $1 (absolute, possibly deleted): in git, the
 # changes since base $2 plus untracked files; unioned with the paths recorded in the list
-# files $3.... One per line, sorted.
+# files $3.... One per line, sorted. Scratchpad paths are kept: the stop check drops them,
+# but a reviewer may review a real branch checked out in a worktree under the scratchpad.
 changed_files() {
   local root="$1" base="$2"
   shift 2
@@ -205,7 +206,7 @@ changed_files() {
       git -C "$root" -c core.quotepath=off ls-files --others --exclude-standard
     fi | awk -v root="$root/" '{ print root $0 }'
     cat /dev/null "$@" 2>/dev/null | awk -v root="$root/" 'index($0, root) == 1' || true
-  } | grep -E '(\.rs|/Cargo\.toml)$' | { grep -vE "$SCRATCH_RE" || true; } | sort -u || true
+  } | grep -E '(\.rs|/Cargo\.toml)$' | sort -u || true
 }
 
 # Changed line ranges of the existing files $3... under root $1, measured from base $2, as

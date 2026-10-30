@@ -67,8 +67,9 @@ hook_field() {
 }
 
 # Claude Code's per-session scratchpad, /tmp/claude-<uid>/<project>/<session>/scratchpad/
-# (/private/tmp on macOS): throwaway code that no style gate, stop check or review
-# snapshot should judge. The ERE form is for filtering path lists.
+# (/private/tmp on macOS): throwaway code that no style gate or stop check should judge. The
+# review record (review-done.sh) still snapshots it: a worktree there can hold a real branch.
+# The ERE form is for filtering path lists.
 SCRATCH_RE='/tmp/claude-[0-9]+/[^/]+/[^/]+/scratchpad/'
 
 is_scratch_path() {
