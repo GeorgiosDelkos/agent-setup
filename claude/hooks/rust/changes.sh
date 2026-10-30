@@ -278,10 +278,17 @@ fingerprint() {
   done | shasum -a 256 | cut -d ' ' -f 1
 }
 
-# Review record of git root $1's repository: a directory of snapshots of the .rs files as the
-# last rust-style-reviewer run saw them. One per repository (its common git directory), not
-# per worktree or session: a review in a subagent's worktree, or in an earlier session, covers
-# the same files in every checkout.
+# Review record of git root $1's repository: a directory of snapshots of the .rs files as
+# rust-style-reviewer runs saw them. One per repository (its common git directory), not per
+# worktree or session: a review in a subagent's worktree, or in an earlier session, covers the
+# same files in every checkout.
+#
+# A snapshot is named `<path key>.<blob id>`: the key is a hash of the repo-relative path, the
+# id is git's blob id of the snapshotted bytes. Agents in several worktrees of one repo review
+# different versions of the same file on different branches. With one snapshot per path each
+# review overwrote the others', and a reviewed pull request read as unreviewed (five hcfs PRs
+# that all changed hcfs-server/src/billing/gate.rs, 2026-10-29). The blob id lets the gate
+# find a commit's exact version without running diff.
 review_dir() {
   local common
   common="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)"
@@ -289,12 +296,58 @@ review_dir() {
     "$(printf '%s' "$common" | shasum -a 256 | cut -c 1-32)"
 }
 
-# Each line on stdin with `<TAB>snapshot` appended: the snapshot file, in the review record of
-# root $1, of the repo-relative path that is the line's last tab-separated field, keyed by a
-# hash of the path. One perl process for all paths: a shasum per path takes tens of seconds
-# over thousands of files.
-review_snapshots() {
+# Snapshots kept per path, newest first. Enough for a few dozen parallel branches that touch
+# one file, each with its latest review rounds; more only slows the gate, which diffs every
+# snapshot of a file whose exact version no review saw. Arbitrary within that.
+REVIEW_KEEP=32
+
+# Each line on stdin with `<TAB>key` appended: the snapshot path prefix (the review record of
+# root $1, then the path key) of the repo-relative path that is the line's last tab-separated
+# field. One perl process for all paths: a shasum per path takes tens of seconds over
+# thousands of files.
+review_keys() {
   REVIEW_DIR="$(review_dir "$1")" perl -MDigest::SHA=sha256_hex -ne \
     'chomp; my $path = (split /\t/)[-1];
     print "$_\t$ENV{REVIEW_DIR}/", substr(sha256_hex($path), 0, 32), "\n"'
+}
+
+# Snapshot the files of root $1 named by the `path<TAB>key` lines on stdin (review_keys
+# output), then keep only the newest REVIEW_KEEP snapshots of each path. A missing file
+# snapshots as empty: the reviewed state of a deletion. Each snapshot is written to a
+# temporary file and renamed into place, so a reviewer finishing at the same time, or the
+# gate, never reads a partial one. Two runs at once each prune only snapshots they listed
+# before writing their own, so neither removes the snapshot the other just wrote.
+save_review_snapshots() {
+  ROOT="$1" KEEP="$REVIEW_KEEP" perl -MDigest::SHA=sha1_hex -MFile::Temp=tempfile \
+    -MTime::HiRes -we '
+    use strict;
+    my (%names, $listed);
+    while (my $line = <STDIN>) {
+      chomp $line;
+      my ($path, $key) = split /\t/, $line;
+      my ($dir, $hash) = $key =~ m{^(.*)/([^/]+)\z} or die "review: bad key $key\n";
+      # One directory listing for all paths: a glob per path is quadratic in the record.
+      if (!$listed++) {
+        opendir my $list, $dir or die "review: cannot read $dir: $!\n";
+        push @{ $names{ substr $_, 0, 32 } }, $_ for grep { /^[0-9a-f]{32}/ } readdir $list;
+      }
+      my $content = "";
+      if (open my $in, "<:raw", "$ENV{ROOT}/$path") {
+        local $/;
+        $content = <$in> // "";
+      }
+      # git hash-object, without a process per file.
+      my $name = "$hash." . sha1_hex("blob " . length($content) . "\0" . $content);
+      my ($out, $tmp) = tempfile(".tmp-XXXXXX", DIR => $dir);
+      binmode $out;
+      print {$out} $content;
+      close $out or die "review: cannot write $tmp: $!\n";
+      rename $tmp, "$dir/$name" or die "review: cannot rename $tmp to $dir/$name: $!\n";
+      # Sub-second mtimes: several review rounds can land in one second.
+      my %mtime = map { $_ => (Time::HiRes::stat("$dir/$_"))[9] // 0 }
+        grep { $_ ne $name } @{ $names{$hash} || [] };
+      my @older = sort { $mtime{$b} <=> $mtime{$a} || $a cmp $b } keys %mtime;
+      unlink map { "$dir/$_" } splice @older, $ENV{KEEP} - 1 if @older >= $ENV{KEEP};
+      $names{$hash} = [$name, @older];
+    }'
 }

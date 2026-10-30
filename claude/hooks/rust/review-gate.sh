@@ -13,8 +13,11 @@
 # ready are not gated.
 #
 # Reviewed lines come from the snapshots review-done.sh takes when the reviewer finishes.
-# Per .rs file in the diff: with a snapshot, the lines that differ between it and the head
-# commit; without one, the file's lines added plus removed in the diff.
+# A file keeps a snapshot per reviewed version (changes.sh review_dir), so reviews of one
+# file on parallel branches do not replace each other. Per .rs file in the diff: none when a
+# snapshot holds its version at the head commit; else the fewest lines that differ between
+# any of its snapshots and the head commit; without one, its lines added plus removed in the
+# diff.
 set -euo pipefail
 
 # shellcheck source-path=SCRIPTDIR source=common.sh
@@ -32,6 +35,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
 # Below this many changed lines (added + removed) a review costs more than it finds: clippy
 # and house-check already cover a small edit, and a typo fix should not need a design review.
 MIN_REVIEW_LINES=20
+
+# git's blob id of an empty file (`git hash-object /dev/null`).
+EMPTY_BLOB=e69de29bb2d1d6434b8b29ae775ad8c2e48c5391
 
 # Unit separator: the field and word separator below. Unlike a tab it is not IFS whitespace,
 # so `read` keeps an empty field instead of shifting the rest left.
@@ -178,17 +184,40 @@ base_ref() {
 # not yet reviewed (see the header), never more than the file's own lines in the diff, so a
 # snapshot from an older review of the file cannot charge the PR for others' changes.
 unreviewed_lines() {
-  local root="$1" from="$2" to="$3" count file snapshot since
-  git -C "$root" -c core.quotepath=off diff --numstat --no-renames "$from" "$to" -- '*.rs' |
-    awk -F '\t' '{ print ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) "\t" $3 }' |
-    review_snapshots "$root" | while IFS=$'\t' read -r count file snapshot; do
-    if [[ -f "$snapshot" ]]; then
-      since="$(diff "$snapshot" <(git -C "$root" show "$to:$file" 2>/dev/null) |
-        grep -c '^[<>]' || true)"
+  local root="$1" from="$2" to="$3" count blob file key snapshot content since
+  # --raw gives each file's blob id at $3, printed before the --numstat lines. A deleted file
+  # has the all-zero id; its reviewed state is the empty snapshot.
+  git -C "$root" -c core.quotepath=off diff --raw --numstat --no-abbrev --no-renames \
+    "$from" "$to" -- '*.rs' | awk -F '\t' -v empty="$EMPTY_BLOB" '
+      /^:/ { split($1, raw, " "); blob[$2] = raw[4] ~ /^0+$/ ? empty : raw[4]; next }
+      { print ($1 == "-" ? 0 : $1) + ($2 == "-" ? 0 : $2) "\t" blob[$3] "\t" $3 }' |
+    review_keys "$root" | while IFS=$'\t' read -r count blob file key; do
+    if [[ -f "$key.$blob" ]]; then
+      count=0
+    fi
+    content=""
+    # `$key*` also matches the one unsuffixed snapshot per path that earlier versions wrote.
+    for snapshot in "$key"*; do
+      if ((count == 0)); then
+        break
+      fi
+      # No match leaves the pattern itself; a concurrent prune can remove a match.
+      if [[ ! -f "$snapshot" ]]; then
+        continue
+      fi
+      # Read once per file, not per snapshot. The trailing `.` keeps trailing newlines,
+      # which command substitution would strip.
+      if [[ -z "$content" ]]; then
+        content="$(
+          git -C "$root" show "$to:$file" 2>/dev/null || true
+          echo .
+        )"
+      fi
+      since="$(diff "$snapshot" <(printf '%s' "${content%.}") | grep -c '^[<>]' || true)"
       if ((since < count)); then
         count="$since"
       fi
-    fi
+    done
     printf '%s\t%s\n' "$count" "$file"
   done
 }

@@ -633,6 +633,83 @@ commit_all "$GS" "second"
 expect "gate: a stale snapshot does not exceed the PR's own diff" 0 review-gate.sh \
   "$(pr_cmd v5 "$GS" 'gh pr ready')"
 
+# Parallel worktrees: two branches change one file differently, each reviewed in turn. A
+# review keeps a snapshot per version, so the second does not undo the first.
+GP="$WORK/gate-parallel"
+new_cloned_repo "$GP"
+git -C "$GP" worktree add -q -b par-a "$WORK/gate-par-a" main
+git -C "$GP" worktree add -q -b par-b "$WORK/gate-par-b" main
+lines "$WORK/gate-par-a/src/lib.rs" 100 30
+commit_all "$WORK/gate-par-a" "branch a"
+run_hook review-done.sh \
+  "$(subagent_stop p1 "$WORK/gate-par-a" '{"agent_id": "ra", "agent_type": "rust-style-reviewer"}')"
+lines "$WORK/gate-par-b/src/lib.rs" 200 30
+commit_all "$WORK/gate-par-b" "branch b"
+run_hook review-done.sh \
+  "$(subagent_stop p2 "$WORK/gate-par-b" '{"agent_id": "rb", "agent_type": "rust-style-reviewer"}')"
+expect "gate: parallel branch a stays reviewed after b's review" 0 review-gate.sh \
+  "$(pr_cmd p1 "$WORK/gate-par-a" 'gh pr create --fill')"
+expect "gate: parallel branch b passes after its review" 0 review-gate.sh \
+  "$(pr_cmd p2 "$WORK/gate-par-b" 'gh pr create --fill')"
+
+# A reviewer run from a session rooted in the main checkout still covers a branch checked out
+# in another worktree of the repository.
+git -C "$GP" worktree add -q -b par-c "$WORK/gate-par-c" main
+lines "$WORK/gate-par-c/src/c.rs" 0 30
+commit_all "$WORK/gate-par-c" "branch c"
+expect "gate: branch c unreviewed" 2 review-gate.sh \
+  "$(pr_cmd p3 "$WORK/gate-par-c" 'gh pr create --fill')" "src/c.rs (30 lines)"
+run_hook review-done.sh \
+  "$(subagent_stop p3 "$GP" '{"agent_id": "rc", "agent_type": "rust-style-reviewer"}')"
+expect "gate: a review from the main checkout covers another worktree" 0 review-gate.sh \
+  "$(pr_cmd p3 "$WORK/gate-par-c" 'gh pr create --fill')"
+
+# A reviewed deletion passes: its snapshot is the empty file.
+GD="$WORK/gate-delete"
+new_cloned_repo "$GD"
+lines "$GD/src/big.rs" 0 30
+commit_all "$GD" "big"
+git -C "$GD" push -q origin main
+git -C "$GD" checkout -q -b drop
+git -C "$GD" rm -q src/big.rs
+commit_all "$GD" "drop big"
+expect "gate: an unreviewed deletion counts" 2 review-gate.sh \
+  "$(pr_cmd p4 "$GD" 'gh pr ready')" "src/big.rs (30 lines)"
+run_hook review-done.sh \
+  "$(subagent_stop p4 "$GD" '{"agent_id": "rd", "agent_type": "rust-style-reviewer"}')"
+expect "gate: a reviewed deletion passes" 0 review-gate.sh "$(pr_cmd p4 "$GD" 'gh pr ready')"
+
+# Two reviewers finishing at once leave whole snapshots and no temporary files.
+REVIEW_STATE="$STATE_TMP/claude-rust-hooks/review-$(printf '%s' \
+  "$(git -C "$GP" rev-parse --path-format=absolute --git-common-dir)" | shasum -a 256 |
+  cut -c 1-32)"
+lines "$WORK/gate-par-a/src/lib.rs" 300 30
+commit_all "$WORK/gate-par-a" "branch a again"
+reviewer='{"agent_id": "r5", "agent_type": "rust-style-reviewer"}'
+review_a="$(subagent_stop p5 "$WORK/gate-par-a" "$reviewer")"
+review_b="$(subagent_stop p6 "$GP" "$reviewer")"
+for ((n = 0; n < 5; n++)); do
+  run_hook review-done.sh "$review_a" &
+  run_hook review-done.sh "$review_b" &
+  wait
+done
+check "review: concurrent runs leave no temporary files" \
+  "$([[ -z "$(find "$REVIEW_STATE" -name '.tmp-*')" ]] && echo yes)"
+expect "gate: concurrent reviews still count" 0 review-gate.sh \
+  "$(pr_cmd p5 "$WORK/gate-par-a" 'gh pr create --fill')"
+
+# Snapshots per path are bounded; the newest stay.
+lib_key="$(printf '%s' src/lib.rs | shasum -a 256 | cut -c 1-32)"
+for ((n = 0; n < 34; n++)); do
+  printf 'pub fn round%d() {}\n' "$n" >>"$WORK/gate-par-a/src/lib.rs"
+  run_hook review-done.sh "$review_a"
+done
+kept="$(find "$REVIEW_STATE" -name "$lib_key*" | wc -l | tr -d ' ')"
+check "review: at most 32 snapshots per path (kept $kept)" "$([[ $kept -eq 32 ]] && echo yes)"
+commit_all "$WORK/gate-par-a" "rounds"
+expect "gate: the newest snapshot survives pruning" 0 review-gate.sh \
+  "$(pr_cmd p5 "$WORK/gate-par-a" 'gh pr create --fill')"
+
 # Many files: one pass over the snapshots, and a long listing still blocks (exit 2, not 141).
 GM="$WORK/gate-many"
 new_cloned_repo "$GM"
