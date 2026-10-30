@@ -698,14 +698,34 @@ check "review: concurrent runs leave no temporary files" \
 expect "gate: concurrent reviews still count" 0 review-gate.sh \
   "$(pr_cmd p5 "$WORK/gate-par-a" 'gh pr create --fill')"
 
-# Snapshots per path are bounded; the newest stay.
+# Several snapshots of one file, none of them its committed version: the closest counts.
+GE="$WORK/gate-par-e"
+git -C "$GP" worktree add -q -b par-e "$GE" main
+lines "$GE/src/e.rs" 0 30
+run_hook review-done.sh "$(subagent_stop p7 "$GE" "$reviewer")"
+lines "$GE/src/e.rs" 30 30
+run_hook review-done.sh "$(subagent_stop p7 "$GE" "$reviewer")"
+: >"$GE/src/e.rs"
+lines "$GE/src/e.rs" 0 30
+lines "$GE/src/e.rs" 100 3
+commit_all "$GE" "close to the first review"
+expect "gate: the closest of several snapshots counts" 0 review-gate.sh \
+  "$(pr_cmd p7 "$GE" 'gh pr create --fill')"
+
+# Snapshots per path are bounded: the newest stay, the oldest go.
+keep="$(sed -n 's/^REVIEW_KEEP=//p' "$HOOKS/changes.sh")"
 lib_key="$(printf '%s' src/lib.rs | shasum -a 256 | cut -c 1-32)"
-for ((n = 0; n < 34; n++)); do
+for ((n = 0; n < keep + 2; n++)); do
   printf 'pub fn round%d() {}\n' "$n" >>"$WORK/gate-par-a/src/lib.rs"
   run_hook review-done.sh "$review_a"
+  if ((n == 0)); then
+    first="$REVIEW_STATE/$lib_key.$(git hash-object "$WORK/gate-par-a/src/lib.rs")"
+  fi
 done
-kept="$(find "$REVIEW_STATE" -name "$lib_key*" | wc -l | tr -d ' ')"
-check "review: at most 32 snapshots per path (kept $kept)" "$([[ $kept -eq 32 ]] && echo yes)"
+kept="$(find "$REVIEW_STATE" -name "$lib_key.*" | wc -l | tr -d ' ')"
+check "review: at most $keep snapshots per path (kept $kept)" \
+  "$([[ $kept -eq $keep ]] && echo yes)"
+check "review: the oldest snapshot is pruned" "$([[ -n "$first" && ! -e "$first" ]] && echo yes)"
 commit_all "$WORK/gate-par-a" "rounds"
 expect "gate: the newest snapshot survives pruning" 0 review-gate.sh \
   "$(pr_cmd p5 "$WORK/gate-par-a" 'gh pr create --fill')"
@@ -722,6 +742,13 @@ expect "gate: 1200 unreviewed files block" 2 review-gate.sh "$(pr_cmd v6 "$GM" '
   "changes 1200 lines"
 elapsed=$(($(date +%s) - started))
 check "gate: 1200 files in under 20 s (took ${elapsed}s)" "$([[ $elapsed -lt 20 ]] && echo yes)"
+# With every file reviewed the gate looks each one up in a single listing of the record.
+run_hook review-done.sh "$(subagent_stop v6 "$GM" "$reviewer")"
+started="$(date +%s)"
+expect "gate: 1200 reviewed files pass" 0 review-gate.sh "$(pr_cmd v6 "$GM" 'gh pr ready')"
+elapsed=$(($(date +%s) - started))
+check "gate: 1200 reviewed files in under 20 s (took ${elapsed}s)" \
+  "$([[ $elapsed -lt 20 ]] && echo yes)"
 
 SETTINGS="$HOOKS/../../settings.json"
 check "settings: the review gate runs on Bash, not on Stop" "$(jq -e '

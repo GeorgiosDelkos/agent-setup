@@ -46,6 +46,19 @@ worktrees() {
   done | sort -u
 }
 
+# Commit worktree $1's changes are measured from: its merge-base with the default branch, the
+# base the gate measures a pull request from; else HEAD; else the empty tree. Not diff_base:
+# that records a session baseline, and hashes the repo's whole state, in every worktree the
+# review visits, which this session may never touch.
+review_base() {
+  local root="$1" branch
+  branch="$(default_branch "$root")"
+  if [[ -n "$branch" ]] && git -C "$root" merge-base HEAD "$branch" 2>/dev/null; then
+    return 0
+  fi
+  git -C "$root" rev-parse -q --verify HEAD || printf '%s' "$EMPTY_TREE"
+}
+
 lists=()
 while IFS= read -r list; do
   lists+=("$list")
@@ -53,7 +66,7 @@ done < <(session_touched_lists)
 
 stop_roots ${lists[@]+"${lists[@]}"} | worktrees | while IFS= read -r root; do
   mkdir -p "$(review_dir "$root")"
-  changed_files "$root" "$(diff_base "$root")" ${lists[@]+"${lists[@]}"} |
+  changed_files "$root" "$(review_base "$root")" ${lists[@]+"${lists[@]}"} |
     { grep '\.rs$' || true; } |
     awk -v prefix="$root/" 'index($0, prefix) == 1 { print substr($0, length(prefix) + 1) }' |
     review_keys "$root" | save_review_snapshots "$root"

@@ -327,9 +327,17 @@ save_review_snapshots() {
       my ($path, $key) = split /\t/, $line;
       my ($dir, $hash) = $key =~ m{^(.*)/([^/]+)\z} or die "review: bad key $key\n";
       # One directory listing for all paths: a glob per path is quadratic in the record.
+      # A temporary file an hour old belongs to a run that was killed (hooks time out
+      # within minutes); nothing else would remove it.
       if (!$listed++) {
         opendir my $list, $dir or die "review: cannot read $dir: $!\n";
-        push @{ $names{ substr $_, 0, 32 } }, $_ for grep { /^[0-9a-f]{32}/ } readdir $list;
+        for (readdir $list) {
+          if (/^([0-9a-f]{32})\.[0-9a-f]+\z/) {
+            push @{ $names{$1} }, $_;
+          } elsif (/^\.tmp-/ && -M "$dir/$_" > 1 / 24) {
+            unlink "$dir/$_";
+          }
+        }
       }
       my $content = "";
       if (open my $in, "<:raw", "$ENV{ROOT}/$path") {
@@ -338,11 +346,20 @@ save_review_snapshots() {
       }
       # git hash-object, without a process per file.
       my $name = "$hash." . sha1_hex("blob " . length($content) . "\0" . $content);
-      my ($out, $tmp) = tempfile(".tmp-XXXXXX", DIR => $dir);
-      binmode $out;
-      print {$out} $content;
-      close $out or die "review: cannot write $tmp: $!\n";
-      rename $tmp, "$dir/$name" or die "review: cannot rename $tmp to $dir/$name: $!\n";
+      # One file that cannot be saved costs only its own review, not the rest of the run.
+      my $tmp;
+      my $saved = eval {
+        (my $out, $tmp) = tempfile(".tmp-XXXXXX", DIR => $dir);
+        binmode $out;
+        print {$out} $content or die "$!\n";
+        close $out or die "$!\n";
+        rename $tmp, "$dir/$name" or die "$!\n";
+      };
+      if (!$saved) {
+        warn "review: cannot save the snapshot of $path as $dir/$name: $@";
+        unlink $tmp if defined $tmp;
+        next;
+      }
       # Sub-second mtimes: several review rounds can land in one second.
       my %mtime = map { $_ => (Time::HiRes::stat("$dir/$_"))[9] // 0 }
         grep { $_ ne $name } @{ $names{$hash} || [] };
