@@ -243,6 +243,40 @@ expect "grok: path/contents scanned" 2 style-gate.sh \
   "$(jq -nc --arg p "$LIB/src/x.rs" '{session_id: "g2", tool_name: "write",
       tool_input: {path: $p, contents: "unsafe impl Send for A {}"}}')" "topics/unsafe.md"
 
+# $1 session, $2 path, $3 tool (read_file or Read), $4 offset, $5 limit.
+# An empty offset or limit is omitted. Grok's read_file names the file target_file.
+sliced_read() {
+  jq -nc --arg s "$1" --arg p "$2" --arg tool "$3" \
+    --arg offset "${4:-}" --arg limit "${5:-}" '
+    {session_id: $s, tool_name: $tool, tool_input:
+      ((if $tool == "read_file" then {target_file: $p} else {file_path: $p} end)
+      + (if $offset == "" then {} else {offset: ($offset | tonumber)} end)
+      + (if $limit == "" then {} else {limit: ($limit | tonumber)} end))}
+  '
+}
+# Grok returns SKILL.md whole even when offset and limit are set. A topic slice
+# leaves the rest unread, so it must not open that topic.
+run_hook style-loaded.sh "$(sliced_read g8 "$SKILL/SKILL.md" read_file 1 5)"
+expect "grok: sliced SKILL.md still loads the skill" 0 style-gate.sh \
+  "$(grok_edit g8 "$LIB/src/x.rs" 'fn a() {}')"
+run_hook style-loaded.sh "$(sliced_read g8 "$SKILL/topics/async.md" read_file 1 5)"
+expect "grok: sliced topic read does not count" 2 style-gate.sh \
+  "$(grok_edit g8 "$LIB/src/x.rs" 'x.await')" "topics/async.md"
+run_hook style-loaded.sh "$(sliced_read g8 "$SKILL/topics/async.md" read_file 2)"
+expect "grok: topic offset past line 1 does not count" 2 style-gate.sh \
+  "$(grok_edit g8 "$LIB/src/x.rs" 'x.await')" "topics/async.md"
+run_hook style-loaded.sh "$(sliced_read g8 "$SKILL/topics/async.md" read_file 1)"
+expect "grok: topic offset 1 with no limit counts" 0 style-gate.sh \
+  "$(grok_edit g8 "$LIB/src/x.rs" 'x.await')"
+# Claude's Read honors offset and limit on every file, including SKILL.md.
+run_hook style-loaded.sh "$(sliced_read g9 "$SKILL/SKILL.md" Read "" 20)"
+expect "claude: sliced SKILL.md does not load the skill" 2 style-gate.sh \
+  "$(edit g9 "$LIB/src/x.rs" 'fn a() {}')" "SKILL.md"
+run_hook style-loaded.sh "$(read_file g9 "$SKILL/SKILL.md")"
+run_hook style-loaded.sh "$(sliced_read g9 "$SKILL/topics/testing.md" Read 1 5)"
+expect "claude: sliced topic read does not count" 2 style-gate.sh \
+  "$(edit g9 "$LIB/tests/t.rs" 'fn a() {}')" "topics/testing.md"
+
 # Whole-file shell reads count as loading; partial ones do not.
 bash_cmd() {
   jq -nc --arg s "$1" --arg c "$2" '{session_id: $s, tool_name: "Bash", tool_input: {command: $c}}'
