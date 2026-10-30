@@ -48,8 +48,9 @@ case "$file_path" in
 esac
 
 file_path="$(physical_path "$file_path")"
-# Scratchpad files are formatted but never recorded, so no stop check or review counts them.
-if ! is_scratch_path "$file_path"; then
+# Exempt scratchpad files (scratch_exempt) are formatted but never recorded, so no stop check
+# counts them.
+if ! scratch_exempt "$file_path"; then
   root="$(git_root "$(dirname "$file_path")")"
   if [[ -n "$root" ]]; then
     ensure_baseline "$root"

@@ -779,17 +779,66 @@ printf '// TODO: dirty before the session\n' >>"$REPO5/src/lib.rs"
 prompt q1 "$REPO5"
 expect "check: Q&A session in a dirty repo passes" 0 check-on-stop.sh "$(rstop q1 "$REPO5")"
 
-# Claude's session scratchpad is exempt: no style gate, nothing recorded, no stop check.
-SCRATCH="$WORK/tmp/claude-501/proj/sess/scratchpad/crate"
-new_repo "$SCRATCH"
-prompt s1 "$SCRATCH"
-expect "scratch: style gate skips the scratchpad" 0 style-gate.sh \
-  "$(edit s1 "$SCRATCH/src/lib.rs" 'unsafe { f() }')"
-lines "$SCRATCH/src/lib.rs" 5 30
-run_hook fmt-on-edit.sh "$(edit s1 "$SCRATCH/src/lib.rs" 'x')"
-check "scratch: edit not recorded" \
-  "$([[ ! -s "$STATE_TMP/claude-rust-hooks/s1.main.edited" ]] && echo yes)"
-expect "scratch: stop check ignores scratch changes" 0 check-on-stop.sh "$(rstop s1 "$SCRATCH")"
+# Claude's session scratchpad is exempt (scratch_exempt) unless it holds a git branch: no
+# style gate, nothing recorded, no stop check. Each case edits a crate there without loading
+# the skill or running tests, so a checked one is blocked by both.
+SCRATCHPAD="$WORK/tmp/claude-501/proj/sess/scratchpad"
+# scratch_case SESSION DIR: style gate, recorded edit, and stop check for an edit in DIR.
+# Sets $gate_code, $recorded (yes or empty) and $stop_code.
+scratch_case() {
+  prompt "$1" "$2"
+  run_hook style-gate.sh "$(edit "$1" "$2/src/lib.rs" 'unsafe { f() }')"
+  gate_code="$code"
+  lines "$2/src/lib.rs" 5 30
+  run_hook fmt-on-edit.sh "$(edit "$1" "$2/src/lib.rs" 'x')"
+  recorded="$([[ -s "$STATE_TMP/claude-rust-hooks/$1.main.edited" ]] && echo yes || true)"
+  run_hook check-on-stop.sh "$(rstop "$1" "$2")"
+  stop_code="$code"
+}
+expect_exempt() {
+  check "scratch: $1: style gate skips it" "$([[ $gate_code -eq 0 ]] && echo yes)"
+  check "scratch: $1: edit not recorded" "$([[ -z "$recorded" ]] && echo yes)"
+  check "scratch: $1: stop check ignores it" "$([[ $stop_code -eq 0 ]] && echo yes)" "$out"
+}
+expect_checked() {
+  check "scratch: $1: style gate blocks" "$([[ $gate_code -eq 2 ]] && echo yes)"
+  check "scratch: $1: edit recorded" "$([[ -n "$recorded" ]] && echo yes)"
+  check "scratch: $1: stop check blocks" \
+    "$([[ $stop_code -eq 2 && "$out" == *"No test run"* ]] && echo yes)" "$out"
+}
+
+mkdir -p "$SCRATCHPAD/plain/src"
+lines "$SCRATCHPAD/plain/src/lib.rs" 0 5
+scratch_case s1 "$SCRATCHPAD/plain"
+expect_exempt "a plain directory"
+
+# `cargo new` runs `git init`: a branch with no commit is still scratch.
+mkdir -p "$SCRATCHPAD/unborn/src"
+lines "$SCRATCHPAD/unborn/src/lib.rs" 0 5
+git -C "$SCRATCHPAD/unborn" init -q -b main
+scratch_case s4 "$SCRATCHPAD/unborn"
+expect_exempt "a repo with no commit"
+
+# A repo above the scratchpad does not make it a branch checkout.
+OUTER="$WORK/outer"
+new_repo "$OUTER"
+mkdir -p "$OUTER/tmp/claude-501/proj/sess/scratchpad/x/src"
+expect "scratch: a repo above the scratchpad keeps it exempt" 0 style-gate.sh \
+  "$(edit s5 "$OUTER/tmp/claude-501/proj/sess/scratchpad/x/src/lib.rs" 'fn a() {}')"
+
+# Worktrees of a repo outside the scratchpad, as the main session makes them.
+SCRATCH_BASE="$WORK/scratch-base"
+new_repo "$SCRATCH_BASE"
+git -C "$SCRATCH_BASE" worktree add -q --detach "$SCRATCHPAD/old" main
+scratch_case s2 "$SCRATCHPAD/old"
+expect_exempt "a detached-HEAD worktree"
+
+# A branch there may become a pull request (scratchpad/batch-e, 2026-10-30).
+git -C "$SCRATCH_BASE" worktree add -q -b batch "$SCRATCHPAD/batch" main
+scratch_case s3 "$SCRATCHPAD/batch"
+expect_checked "a worktree on a branch"
+run_hook style-gate.sh "$(edit s3 "$SCRATCHPAD/batch/src/new/mod.rs" 'fn a() {}')"
+check "scratch: a new file in a branch worktree is gated" "$([[ $code -eq 2 ]] && echo yes)"
 
 # check-on-stop: runs cargo clippy on throwaway crates.
 # An opted-in crate (house rules on, with its own pedantic lint table) unless $3 is `plain`.

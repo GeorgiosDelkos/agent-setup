@@ -14,6 +14,7 @@
 # house rules (house_opted_in), house-check.pl and the column limit on changed lines. Changed
 # lines are the hunks since that base; an untracked or non-git file counts as all changed.
 # Last, Rust files this session modified after its last test run (tests-ran.sh) ask for one.
+# A root under the session scratchpad is skipped unless it is on a git branch (scratch_exempt).
 #
 # A state that was already checked is not checked again, and a second stop in a row always
 # passes. Exit 2 only for findings; a hook's own failure is reported loudly and exits 1, so
@@ -43,6 +44,7 @@ done < <(session_touched_lists)
 # `root<TAB>file` for every existing file to check, sorted.
 files_to_check() {
   local root base file
+  # A subagent's list never holds an exempt path: fmt-on-edit.sh does not record one.
   if is_subagent; then
     sort -u "$edited" 2>/dev/null | while IFS= read -r file; do
       if [[ -f "$file" ]]; then
@@ -53,11 +55,14 @@ files_to_check() {
     return 0
   fi
   stop_roots "$edited" | while IFS= read -r root; do
-    if ! session_caused "$root" ${lists[@]+"${lists[@]}"} "$edited"; then
+    # Per root, not per file: a root is a git top level or a crate or directory outside git,
+    # so every file under it shares its answer.
+    if scratch_exempt "$root/" ||
+      ! session_caused "$root" ${lists[@]+"${lists[@]}"} "$edited"; then
       continue
     fi
     base="$(diff_base "$root" 2>/dev/null || true)"
-    changed_files "$root" "$base" "$edited" | { grep -vE "$SCRATCH_RE" || true; } |
+    changed_files "$root" "$base" "$edited" |
       while IFS= read -r file; do
         if [[ -f "$file" ]]; then
           printf '%s\t%s\n' "$root" "$file"
