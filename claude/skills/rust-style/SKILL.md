@@ -47,7 +47,7 @@ Read the topic file before an edit that touches its area. The edit hook blocks u
 | Topic | File | Loaded when the edit adds |
 |---|---|---|
 | Unsafe and FFI | `topics/unsafe.md` | `unsafe`, `extern "C"`, `repr(C)`, raw pointers, `MaybeUninit`, `UnsafeCell` |
-| Concurrency | `topics/concurrency.md` | atomics, `Ordering::`, `Mutex`, `RwLock`, `Condvar`, `thread::spawn`, loom |
+| Concurrency | `topics/concurrency.md` | atomics, `Ordering::`, `Mutex`, `RwLock`, `Condvar`, `thread::spawn`, channels, loom |
 | Async | `topics/async.md` | `async`, `.await`, `impl Future`, `Poll<`, `Waker`, `tokio::` |
 | Library API | `topics/library-api.md` | a `pub` item in a published library crate |
 | Testing | `topics/testing.md` | anything under `tests/` or `benches/`, `#[test]`, `#[cfg(test)]` |

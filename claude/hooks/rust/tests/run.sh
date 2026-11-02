@@ -189,6 +189,9 @@ expect "unsafe: passes after topic read" 0 style-gate.sh \
 expect "concurrency: atomic blocked" 2 style-gate.sh \
   "$(edit g1 "$LIB/src/x.rs" 'static N: AtomicUsize = AtomicUsize::new(0);')" \
   "topics/concurrency.md"
+expect "concurrency: channel blocked" 2 style-gate.sh \
+  "$(edit g1 "$LIB/src/x.rs" 'let (tx, rx) = std::sync::mpsc::sync_channel(64);')" \
+  "topics/concurrency.md"
 expect "concurrency: cmp::Ordering passes" 0 style-gate.sh \
   "$(edit g1 "$LIB/src/x.rs" 'x.cmp(&y) == Ordering::Less')"
 expect "testing: tests/ path blocked" 2 style-gate.sh "$(edit g1 "$LIB/tests/t.rs" 'fn a() {}')" \
