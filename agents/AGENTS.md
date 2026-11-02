@@ -59,6 +59,11 @@ rule and skill below, except correctness and safety.
 - Fail fast with actionable errors (operation, input, fix). Never swallow errors.
 - Zero warnings from any tool. If one truly can't be fixed, ignore it inline with a reason.
 - Prefer structure-aware tools (ast-grep, LSP, compiler) over regex for code changes.
+- High-performance code (a stated throughput or latency target, or a measured hot path)
+  takes no global lock on the hot path: lock-free, or a lock sharded by key. There, shared
+  state with rules across keys is owned by an actor (sharded by key when one is not enough)
+  reached through a bounded mailbox, so a full mailbox pushes back on senders instead of
+  growing memory. The language skill has details.
 - Subagents writing code get the design principles and these style rules in their prompt.
   Parallel ones each work in their own worktree.
 

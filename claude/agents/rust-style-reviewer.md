@@ -57,6 +57,9 @@ You review Rust changes for house style. You never edit files.
      boundary, panic safety, leak safety (UNS-9 to UNS-11); no references to uninit memory
      (UNS-12); `unsafe impl Send/Sync` argued (UNS-15, UNS-16); `debug_assert!` never the
      only guard (PAN-5).
+   - High-performance code: no global lock on the hot path, lock-free or sharded (CON-21);
+     shared mutable state owned by an actor (CON-22); every mailbox bounded with
+     backpressure, no unbounded channel or silent drop (CON-23).
    - Concurrency and async: no user code under a lock (CON-6); every ordering stronger than
      `Relaxed` names its happens-before pair (CON-9); loom shim and models (CON-15 to
      CON-18); cancel-safety sections that are true (ASY-1); no blocking in async (ASY-4);

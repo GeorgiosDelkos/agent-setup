@@ -69,6 +69,9 @@ rust_topics() {
   # Only the atomic orderings: cmp::Ordering::Less is not concurrency.
   local concurrency='\bAtomic[A-Z][A-Za-z0-9]*|Ordering::(Relaxed|Acquire|Release|AcqRel|SeqCst)'
   concurrency+='|\bMutex\b|\bRwLock\b|\bCondvar\b|thread::spawn|\bloom::'
+  # Channels: the actor and mailbox rules (CON-22, CON-23) live in the concurrency topic.
+  concurrency+='|\bmpsc\b|\bsync_channel\b|\bcrossbeam(_channel|::channel)\b|\bflume::'
+  concurrency+='|\basync_channel::|\bkanal::'
   local async='\basync\b|\.await\b|impl Future|\bPoll<|\bWaker\b|\btokio::'
   local testing='#\[([a-z_]+::)?test\]|#\[cfg\(test\)\]|proptest!|loom::model'
   local pub_item='^[[:space:]]*pub[[:space:]]+((const|unsafe|async|extern[[:space:]]+"[^"]*")'

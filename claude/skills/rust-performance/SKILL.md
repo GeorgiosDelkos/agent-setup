@@ -334,7 +334,7 @@ RUSTFLAGS="-C force-frame-pointers=yes" cargo build --release
 - `criterion` -- Statistical benchmarking
 - `bytes` -- Zero-copy byte buffers
 - `rayon` -- Data parallelism
-- `dashmap` -- Lock-free concurrent HashMap
+- `dashmap` -- Concurrent HashMap over sharded `RwLock`s
 - `quick_cache` -- Bounded concurrent LRU cache
 - `parking_lot` -- Faster mutexes
 - `smallvec` -- Stack allocation for small vecs

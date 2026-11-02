@@ -189,6 +189,13 @@ expect "unsafe: passes after topic read" 0 style-gate.sh \
 expect "concurrency: atomic blocked" 2 style-gate.sh \
   "$(edit g1 "$LIB/src/x.rs" 'static N: AtomicUsize = AtomicUsize::new(0);')" \
   "topics/concurrency.md"
+# One input per channel pattern, so dropping any one of them fails a test.
+for channel in 'use std::sync::{mpsc, Arc};' 'let (tx, rx) = sync_channel(64);' \
+  'crossbeam_channel::bounded(8)' 'crossbeam::channel::bounded(8)' 'flume::bounded(8)' \
+  'async_channel::bounded(8)' 'kanal::bounded(8)'; do
+  expect "concurrency: channel blocked: $channel" 2 style-gate.sh \
+    "$(edit g1 "$LIB/src/x.rs" "$channel")" "topics/concurrency.md"
+done
 expect "concurrency: cmp::Ordering passes" 0 style-gate.sh \
   "$(edit g1 "$LIB/src/x.rs" 'x.cmp(&y) == Ordering::Less')"
 expect "testing: tests/ path blocked" 2 style-gate.sh "$(edit g1 "$LIB/tests/t.rs" 'fn a() {}')" \
