@@ -1,7 +1,7 @@
 # Concurrency and atomics (CON)
 
-Read before adding atomics, `Ordering::`, locks, `Condvar`, threads, or loom code. Tags and
-IDs as in `../SKILL.md`. For depth: `rfr-concurrency`; for unsafe parts also
+Read before adding atomics, `Ordering::`, locks, `Condvar`, threads, channels, or loom code. Tags
+and IDs as in `../SKILL.md`. For depth: `rfr-concurrency`; for unsafe parts also
 `topics/unsafe.md`.
 
 ## Design
@@ -23,32 +23,39 @@ IDs as in `../SKILL.md`. For depth: `rfr-concurrency`; for unsafe parts also
 
 ## High-performance code
 
-IDs continue from CON-20 so existing IDs stay stable.
-
-- **CON-21** High-performance code is a crate under the low-level profile, or code with a
-  stated throughput or latency target or a measured hot path. Its hot path takes no global
-  lock. Reads go lock-free: atomics, an atomically swapped `Arc` snapshot, epoch or RCU
-  reclamation, or per-thread or per-core state merged on read. A write that must lock takes
-  one shard of a sharded lock: `shards[hash(key) & (N - 1)]`, N a power of two sized from
-  the core count, each shard `CachePadded`. A lock left on the hot path has a comment with
-  the benchmark that shows it costs nothing. The docs say which path takes which lock
-  (LLV-5, LLV-6), and lock-free code still ships with its loom models and TSan run (CON-19).
-  [house: user decision]
-- **CON-22** Shared mutable state in high-performance code is owned by an actor: one thread
-  or task holds it as plain owned data and is the only code that mutates it; everyone else
-  sends it messages. Callers hold a cheap `Clone` handle over the sender, a request that
-  needs an answer carries a `oneshot` reply, and a closed mailbox is an error, never a panic
-  (ASY-9). Hot reads do not queue behind writes: the actor publishes an immutable snapshot
-  readers load lock-free (CON-21). When one actor is the bottleneck, shard it into N actors
-  by key hash, never back to a shared lock. [house: user decision]
-- **CON-23** Every mailbox is bounded, its capacity a named `const` with the reason for its
-  value. A full mailbox applies backpressure to the sender: by default the sender waits
-  (`send().await`, `SyncSender::send`); where waiting is wrong (a request handler that must
-  answer within a deadline), `try_send` hands a `Full` error back to the caller, which sheds
-  the load visibly. Never an unbounded channel (`std::sync::mpsc::channel`,
-  `mpsc::unbounded_channel`, `crossbeam_channel::unbounded`) and never a silent drop: an
-  unbounded mailbox turns overload into unbounded memory and latency. Expose the queue depth
-  as a metric when the crate has metrics. [house: user decision]
+- **CON-21** High-performance code has a stated throughput or latency target, or a measured
+  hot path; the low-level profile alone does not make a crate high-performance. Its hot path
+  takes no global lock. Reads go lock-free: atomics, an atomically swapped `Arc` snapshot,
+  epoch or RCU reclamation, or per-thread or per-core state merged on read. A write that
+  must lock takes one shard of a sharded lock: N shards, N a power of two sized from the core
+  count, each shard `CachePadded`, picked by the top `log2(N)` bits of the key hash (a hash
+  map inside the shard indexes its buckets by the low bits, so those would collide). A lock
+  left on the hot path has a comment with the benchmark that shows it costs nothing. The
+  docs say which path takes which lock (LLV-5, LLV-6), and lock-free code still ships with
+  its loom models and TSan run (CON-19). [house: user decision]
+- **CON-22** Choose by what the shared state is. Independent per-key data, with no rule that
+  ties keys together (counters, a map of independent entries), uses atomics or a sharded map
+  (CON-21). State with a rule across keys, or that owns I/O or another resource, is owned by
+  an actor: one thread or task holds it as plain owned data and is the only code that mutates
+  it; everyone else sends it messages. Callers hold a cheap `Clone` handle over the sender, a
+  request that needs an answer carries a `oneshot` reply, and a closed mailbox is an error,
+  never a panic (ASY-9). Hot reads do not queue behind writes: the actor publishes an
+  immutable snapshot readers load lock-free (CON-21), once per batch of messages rather than
+  per write, and through a persistent or left-right structure when copying the whole state
+  costs too much. When one actor is the bottleneck, shard it into N actors by key hash, never
+  back to a shared lock. [house: user decision]
+- **CON-23** Every actor mailbox in high-performance code is bounded, its capacity a named
+  `const` with the reason for its value. A full mailbox applies backpressure to the sender:
+  by default the sender waits (`send().await`, `SyncSender::send`); where waiting is wrong (a
+  request handler that must answer within a deadline), `try_send` hands a `Full` error back
+  to the caller, which sheds the load visibly. Never an unbounded channel
+  (`std::sync::mpsc::channel`, `mpsc::unbounded_channel`, `crossbeam_channel::unbounded`)
+  and never a silent drop: an unbounded mailbox turns overload into unbounded memory and
+  latency. Waiting sends must not form a cycle: two actors, or a ring of them, that wait on
+  each other's full mailboxes deadlock. A message back up the graph goes through the
+  request's `oneshot` reply or `try_send`, with a comment naming the cycle it avoids. Expose
+  the queue depth as a metric when the crate has metrics. [house: user decision;
+  ref: `rfr-concurrency`]
 
 ## Locks and callbacks
 
