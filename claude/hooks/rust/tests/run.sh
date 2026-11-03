@@ -1317,7 +1317,23 @@ guard "switch --discard-changes blocked" 2 "git switch --discard-changes feature
 guard "switch to a branch passes" 0 "git switch -c feature"
 
 guard "gh pr merge --admin blocked" 2 "gh pr merge 7 --squash --admin"
+guard "env prefix gh pr merge --admin blocked" 2 "FOO=1 gh pr merge 7 --admin"
+guard "two env prefixes gh pr merge --admin blocked" 2 \
+  "A=1 B=x gh pr merge 7 --admin"
+guard "env gh pr merge --admin blocked" 2 "env FOO=1 gh pr merge 7 --admin"
+guard "sudo gh pr merge --admin blocked" 2 "sudo gh pr merge 7 --admin"
+guard "full-path gh pr merge --admin blocked" 2 "/opt/homebrew/bin/gh pr merge 7 --admin"
+guard "gh after then blocked" 2 "if true; then gh pr merge 7 --admin; fi"
+guard "gh -R o/r pr merge --admin blocked" 2 "gh -R o/r pr merge 7 --admin"
+guard "gh --repo=o/r pr merge --admin blocked" 2 "gh --repo=o/r pr merge 7 --admin"
+# A removed ALLOW_ADMIN_MERGE exception matched anywhere in the line, so an allowed-looking
+# first command unlocked an admin merge in a later one. This keeps that from coming back.
+guard "admin merge chained after an allowed-looking merge blocked" 2 \
+  "BYPASS=1 gh pr merge 1 && gh pr merge 9 --admin --repo o/r"
 guard "gh pr merge passes" 0 "gh pr merge 7 --squash"
+guard "env prefix gh pr merge passes" 0 "GH_DEBUG=1 gh pr merge 7 --squash"
+guard "--admin in a later command passes" 0 "gh pr merge 7 --squash; echo --admin"
+guard "quoted mention passes" 0 "git commit -m 'block gh pr merge 7 --admin'"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

@@ -185,7 +185,12 @@ if grep -qxE 'main|master|\*' <<<"$branches"; then
   block "push to a feature branch and open a PR, never directly to main/master"
 fi
 
-admin_merge='(^|[;&|(][[:space:]]*)gh[[:space:]]+pr[[:space:]]+merge[[:space:]].*--admin'
+# `gh` as a word anywhere, as for rm above, not only at a command start: a prefix (`env`,
+# `sudo`, `command`, VAR=value, a full path, `then`) would otherwise hide the merge. The cost:
+# an unquoted `echo gh pr merge 7 --admin` is blocked too. `--admin` must be in the same
+# simple command, and gh's own `-R`/`--repo` may come before `pr`.
+admin_merge='(^|[^[:alnum:]_.-])gh([[:space:]]+(-R|--repo)([[:space:]]+|=)[^[:space:]]+)?'
+admin_merge+='[[:space:]]+pr[[:space:]]+merge[[:space:]][^;&|]*--admin'
 if grep -qE "$admin_merge" <<<"$code"; then
   block "gh pr merge --admin skips the PR's required reviews and checks: leave the merge" \
     "to the user"
