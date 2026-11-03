@@ -63,8 +63,10 @@ deletes_recursively() {
 # --hard` and a checkout or restore of the whole tree overwrite every uncommitted change. A
 # single path (`git checkout -- src/x.rs`) and `git restore --staged` pass.
 discards_work() {
-  # Leading VAR=value words, then git with any global options (-C dir, -c key=value, --long).
-  local git='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git'
+  # git as a word anywhere in the simple command, as for rm, so a prefix (VAR=value, `env`,
+  # `sudo`, `command`, a full path, `then`) does not hide it; then any global options (-C dir,
+  # -c key=value, --long). The cost: an unquoted `echo git reset --hard` is blocked too.
+  local git='(^|[^[:alnum:]_.-])git'
   git+='(([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)|([[:space:]]+--[a-z-]+(=[^[:space:]]*)?))*'
   git+='[[:space:]]+'
   local force='[[:space:]](-[[:alpha:]]*f[[:alpha:]]*|--force)([[:space:]]|$)'
