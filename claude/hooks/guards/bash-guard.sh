@@ -58,6 +58,22 @@ deletes_recursively() {
   grep -qE "$rm_r" <<<"$cmd" || grep -qE "$find_delete" <<<"$cmd"
 }
 
+# git's global options that take their value as a separate word (`git -C dir`), from the
+# usage of git 2.56 plus --attr-source and --super-prefix, which it also accepts. Any other
+# word before the subcommand that starts with `-` stands alone (-P, --no-pager, --opt=value).
+git_value_options=(-C -c --git-dir --work-tree --namespace --config-env --attr-source
+  --super-prefix)
+
+# The simple commands in $1, one per line: split at ; & && || | backticks and newlines, with
+# subshell parens dropped. Quote marks become spaces: code_text keeps a shell hand-off
+# (`bash -c "..."`, ssh) whole, and a closing quote right after `--hard` or `main` would hide
+# the word from the checks. Known limit: a quoted option value with a space inside a
+# hand-off (`bash -c 'git -c "a=b c" push'`) splits into words. perl, not sed: BSD sed writes
+# `\n` in a replacement as a plain `n`.
+simple_commands() {
+  perl -pe 's/(&&|\|\||[;&|()`])/\n/g; s/["\x27]/ /g' <<<"$1"
+}
+
 # Why the first simple command in $1 that throws away uncommitted work does so, or nothing.
 # trash cannot bring any of it back: `git clean -f` deletes untracked files, `git reset
 # --hard` and a checkout or restore of the whole tree overwrite every uncommitted change. A
@@ -65,14 +81,13 @@ deletes_recursively() {
 discards_work() {
   # git as a word anywhere in the simple command, with the same boundary as the gh check
   # below, so a prefix (VAR=value, `env`, `sudo`, `command`, a full path, `then`) does not
-  # hide it; then any global options: those that take a separate value (-C dir, -c key=value,
-  # --git-dir dir, ...) and any other word starting with `-` (-P, --no-pager, --opt=value).
-  # The costs: an unquoted `echo git reset --hard` is blocked, and so is
+  # hide it; then any global options (git_value_options with their value, or one word
+  # starting with `-`). The costs: an unquoted `echo git reset --hard` is blocked, and so is
   # `find . -exec git checkout -- {} ;`, whose `.` reads as the whole tree (it does discard
   # those files, under the wrong message).
-  local git='(^|[^[:alnum:]_.-])git(([[:space:]]+(-[Cc]|--git-dir|--work-tree|--namespace'
-  git+='|--config-env)[[:space:]]+[^[:space:]]+)|([[:space:]]+-[^[:space:]]+))*'
-  git+='[[:space:]]+'
+  local value_options="${git_value_options[*]}"
+  local option="[[:space:]]+(${value_options// /|})[[:space:]]+[^[:space:]]+"
+  local git="(^|[^[:alnum:]_.-])git(${option}|[[:space:]]+-[^[:space:]]+)*[[:space:]]+"
   local force='[[:space:]](-[[:alpha:]]*f[[:alpha:]]*|--force)([[:space:]]|$)'
   local dry_run='[[:space:]](-[[:alpha:]]*n[[:alpha:]]*|--dry-run)([[:space:]]|$)'
   local whole_tree='[[:space:]](\.|\./|:/|\*)([[:space:]]|$)'
@@ -80,8 +95,6 @@ discards_work() {
   local worktree='[[:space:]](--worktree|-W)([[:space:]]|$)'
   local discard='[[:space:]](-f|--force|--discard-changes)([[:space:]]|$)'
   local segment
-  # Quote marks become spaces: code_text keeps a shell hand-off (`bash -c "..."`, ssh) whole,
-  # and a closing quote right after `--hard` or `-f` would hide the flag from the patterns.
   while IFS= read -r segment; do
     if [[ "$segment" =~ ${git}clean([[:space:]]|$) && "$segment" =~ $force &&
       ! "$segment" =~ $dry_run ]]; then
@@ -104,7 +117,7 @@ discards_work() {
       echo "a forced checkout or switch throws away uncommitted changes: git stash them first"
       return
     fi
-  done < <(perl -pe 's/(&&|\|\||[;|()])/\n/g; s/["\x27]/ /g' <<<"$1")
+  done < <(simple_commands "$1")
 }
 
 # Current branch of the repo at $1, or nothing (detached HEAD, not a repo).
@@ -122,31 +135,36 @@ resolve_dir() {
   printf '%s' "$dir"
 }
 
-# For one simple command given as words: when it runs `git push`, print the index of `push`
-# and the last -C directory (empty without one); otherwise print nothing. git counts as a
-# word anywhere, as in discards_work, so a prefix (VAR=value, `env`, `sudo`, a full path,
-# `then`) does not hide it, and its global options are skipped.
+# For one simple command run in directory $1, given as the remaining words: when it runs
+# `git push`, print the index of `push` among those words and the directory git runs in;
+# otherwise print nothing. Every word that is git, or a path ending in /git, is tried, as in
+# discards_work, so a prefix (VAR=value, `env`, `sudo -u git`, `then`) does not hide it.
+# Each -C applies relative to the one before, as git does. The cost: an unquoted
+# `echo git push origin main` is blocked.
 git_push_at() {
-  local words=("$@") i dir=""
-  for ((i = 0; i < ${#words[@]}; i++)); do
-    if [[ "${words[i]}" =~ ^(.*/)?git$ ]]; then
-      break
+  local base="$1" words g i dir value_options=" ${git_value_options[*]} "
+  shift
+  words=("$@")
+  for ((g = 0; g < ${#words[@]}; g++)); do
+    if ! [[ "${words[g]}" =~ ^(.*/)?git$ ]]; then
+      continue
+    fi
+    dir="$base"
+    for ((i = g + 1; i < ${#words[@]}; i++)); do
+      if [[ "${words[i]}" == -C ]]; then
+        dir="$(resolve_dir "$dir" "${words[i + 1]:-}")"
+        i=$((i + 1))
+      elif [[ "$value_options" == *" ${words[i]} "* ]]; then
+        i=$((i + 1))
+      elif [[ "${words[i]}" != -* ]]; then
+        break
+      fi
+    done
+    if [[ "${words[i]:-}" == push ]]; then
+      printf '%s %s\n' "$i" "$dir"
+      return
     fi
   done
-  for ((i = i + 1; i < ${#words[@]}; i++)); do
-    case "${words[i]}" in
-    -C)
-      dir="${words[i + 1]:-}"
-      i=$((i + 1))
-      ;;
-    -c | --git-dir | --work-tree | --namespace | --config-env) i=$((i + 1)) ;;
-    -*) ;;
-    *) break ;;
-    esac
-  done
-  if [[ "${words[i]:-}" == push ]]; then
-    printf '%s %s\n' "$i" "$dir"
-  fi
 }
 
 # Branches the `git push` invocations in $1 update, one per line: each refspec's
@@ -155,11 +173,8 @@ git_push_at() {
 # The command is walked one simple command at a time so that `cd repo && git push` looks up
 # the branch of `repo`, not of the session's directory.
 pushed_branches() {
-  local segment tokens dir="$cwd" i token positional refspec git_dir
-  # One simple command per line: split at ; && || | and newlines, drop subshell parens.
-  # Quote marks become spaces, as in discards_work, for shell hand-offs kept whole.
-  # perl, not sed: BSD sed writes `\n` in a replacement as a plain `n`.
-  perl -pe 's/(&&|\|\||[;|()])/\n/g; s/["\x27]/ /g' <<<"$1" | while IFS= read -r segment; do
+  local segment tokens dir="$cwd" i token positional refspec push_dir
+  simple_commands "$1" | while IFS= read -r segment; do
     read -ra tokens <<<"$segment"
     if [[ ${#tokens[@]} -eq 0 ]]; then
       continue
@@ -168,13 +183,9 @@ pushed_branches() {
       dir="$(resolve_dir "$dir" "${tokens[1]:-~}")"
       continue
     fi
-    read -r i git_dir <<<"$(git_push_at "${tokens[@]}")"
+    read -r i push_dir <<<"$(git_push_at "$dir" "${tokens[@]}")"
     if [[ -z "$i" ]]; then
       continue
-    fi
-    local push_dir="$dir"
-    if [[ -n "$git_dir" ]]; then
-      push_dir="$(resolve_dir "$dir" "$git_dir")"
     fi
     positional=()
     for ((i = i + 1; i < ${#tokens[@]}; i++)); do
