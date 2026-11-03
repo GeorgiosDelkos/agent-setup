@@ -122,17 +122,44 @@ resolve_dir() {
   printf '%s' "$dir"
 }
 
-# Branches the `git [-C dir] push` invocations in $1 update, one per line: each refspec's
+# For one simple command given as words: when it runs `git push`, print the index of `push`
+# and the last -C directory (empty without one); otherwise print nothing. git counts as a
+# word anywhere, as in discards_work, so a prefix (VAR=value, `env`, `sudo`, a full path,
+# `then`) does not hide it, and its global options are skipped.
+git_push_at() {
+  local words=("$@") i dir=""
+  for ((i = 0; i < ${#words[@]}; i++)); do
+    if [[ "${words[i]}" =~ ^(.*/)?git$ ]]; then
+      break
+    fi
+  done
+  for ((i = i + 1; i < ${#words[@]}; i++)); do
+    case "${words[i]}" in
+    -C)
+      dir="${words[i + 1]:-}"
+      i=$((i + 1))
+      ;;
+    -c | --git-dir | --work-tree | --namespace | --config-env) i=$((i + 1)) ;;
+    -*) ;;
+    *) break ;;
+    esac
+  done
+  if [[ "${words[i]:-}" == push ]]; then
+    printf '%s %s\n' "$i" "$dir"
+  fi
+}
+
+# Branches the `git push` invocations in $1 update, one per line: each refspec's
 # destination, the current branch for `HEAD` or a push without a refspec (it pushes the
 # current branch under push.default simple or upstream), `*` for --all, --branches, --mirror.
 # The command is walked one simple command at a time so that `cd repo && git push` looks up
 # the branch of `repo`, not of the session's directory.
 pushed_branches() {
-  local push='^git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([[:space:]]|$)'
-  local segment tokens dir="$cwd" i token positional refspec
+  local segment tokens dir="$cwd" i token positional refspec git_dir
   # One simple command per line: split at ; && || | and newlines, drop subshell parens.
+  # Quote marks become spaces, as in discards_work, for shell hand-offs kept whole.
   # perl, not sed: BSD sed writes `\n` in a replacement as a plain `n`.
-  perl -pe 's/(&&|\|\||[;|()])/\n/g' <<<"$1" | while IFS= read -r segment; do
+  perl -pe 's/(&&|\|\||[;|()])/\n/g; s/["\x27]/ /g' <<<"$1" | while IFS= read -r segment; do
     read -ra tokens <<<"$segment"
     if [[ ${#tokens[@]} -eq 0 ]]; then
       continue
@@ -141,14 +168,13 @@ pushed_branches() {
       dir="$(resolve_dir "$dir" "${tokens[1]:-~}")"
       continue
     fi
-    if ! grep -qE "$push" <<<"${tokens[*]}"; then
+    read -r i git_dir <<<"$(git_push_at "${tokens[@]}")"
+    if [[ -z "$i" ]]; then
       continue
     fi
     local push_dir="$dir"
-    i=1
-    if [[ "${tokens[1]}" == -C ]]; then
-      push_dir="$(resolve_dir "$dir" "${tokens[2]}")"
-      i=3
+    if [[ -n "$git_dir" ]]; then
+      push_dir="$(resolve_dir "$dir" "$git_dir")"
     fi
     positional=()
     for ((i = i + 1; i < ${#tokens[@]}; i++)); do
