@@ -4,7 +4,8 @@
 # Idempotent: links that are already correct are left alone; anything else at a target
 # path is moved to ~/.agent-setup-backup/<timestamp>/ before it is replaced. settings.json is
 # merged rather than linked because Claude Code rewrites it in place, which would replace a
-# symlink with a plain file.
+# symlink with a plain file. ~/.cargo/config.toml gets a marked copy of cargo/config.toml
+# (setup_cargo).
 set -euo pipefail
 
 SETUP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -251,35 +252,48 @@ check_tools() {
   fi
 }
 
-# Make ~/.cargo/config.toml include the shared Cargo settings. Included rather than linked or
-# merged, because the local file holds per-machine linkers and rustflags, and TOML has no
-# merge tool here like jq for JSON. `include` must be a top-level key, so it goes before the
-# first table. Cargo 1.95 and later read it (checked 1.95, 1.96, 1.99); 1.88 ignores it
-# without an error, so an old pinned toolchain only loses the setting.
+# Copy the shared Cargo settings into ~/.cargo/config.toml, between marker lines, replacing an
+# older copy. The file is not linked or merged: it also holds per-machine linkers and
+# rustflags, and there is no TOML counterpart to jq here. Cargo's `include` was tried and
+# dropped: a missing included file (a moved or unsynced folder) makes every cargo command
+# fail, and toolchain 1.88 ignores the key. A copy has neither problem; the cost is that an
+# edit to cargo/config.toml reaches a machine only when install.sh runs there.
 setup_cargo() {
-  local shared="$SETUP_DIR/cargo/config.toml" local_file="$HOME/.cargo/config.toml"
-  local old="$BACKUP_DIR/.cargo/config.toml"
-  if [[ -f "$local_file" ]] && grep -qF "\"$shared\"" "$local_file"; then
-    echo "ok      $local_file"
-    return 0
-  fi
-  if [[ -f "$local_file" ]] && grep -q '^[[:space:]]*include[[:space:]]*=' "$local_file"; then
-    echo "skip    $local_file already has an include key; add \"$shared\" to it by hand"
-    return 0
-  fi
-
+  local local_file="$HOME/.cargo/config.toml" relative current kept new block
+  local begin="# BEGIN agent-setup: from cargo/config.toml, rewritten by install.sh"
+  local end="# END agent-setup"
+  block="$begin"$'\n'"$(cat "$SETUP_DIR/cargo/config.toml")"$'\n'"$end"
   if [[ ! -f "$local_file" ]]; then
     mkdir -p "$(dirname "$local_file")"
-    printf 'include = ["%s"]\n' "$shared" >"$local_file"
+    printf '%s\n' "$block" >"$local_file"
     echo "wrote   $local_file"
     return 0
   fi
-  backup "$local_file"
-  {
-    printf 'include = ["%s"]\n\n' "$shared"
-    cat "$old"
-  } >"$local_file"
-  echo "added   include of $shared to $local_file"
+
+  current="$(cat "$local_file")"
+  kept="$(awk -v b="$begin" -v e="$end" \
+    '$0 == b { skip = 1 } !skip { print } $0 == e { skip = 0 }' "$local_file")"
+  # A second header for the same table would make the whole file invalid TOML.
+  if grep -q '^[[:space:]]*\[profile\.dev\.package\."\*"\]' <<<"$kept"; then
+    echo "skip    $local_file already sets [profile.dev.package.\"*\"]; merge" \
+      "$SETUP_DIR/cargo/config.toml into it by hand"
+    return 0
+  fi
+  new="$block"
+  if [[ -n "$kept" ]]; then
+    new="$kept"$'\n\n'"$block"
+  fi
+  if [[ "$new" == "$current" ]]; then
+    echo "ok      $local_file"
+    return 0
+  fi
+
+  # Copied, then written through: a symlinked config stays a symlink.
+  relative="${local_file#"$HOME"/}"
+  mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
+  cp "$local_file" "$BACKUP_DIR/$relative"
+  printf '%s\n' "$new" >"$local_file"
+  echo "updated $local_file (previous copy in $BACKUP_DIR)"
 }
 
 main() {
