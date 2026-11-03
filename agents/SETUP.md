@@ -46,6 +46,7 @@ machine reaches every machine.
 | `~/.grok/agents/rust-style-reviewer.md` | `$SETUP/claude/agents/…` | The reviewer, for Grok. |
 | `~/.claude/CLAUDE.md` | (file) | `@~/.config/agents/AGENTS.md`, plus `@~/.config/agents/AGENTS.local.md` when the local layer has one. |
 | `~/.claude/settings.json` | (file, merged) | Hooks, permissions, plugins. Grok reads its hooks too. |
+| `~/.cargo/config.toml` | (file, `include`s `$SETUP/cargo/config.toml`) | Shared Cargo settings: no dependency debug info in dev builds, which keeps each worktree's `target/` small. Local linkers and rustflags stay in the local file. |
 | `~/Library/Application Support/JetBrains/Air/acp.json` | (file, merged from `$SETUP/air/acp.json`) | Grok and Claude Code as ACP agents in JetBrains Air. |
 | `~/Library/Application Support/JetBrains/Air/review/review-prompt.md` | `$SETUP/air/review-prompt.md` | Air's code-review task list, aligned with the review order in `AGENTS.md`. Air sends it as the user turn, so it outranks `AGENTS.md`. If Air replaces the link with a plain file, re-run `install.sh`. |
 | `~/Library/Application Support/JetBrains/Air/themes/` | `$SETUP/air/themes/` | `Dark-Blue.json`: Air's Dark theme with loud comments (code comments orange, doc comments green, TODOs yellow), per the Comments section of `AGENTS.md`. Edit it in Air with Edit Color Theme…; the save lands in the synced folder. `install.sh` moves an existing local `themes/` folder to the backup dir; to keep a theme from it, copy the file into `$SETUP/air/themes/`, which shares it with every machine. |

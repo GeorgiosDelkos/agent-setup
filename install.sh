@@ -251,6 +251,37 @@ check_tools() {
   fi
 }
 
+# Make ~/.cargo/config.toml include the shared Cargo settings. Included rather than linked or
+# merged, because the local file holds per-machine linkers and rustflags, and TOML has no
+# merge tool here like jq for JSON. `include` must be a top-level key, so it goes before the
+# first table. Cargo 1.95 and later read it (checked 1.95, 1.96, 1.99); 1.88 ignores it
+# without an error, so an old pinned toolchain only loses the setting.
+setup_cargo() {
+  local shared="$SETUP_DIR/cargo/config.toml" local_file="$HOME/.cargo/config.toml"
+  local old="$BACKUP_DIR/.cargo/config.toml"
+  if [[ -f "$local_file" ]] && grep -qF "\"$shared\"" "$local_file"; then
+    echo "ok      $local_file"
+    return 0
+  fi
+  if [[ -f "$local_file" ]] && grep -q '^[[:space:]]*include[[:space:]]*=' "$local_file"; then
+    echo "skip    $local_file already has an include key; add \"$shared\" to it by hand"
+    return 0
+  fi
+
+  if [[ ! -f "$local_file" ]]; then
+    mkdir -p "$(dirname "$local_file")"
+    printf 'include = ["%s"]\n' "$shared" >"$local_file"
+    echo "wrote   $local_file"
+    return 0
+  fi
+  backup "$local_file"
+  {
+    printf 'include = ["%s"]\n\n' "$shared"
+    cat "$old"
+  } >"$local_file"
+  echo "added   include of $shared to $local_file"
+}
+
 main() {
   echo "AgentSetup: $SETUP_DIR"
 
@@ -286,6 +317,7 @@ main() {
   if [[ -f "$SETUP_DIR/install.local.sh" ]]; then
     bash "$SETUP_DIR/install.local.sh"
   fi
+  setup_cargo
   setup_air
   setup_git
   check_sync
