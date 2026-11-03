@@ -134,6 +134,10 @@ between the lines* (Rust Munich 2026).
   merge only when review, fixes, and green CI are all on GitHub. Subagents follow this too.
 - No Co-Authored-By or AI attribution. Use the user's git identity.
 - Delete with `trash`, never `rm -rf`.
+- Remove worktrees you created once done. Claude Code keeps any worktree with commits and
+  never rechecks it, and each holds a `target/` of 5-60 GB; leftovers filled the disk once.
+  When a worktree's PR is merged or closed and `git status` is clean: `git worktree remove`
+  it and `git branch -D` its branch. Leave a worktree with uncommitted work or an open PR.
 
 ## Communication
 
