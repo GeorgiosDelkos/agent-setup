@@ -65,11 +65,13 @@ deletes_recursively() {
 discards_work() {
   # git as a word anywhere in the simple command, with the same boundary as the gh check
   # below, so a prefix (VAR=value, `env`, `sudo`, `command`, a full path, `then`) does not
-  # hide it; then any global options (-C dir, -c key=value, --long). The costs: an unquoted
-  # `echo git reset --hard` is blocked, and so is `find . -exec git checkout -- {} ;`, whose
-  # `.` reads as the whole tree (it does discard those files, under the wrong message).
-  local git='(^|[^[:alnum:]_.-])git'
-  git+='(([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)|([[:space:]]+--[a-z-]+(=[^[:space:]]*)?))*'
+  # hide it; then any global options: those that take a separate value (-C dir, -c key=value,
+  # --git-dir dir, ...) and any other word starting with `-` (-P, --no-pager, --opt=value).
+  # The costs: an unquoted `echo git reset --hard` is blocked, and so is
+  # `find . -exec git checkout -- {} ;`, whose `.` reads as the whole tree (it does discard
+  # those files, under the wrong message).
+  local git='(^|[^[:alnum:]_.-])git(([[:space:]]+(-[Cc]|--git-dir|--work-tree|--namespace'
+  git+='|--config-env)[[:space:]]+[^[:space:]]+)|([[:space:]]+-[^[:space:]]+))*'
   git+='[[:space:]]+'
   local force='[[:space:]](-[[:alpha:]]*f[[:alpha:]]*|--force)([[:space:]]|$)'
   local dry_run='[[:space:]](-[[:alpha:]]*n[[:alpha:]]*|--dry-run)([[:space:]]|$)'
