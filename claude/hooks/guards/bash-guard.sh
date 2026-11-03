@@ -185,7 +185,10 @@ if grep -qxE 'main|master|\*' <<<"$branches"; then
   block "push to a feature branch and open a PR, never directly to main/master"
 fi
 
-admin_merge='(^|[;&|(][[:space:]]*)gh[[:space:]]+pr[[:space:]]+merge[[:space:]].*--admin'
+# Leading `VAR=value` words are skipped, so an environment prefix does not hide the merge.
+env_prefix='([[:alpha:]_][[:alnum:]_]*=[^[:space:]]*[[:space:]]+)*'
+admin_merge="(^|[;&|(][[:space:]]*)${env_prefix}gh[[:space:]]+pr[[:space:]]+merge"
+admin_merge+="[[:space:]].*--admin"
 if grep -qE "$admin_merge" <<<"$code"; then
   block "gh pr merge --admin skips the PR's required reviews and checks: leave the merge" \
     "to the user"

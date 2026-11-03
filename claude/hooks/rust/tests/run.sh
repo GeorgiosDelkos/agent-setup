@@ -1317,7 +1317,13 @@ guard "switch --discard-changes blocked" 2 "git switch --discard-changes feature
 guard "switch to a branch passes" 0 "git switch -c feature"
 
 guard "gh pr merge --admin blocked" 2 "gh pr merge 7 --squash --admin"
+guard "env prefix gh pr merge --admin blocked" 2 "FOO=1 gh pr merge 7 --admin"
+guard "two env prefixes gh pr merge --admin blocked" 2 \
+  "A=1 B=x gh pr merge 7 --admin"
+guard "gh pr merge --admin after && blocked" 2 \
+  "BYPASS=1 gh pr merge 1 && gh pr merge 9 --admin --repo o/r"
 guard "gh pr merge passes" 0 "gh pr merge 7 --squash"
+guard "env prefix gh pr merge passes" 0 "GH_DEBUG=1 gh pr merge 7 --squash"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
