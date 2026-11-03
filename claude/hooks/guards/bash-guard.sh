@@ -63,8 +63,12 @@ deletes_recursively() {
 # --hard` and a checkout or restore of the whole tree overwrite every uncommitted change. A
 # single path (`git checkout -- src/x.rs`) and `git restore --staged` pass.
 discards_work() {
-  # Leading VAR=value words, then git with any global options (-C dir, -c key=value, --long).
-  local git='^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*git'
+  # git as a word anywhere in the simple command, with the same boundary as the gh check
+  # below, so a prefix (VAR=value, `env`, `sudo`, `command`, a full path, `then`) does not
+  # hide it; then any global options (-C dir, -c key=value, --long). The costs: an unquoted
+  # `echo git reset --hard` is blocked, and so is `find . -exec git checkout -- {} ;`, whose
+  # `.` reads as the whole tree (it does discard those files, under the wrong message).
+  local git='(^|[^[:alnum:]_.-])git'
   git+='(([[:space:]]+-[Cc][[:space:]]+[^[:space:]]+)|([[:space:]]+--[a-z-]+(=[^[:space:]]*)?))*'
   git+='[[:space:]]+'
   local force='[[:space:]](-[[:alpha:]]*f[[:alpha:]]*|--force)([[:space:]]|$)'
@@ -74,6 +78,8 @@ discards_work() {
   local worktree='[[:space:]](--worktree|-W)([[:space:]]|$)'
   local discard='[[:space:]](-f|--force|--discard-changes)([[:space:]]|$)'
   local segment
+  # Quote marks become spaces: code_text keeps a shell hand-off (`bash -c "..."`, ssh) whole,
+  # and a closing quote right after `--hard` or `-f` would hide the flag from the patterns.
   while IFS= read -r segment; do
     if [[ "$segment" =~ ${git}clean([[:space:]]|$) && "$segment" =~ $force &&
       ! "$segment" =~ $dry_run ]]; then
@@ -96,7 +102,7 @@ discards_work() {
       echo "a forced checkout or switch throws away uncommitted changes: git stash them first"
       return
     fi
-  done < <(perl -pe 's/(&&|\|\||[;|()])/\n/g' <<<"$1")
+  done < <(perl -pe 's/(&&|\|\||[;|()])/\n/g; s/["\x27]/ /g' <<<"$1")
 }
 
 # Current branch of the repo at $1, or nothing (detached HEAD, not a repo).
