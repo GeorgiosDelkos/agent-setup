@@ -1,0 +1,13 @@
+# Shared Cargo settings. install.sh (setup_cargo) copies this file into ~/.cargo/config.toml
+# between marker lines; after editing it, re-run install.sh on each machine. Machine-local
+# settings (linkers, rustflags) stay outside the markers.
+
+# No debug info for dependencies in dev and test builds; workspace members keep full debug
+# info. On macOS most of a dev `target/` is dependency debug info, and every agent worktree
+# builds its own `target/`: on 2026-11-03 73 worktrees held 567 GB and filled the disk.
+# Downside accepted: a debugger cannot step into dependency source. Release builds and CI are
+# unaffected. Cargo config beats Cargo.toml, so this also overrides a repo's own
+# `[profile.dev.package."*"] debug` setting (its other keys there still apply). A repo that
+# needs dependency debug info sets it in its own `.cargo/config.toml`, which beats this file.
+[profile.dev.package."*"]
+debug = false
