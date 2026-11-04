@@ -65,6 +65,14 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   equivalent. `templates/ci/mutants.yml` runs the same check on each PR; keep it unless the
   suite takes more than a few minutes. [house: line coverage passes tests that assert
   nothing; mutation testing does not]
+- **TST-20** Run `cargo mutants` locally with `-j 2` or fewer and without `--timeout`. A
+  mutant can make a loop unbounded and allocate until the machine stalls. Each job is its
+  own test process, and the test timeout is the only thing that stops a runaway mutant.
+  The auto timeout (baseline test time times `timeout_multiplier`, default 5) stops it
+  early; `--timeout` replaces that limit, and `--jobs` multiplies the memory taken. A repo
+  sets `timeout_multiplier = 2.0` in `.cargo/mutants.toml`. [house: on 2026-11-04,
+  `-j 4 --timeout 300` let one mutant reach 73 GB on a 16 GB laptop, and the kernel
+  watchdog reset it]
 
 ## Golden files and fixtures
 
