@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash / run_terminal_command): block recursive deletes (use `trash`, which can be
 # undone), git commands that throw away uncommitted work, pushes that update main or master
-# (use a feature branch and a PR), and admin merges that skip a PR's checks. Reads Claude's
-# `tool_input.command`, which Grok also sends as a snake_case alias.
+# (use a feature branch and a PR), admin merges that skip a PR's checks, and `cargo mutants`
+# runs that let a runaway mutant exhaust memory. Reads Claude's `tool_input.command`, which
+# Grok also sends as a snake_case alias.
 #
 # A guardrail against an agent's mistakes, not a sandbox: a script file, an interpreter or
 # `xargs` gets past any pattern match.
@@ -228,6 +229,46 @@ fi
 branches="$(pushed_branches "$code")"
 if grep -qxE 'main|master|\*' <<<"$branches"; then
   block "push to a feature branch and open a PR, never directly to main/master"
+fi
+
+# Why the first `cargo mutants` in $1 can let a runaway mutant exhaust memory, or nothing.
+# A mutant can make a loop unbounded, and only the auto test timeout ends it: an explicit
+# timeout or a skipped baseline (300 s) gives it longer to grow, and each job above 2 adds a
+# process that can grow (rust-style TST-20). Words after ` -- ` go to the test runner, so
+# they are not mutants' options. CARGO_MUTANTS_JOBS is checked in every simple command,
+# because `export` sets it in one command for a later one.
+unbounded_mutants() {
+  local mutants='(^|[^[:alnum:]_.-])cargo(-mutants)?([[:space:]]+\+[^[:space:]]+)?'
+  mutants+='[[:space:]]+mutants([[:space:]]|$)'
+  local timeout='[[:space:]](-t|--timeout)([[:space:]]|=|[0-9]|$)'
+  local skip='[[:space:]]--baseline([[:space:]]+|=)skip([[:space:]]|$)'
+  local jobs='[[:space:]](-j|--jobs)(=|[[:space:]]*)([0-9]+)'
+  local env_jobs='(^|[[:space:]])CARGO_MUTANTS_JOBS=([0-9]+)'
+  local fix="run cargo mutants with -j 2 or fewer and no --timeout, -t or --baseline=skip"
+  local segment
+  while IFS= read -r segment; do
+    if [[ "$segment" =~ $env_jobs ]] && ((10#${BASH_REMATCH[2]} > 2)); then
+      echo "CARGO_MUTANTS_JOBS above 2 runs that many test processes at once: $fix"
+      return
+    fi
+    if ! [[ "$segment" =~ $mutants ]]; then
+      continue
+    fi
+    segment="${segment%%[[:space:]]--[[:space:]]*}"
+    if [[ "$segment" =~ $timeout || "$segment" =~ $skip ]]; then
+      echo "a set test timeout lets a runaway mutant allocate for that long: $fix"
+      return
+    fi
+    if [[ "$segment" =~ $jobs ]] && ((10#${BASH_REMATCH[3]} > 2)); then
+      echo "each cargo mutants job is a test process a runaway mutant can grow in: $fix"
+      return
+    fi
+  done < <(simple_commands "$1")
+}
+
+reason="$(unbounded_mutants "$code")"
+if [[ -n "$reason" ]]; then
+  block "$reason"
 fi
 
 # `gh` as a word anywhere, as for rm above, not only at a command start: a prefix (`env`,
