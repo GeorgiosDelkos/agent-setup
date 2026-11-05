@@ -40,9 +40,11 @@ Run `~/.claude/scripts/grok-review.sh`. It does the whole run, so do not assembl
 The script:
 - runs Grok from its own home, `~/.grok-review`, with its own login. That home has the
   `pr-review` sandbox profile (`grok/review-sandbox.toml`, installed by `install.sh`).
-- refreshes that login first, with one call outside the sandbox that is given nothing from
-  the PR (a fixed prompt in an empty directory). Inside the sandbox Grok cannot refresh it,
-  and a review started on an expired login fails with 401s.
+- refreshes that login first, with one time-limited call outside the sandbox, made before
+  the PR is checked out and given nothing from it (a fixed prompt, one turn, an empty
+  directory and an empty `HOME`, so none of your plugins, hooks or MCP servers load).
+  Inside the sandbox Grok cannot refresh the login, and a review started on an expired one
+  fails with 401s.
 - makes a disposable worktree of the PR head inside that home, and removes the root
   agent configuration from it, so the PR's hooks, rules, skills and servers do not load.
 - runs Grok with reading, searching and listing tools only (no shell, edit, web, MCP or
