@@ -296,25 +296,32 @@ setup_cargo() {
   echo "updated $local_file (previous copy in $BACKUP_DIR)"
 }
 
-# The Grok review home (claude/commands/review-pr.md, "Grok review"): GROK_HOME for review
-# runs, with its own login so the main ~/.grok is out of reach, and the pr-review sandbox
-# profile. The profile is copied, not linked: grok refuses a symlinked sandbox.toml.
+# The Grok review home (claude/scripts/grok-review.sh): GROK_HOME for review runs, with its
+# own login so the main ~/.grok is out of reach, and the pr-review sandbox profile. The
+# profile is copied, not linked: grok refuses a symlinked sandbox.toml. A symlinked home is
+# refused: chmod and the copy would follow it, into ~/.grok for example.
 setup_grok_review() {
   local home="$HOME/.grok-review" source="$SETUP_DIR/grok/review-sandbox.toml"
   local target="$home/sandbox.toml"
+  if [[ -L "$home" ]]; then
+    echo "skip    $home is a symlink; make it a real directory to enable Grok reviews" >&2
+    return 0
+  fi
   mkdir -p "$home"
   chmod 700 "$home"
   if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
     echo "ok      $target"
   else
+    # Write beside it, then rename over it, so a failed copy leaves the old profile.
+    cp "$source" "$target.new"
+    chmod 600 "$target.new"
     if [[ -e "$target" || -L "$target" ]]; then
       backup "$target"
     fi
-    cp "$source" "$target"
-    chmod 600 "$target"
+    mv -f "$target.new" "$target"
     echo "copied  $target"
   fi
-  if [[ ! -f "$home/auth.json" ]]; then
+  if [[ ! -f "$home/auth.json" || -L "$home/auth.json" || ! -s "$home/auth.json" ]]; then
     echo "note    Grok reviews need a login in the review home: GROK_HOME=$home grok login"
   fi
 }
@@ -323,7 +330,7 @@ main() {
   echo "AgentSetup: $SETUP_DIR"
 
   link "$SETUP_DIR/agents" "$HOME/.config/agents"
-  for dir in skills agents commands hooks; do
+  for dir in skills agents commands hooks scripts; do
     link "$SETUP_DIR/claude/$dir" "$HOME/.claude/$dir"
   done
   link "$SETUP_DIR/claude/statusline.sh" "$HOME/.claude/statusline.sh"
@@ -360,7 +367,8 @@ main() {
   setup_git
   check_sync
   # Sync drops the executable bit, so restore it on everything that is run directly.
-  chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh "$SETUP_DIR/claude/statusline.sh"
+  chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh "$SETUP_DIR/claude/statusline.sh" \
+    "$SETUP_DIR"/claude/scripts/*.sh
   check_tools
   echo "Done. Start new Claude Code and Grok sessions to pick up the changes."
 }

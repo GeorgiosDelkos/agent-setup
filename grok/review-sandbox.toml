@@ -1,17 +1,22 @@
-# Sandbox profile for the Grok review in claude/commands/review-pr.md ("Grok review").
-# install.sh copies it to ~/.grok-review/sandbox.toml (a copy, not a link: grok refuses to
-# apply a profile from a symlinked sandbox.toml, which it write-protects). The review runs with
-# GROK_HOME=~/.grok-review, a separate home with its own login, so the main ~/.grok (its
-# credential and its session transcripts) can be denied here.
+# Sandbox profile for the Grok review (claude/scripts/grok-review.sh, which
+# claude/commands/review-pr.md calls). install.sh copies it to ~/.grok-review/sandbox.toml:
+# a copy, not a link, because grok refuses to apply a profile from a symlinked sandbox.toml.
 #
-# `strict` already limits reads to the working directory, system paths and the Grok home.
-# Each entry below is kernel-enforced (read and write). Checked with probe files on
-# 2026-11-05 (grok 1.0.70, macOS): the worktree reads; ~/.grok, ~/Documents and a file
-# under /private/tmp/claude-501 are denied. A temp-dir glob needs the trailing `/**`:
-# without it, files under the matched directory stayed readable.
+# The review runs with GROK_HOME=~/.grok-review, a separate home with its own login, so the
+# main ~/.grok (its credential and its session transcripts) can be denied here. The script
+# also gives Grok a private TMPDIR inside that home and puts the worktree there, which is
+# what lets the system temp trees be denied: without a private TMPDIR, denying
+# /private/var/folders stops Grok's own workspace session.
+#
+# `strict` limits reads to the working directory, system paths and the Grok home. The
+# entries below are kernel-enforced (read and write). Checked with probe files on
+# 2026-11-05 (grok 1.0.70, macOS): the worktree reads; ~/.grok, ~/Documents, /private/tmp
+# and the user temp dir under /private/var/folders are denied. Globs need the trailing
+# `/**`: without it, files under the matched directory stayed readable.
 #
 # Not denied, because Grok will not start without them: this home's auth.json (its own
-# login) and sessions/ (the current session is written there).
+# login) and sessions/ (the current session is written there). The script empties
+# sessions/ after each run and checks the output for the login's material.
 
 [profiles.pr-review]
 extends = "strict"
@@ -22,6 +27,7 @@ deny = [
   "~/.grok-review/memory-v2",
   "~/.grok-review/memtrace",
   "~/.grok-review/logs",
-  "/private/tmp/claude-*/**",
-  "/tmp/claude-*/**",
+  "/private/tmp/**",
+  "/tmp/**",
+  "/private/var/folders/**",
 ]

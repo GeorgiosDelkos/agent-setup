@@ -40,6 +40,7 @@ machine reaches every machine.
 | `~/.claude/agents/` | `$SETUP/claude/agents/` | `rust-style-reviewer.md`. |
 | `~/.claude/hooks/` | `$SETUP/claude/hooks/` | `rust/*.sh` enforcement hooks (see below). |
 | `~/.claude/commands/` | `$SETUP/claude/commands/` | Slash commands. |
+| `~/.claude/scripts/` | `$SETUP/claude/scripts/` | Scripts the commands call: `grok-review.sh`, the locked-down Grok review run by `review-pr`. Tests in `tests/`, run by `check.sh`. |
 | `~/.claude/statusline.sh` | `$SETUP/claude/statusline.sh` | Status line. |
 | `~/.grok/rules/AGENTS.md` | `$SETUP/agents/AGENTS.md` | Grok's global rules. |
 | `~/.grok/rules/AGENTS.local.md` | `$SETUP/agents/AGENTS.local.md` | The local layer's rules, when it has them. |
@@ -222,19 +223,19 @@ subscriptions have changed several times. If it stops being allowed, either:
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
-  - The Grok review sandbox, which `review-pr` uses.
-    - Setup: put a harmless probe file in a `mktemp -d` worktree, another in a new
-      folder under `~/.grok`, and another in a new folder under `~/Documents`.
-    - Run: the command from `review-pr` ("Grok review"), with `-p` in place of
-      `--prompt-file`. Ask it to list its tools, `read_file` each probe file, and run
-      `echo hi > probe.txt`.
-    - Expected: the tools are `read_file`, `list_dir` and `grep`; the worktree probe
-      reads; the other two report `Permission denied`; no `probe.txt` exists; the exit
-      status is 0 and stderr is empty.
+  - The Grok review sandbox, which `review-pr` uses through `grok-review.sh`.
+    - Setup: a scratch git repository with one committed `probe.txt`. Harmless probe
+      files in new folders under `~/.grok`, `~/Documents`, `/private/tmp` and `$TMPDIR`.
+      A prompt file that asks Grok to list its tools, `read_file` the worktree's
+      `probe.txt` and each probe file, and report each word or error.
+    - Run: `~/.claude/scripts/grok-review.sh <scratch-repo> <its HEAD> <prompt> <out>`.
+    - Expected: exit 0; the tools are `read_file`, `list_dir` and `grep`; the worktree
+      probe reads; every other probe reports `Permission denied`.
     - Use probe files, not real secrets. Asked to read `~/.ssh` and the like, the model
       refuses on its own, and that tests nothing about the sandbox.
 - Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
-  Perl syntax, the 100-column check and the hook test suite (`--quick` skips the suite).
+  Perl syntax, the 100-column check, the hook test suite and the script tests (`--quick`
+  skips both suites).
   Every step must say `ok`.
 - End to end: in a scratch crate, ask either tool to add an `unsafe` function.
   - The first `.rs` edit is blocked until the agent loads `rust-style` and reads
