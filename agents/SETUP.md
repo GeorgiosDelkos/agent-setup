@@ -40,12 +40,14 @@ machine reaches every machine.
 | `~/.claude/agents/` | `$SETUP/claude/agents/` | `rust-style-reviewer.md`. |
 | `~/.claude/hooks/` | `$SETUP/claude/hooks/` | `rust/*.sh` enforcement hooks (see below). |
 | `~/.claude/commands/` | `$SETUP/claude/commands/` | Slash commands. |
+| `~/.claude/scripts/` | `$SETUP/claude/scripts/` | Scripts the commands call: `grok-review.sh`, the locked-down Grok review run by `review-pr`. Tests in `tests/`, run by `check.sh`. |
 | `~/.claude/statusline.sh` | `$SETUP/claude/statusline.sh` | Status line. |
 | `~/.grok/rules/AGENTS.md` | `$SETUP/agents/AGENTS.md` | Grok's global rules. |
 | `~/.grok/rules/AGENTS.local.md` | `$SETUP/agents/AGENTS.local.md` | The local layer's rules, when it has them. |
 | `~/.grok/agents/rust-style-reviewer.md` | `$SETUP/claude/agents/…` | The reviewer, for Grok. |
 | `~/.claude/CLAUDE.md` | (file) | `@~/.config/agents/AGENTS.md`, plus `@~/.config/agents/AGENTS.local.md` when the local layer has one. |
 | `~/.claude/settings.json` | (file, merged) | Hooks, permissions, plugins. Grok reads its hooks too. |
+| `~/.grok-review/sandbox.toml` | (file, a copy of `$SETUP/grok/review-sandbox.toml`) | The `pr-review` sandbox profile for the Grok review in `review-pr`. `~/.grok-review` is a separate Grok home, with its own login, so the review cannot read the main `~/.grok`. It is a copy because grok refuses a symlinked `sandbox.toml`. Re-run `install.sh` after editing the shared file. |
 | `~/.cargo/config.toml` | (file, holds a marked copy of `$SETUP/cargo/config.toml`) | Shared Cargo settings: no dependency debug info in dev builds, which keeps each worktree's `target/` small. Local linkers and rustflags stay outside the markers. Re-run `install.sh` after editing the shared file. |
 | `~/Library/Application Support/JetBrains/Air/acp.json` | (file, merged from `$SETUP/air/acp.json`) | Grok and Claude Code as ACP agents in JetBrains Air. |
 | `~/Library/Application Support/JetBrains/Air/review/review-prompt.md` | `$SETUP/air/review-prompt.md` | Air's code-review task list, aligned with the review order in `AGENTS.md`. Air sends it as the user turn, so it outranks `AGENTS.md`. If Air replaces the link with a plain file, re-run `install.sh`. |
@@ -138,6 +140,11 @@ read those first.
    ```
 
    For JetBrains Air, also install Node (nvm), Claude Code, and Grok, and log in to both.
+   Grok is also the second-model adversarial reviewer in `review-pr`. That command runs it
+   headless, from the separate home `~/.grok-review`, with read-only tools under the
+   `pr-review` sandbox profile. After `install.sh`, sign that home in once with
+   `GROK_HOME=~/.grok-review grok login`. A dedicated, revocable key is best. Without
+   that login, `review-pr` reviews with the Claude agents alone.
 
 2. Let the file sync bring `$SETUP` to the machine, then run:
 
@@ -216,8 +223,19 @@ subscriptions have changed several times. If it stops being allowed, either:
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
+  - The Grok review sandbox, which `review-pr` uses through `grok-review.sh`.
+    - Setup: a scratch git repository with one committed `probe.txt`. Harmless probe
+      files in new folders under `~/.grok`, `~/Documents`, `/private/tmp` and `$TMPDIR`.
+      A prompt file that asks Grok to list its tools, `read_file` the worktree's
+      `probe.txt` and each probe file, and report each word or error.
+    - Run: `~/.claude/scripts/grok-review.sh <scratch-repo> <its HEAD> <prompt> <out>`.
+    - Expected: exit 0; the tools are `read_file`, `list_dir` and `grep`; the worktree
+      probe reads; every other probe reports `Permission denied`.
+    - Use probe files, not real secrets. Asked to read `~/.ssh` and the like, the model
+      refuses on its own, and that tests nothing about the sandbox.
 - Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
-  Perl syntax, the 100-column check and the hook test suite (`--quick` skips the suite).
+  Perl syntax, the 100-column check, the hook test suite and the script tests (`--quick`
+  skips both suites).
   Every step must say `ok`.
 - End to end: in a scratch crate, ask either tool to add an `unsafe` function.
   - The first `.rs` edit is blocked until the agent loads `rust-style` and reads
