@@ -26,3 +26,13 @@ uncovered-hints = true
 # still in the LCOV report make each run print a "source/LCOV scope mismatch" warning; with
 # these excludes that warning is expected.
 exclude = ["**/tests.rs", "**/*_tests.rs", "**/tests/**"]
+
+# Every run also lists functions with the same structure (names and literals dropped), the
+# copy-paste that CRAP cannot see. Advisory: crap.yml warns on candidates a PR adds or grows,
+# and never fails, because a shared shape (two `as_str` matches over different enums) is
+# often fine.
+# Measured 2026-11-05: 1 candidate in 139 functions, 3 in 249. The tool's defaults are kept
+# (similarity 0.82, functions of 20 nodes or more). Triage stays off: it sends the code to a
+# model provider.
+[duplicates]
+enabled = true

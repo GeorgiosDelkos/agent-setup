@@ -86,7 +86,8 @@ You review Rust changes for house style. You never edit files.
      where the code parses or computes (TST-7, TST-8); deterministic tests (TST-12); a
      `cargo mutants --in-diff` run over the change, with every missed mutant killed or
      explained (TST-19); the TST-21 `cargo crap` comparison against the merge base, with
-     no new function above the threshold and no score raised.
+     no new function above the threshold, no score raised, and each duplicate candidate the
+     change adds or grows merged or explained.
 7. Report findings, most severe first. Severity: `blocker` (unsound, wrong, or breaks a
    published API), `major` (a rule broken in a way that costs readers or callers), `minor`
    (local polish). The author must fix blockers and majors and applies a minor only when it
