@@ -138,9 +138,9 @@ read those first.
    ```
 
    For JetBrains Air, also install Node (nvm), Claude Code, and Grok, and log in to both.
-   Grok, signed in, is also the second-model adversarial reviewer in `review-pr`, which runs
-   it headless (`grok --permission-mode plan --prompt-file …`). Without it, `review-pr`
-   reviews with the Claude agents alone.
+   Grok, signed in, is also the second-model adversarial reviewer in `review-pr`. That
+   command runs it headless, with read-only tools under `--sandbox strict`. Without it,
+   `review-pr` reviews with the Claude agents alone.
 
 2. Let the file sync bring `$SETUP` to the machine, then run:
 
@@ -219,9 +219,12 @@ subscriptions have changed several times. If it stops being allowed, either:
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
-  - Headless review mode, which `review-pr` uses: `grok --permission-mode plan -p "Reply
-    with OK"` prints `OK`. Asked to create a file in that mode, it plans and writes
-    nothing.
+  - Headless review mode, which `review-pr` uses. In a scratch repository, run the
+    command from `review-pr` ("Grok review") with `-p` in place of `--prompt-file`.
+    Ask it to list its tools, read a file in the worktree, read `~/.ssh/known_hosts`,
+    and run `echo hi > probe.txt`. Expected result: the tools are `read_file`,
+    `list_dir` and `grep`; the worktree file reads; the `~/.ssh` read is denied; no
+    shell runs; no `probe.txt` exists; stderr is empty.
 - Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
   Perl syntax, the 100-column check and the hook test suite (`--quick` skips the suite).
   Every step must say `ok`.
