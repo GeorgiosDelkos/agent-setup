@@ -48,6 +48,32 @@ dir="$(dirname "$0")"
 log="$dir/log"
 STUB_MODE="$(cat "$dir/stub.mode")"
 STUB_SECRET="$(cat "$dir/stub.secret")"
+# The sign-in refresh is the call with `-p`; the review is the one with `--prompt-file`.
+if printf '%s\n' "$@" | grep -qx -- '-p'; then
+  echo signin >>"$log.order"
+  printf '%s\n' "$@" >"$log.signin.args"
+  env >"$log.signin.env"
+  # Whether any PR worktree is on disk while the unsandboxed call runs.
+  if compgen -G "$GROK_HOME/runs/*/wt" >/dev/null; then
+    echo present >"$log.signin.wt"
+  else
+    echo absent >"$log.signin.wt"
+  fi
+  case "$(cat "$dir/stub.signin")" in
+    fail)
+      echo '{"message": "rejected (401)"}' >&2
+      exit 1
+      ;;
+    leak)
+      echo "refresh failed for $STUB_SECRET" >&2
+      exit 1
+      ;;
+    hang) exec sleep 60 ;;
+  esac
+  echo OK
+  exit 0
+fi
+echo review >>"$log.order"
 printf '%s\n' "$@" >"$log.args"
 env >"$log.env"
 cwd=""
@@ -89,13 +115,15 @@ EOF
 chmod +x "$stub"
 
 printf '%s\n' "$secret" >"$WORK/stub.secret"
+printf 'ok\n' >"$WORK/stub.signin"
 
 run() {
   local mode="$1" out="$2"
   local code=0
   printf '%s\n' "$mode" >"$WORK/stub.mode"
-  rm -f "$WORK/log.args" "$WORK/log.env"
-  GH_TOKEN=leak-me GROK_BIN="$stub" GROK_REVIEW_HOME="$home" \
+  rm -f "$WORK/log.args" "$WORK/log.env" "$WORK/log.order" "$WORK/log.signin.args" \
+    "$WORK/log.signin.env" "$WORK/log.signin.wt"
+  GH_TOKEN=leak-me GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 \
     bash "$SCRIPT" "$repo" "$sha" "$prompt" "$out" >"$WORK/stdout" 2>"$WORK/stderr" || code=$?
   echo "$code"
 }
@@ -124,6 +152,72 @@ check "ok: worktree removed" "$(git -C "$repo" worktree list | grep -q runs &&
   echo no || echo yes)"
 check "ok: run dirs removed" "$([[ -z "$(ls -A "$home/runs")" ]] && echo yes || echo no)"
 check "ok: sessions emptied" "$([[ -z "$(ls -A "$home/sessions")" ]] && echo yes || echo no)"
+
+# The sign-in refresh runs first, outside the sandbox, so it must be given nothing from the
+# PR: no worktree on disk yet, an empty working directory and HOME, a fixed prompt, one
+# listing tool, one turn, no web, no subagents.
+signin="$(cat "$WORK/log.signin.args" 2>/dev/null || true)"
+order="$(tr '\n' ' ' <"$WORK/log.order")"
+check "signin: runs before the review" "$([[ "$order" == "signin review " ]] &&
+  echo yes || echo no)"
+check "signin: no PR worktree on disk" "$([[ "$(cat "$WORK/log.signin.wt")" == absent ]] &&
+  echo yes || echo no)"
+signin_cwd="$(grep -A1 -xF -- '--cwd' <<<"$signin" | tail -1)"
+check "signin: own working directory" "$([[ "$signin_cwd" == "$home"/runs/pr-*/signin ]] &&
+  echo yes || echo no)"
+check "signin: nothing from the PR in its arguments" "$(grep -qE -- \
+  '--prompt-file|--add-dir|prompt\.md|/wt$' <<<"$signin" && echo no || echo yes)"
+for flag in "--tools" "list_dir" "--disallowed-tools" "search_tool,use_tool" \
+  "--disable-web-search" "--no-subagents" "--max-turns"; do
+  check "signin: passes $flag" "$(grep -qxF -- "$flag" <<<"$signin" && echo yes || echo no)"
+done
+check "signin: one turn" "$(grep -A1 -xF -- '--max-turns' <<<"$signin" | tail -1 |
+  grep -qx 1 && echo yes || echo no)"
+check "signin: empty HOME, not the user's" "$(grep -qE "^HOME=$home/runs/pr-[^/]+/signin-home\$" \
+  "$WORK/log.signin.env" && echo yes || echo no)"
+check "signin: forces the refresh" "$(grep -qxF GROK_AUTH_EARLY_INVALIDATION_SECS=86400 \
+  "$WORK/log.signin.env" && echo yes || echo no)"
+check "review: no forced refresh" "$(grep -q GROK_AUTH_EARLY_INVALIDATION_SECS \
+  "$WORK/log.env" && echo no || echo yes)"
+check "review: the user's HOME, which the profile's ~ denies are written against" \
+  "$(grep -qxF "HOME=$HOME" "$WORK/log.env" && echo yes || echo no)"
+check "signin: GROK_HOME is the review home" "$(grep -qxF "GROK_HOME=$home" \
+  "$WORK/log.signin.env" && echo yes || echo no)"
+check "signin: tokens stay out of the env" "$(grep -q GH_TOKEN "$WORK/log.signin.env" &&
+  echo no || echo yes)"
+
+# ---- a sign-in that cannot be refreshed stops before the review ---------------------------
+printf 'fail\n' >"$WORK/stub.signin"
+out="$WORK/review-signin.txt"
+code="$(run ok "$out")"
+printf 'ok\n' >"$WORK/stub.signin"
+check "signin fails: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+check "signin fails: review not run" "$([[ ! -e "$WORK/log.args" ]] && echo yes || echo no)"
+check "signin fails: no output" "$([[ ! -e "$out" ]] && echo yes || echo no)"
+check "signin fails: says to sign in" "$(grep -q 'grok login' "$WORK/stderr" &&
+  echo yes || echo no)"
+check "signin fails: worktree removed" "$(git -C "$repo" worktree list | grep -q runs &&
+  echo no || echo yes)"
+
+# A sign-in that waits (an interactive fallback) is stopped at the limit.
+printf 'hang\n' >"$WORK/stub.signin"
+start=$SECONDS
+code="$(run ok "$WORK/review-hang.txt")"
+elapsed=$((SECONDS - start))
+printf 'ok\n' >"$WORK/stub.signin"
+check "signin hangs: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+check "signin hangs: stopped at the limit" "$([[ "$elapsed" -lt 20 ]] && echo yes || echo no)"
+check "signin hangs: review not run" "$([[ ! -e "$WORK/log.args" ]] && echo yes || echo no)"
+check "signin hangs: no stub left running" "$(pgrep -f "sleep 60" >/dev/null &&
+  echo no || echo yes)"
+
+# A failed sign-in's stderr is not echoed when it holds the credential.
+printf 'leak\n' >"$WORK/stub.signin"
+code="$(run ok "$WORK/review-signin-leak.txt")"
+printf 'ok\n' >"$WORK/stub.signin"
+check "signin leak: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+check "signin leak: secret not printed" "$(grep -qF "$secret" "$WORK/stdout" "$WORK/stderr" &&
+  echo no || echo yes)"
 
 # ---- compaction notices on stderr are not a failure ----------------------------------------
 out="$WORK/review-compacted.txt"

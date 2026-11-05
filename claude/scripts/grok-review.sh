@@ -11,7 +11,7 @@
 #
 # Exit status: 0 review written; 1 the run failed (output not usable); 2 the output held
 # material from the review home's credential and was deleted; 3 Grok is unavailable (not
-# installed, review home missing, not signed in); 64 usage.
+# installed, review home missing, not signed in, sign-in could not be refreshed); 64 usage.
 #
 # GROK_BIN and GROK_REVIEW_HOME override the grok binary and the review home (tests).
 set -euo pipefail
@@ -43,6 +43,33 @@ grok_bin="${GROK_BIN:-$(command -v grok || true)}"
 [[ -f "$home/auth.json" && ! -L "$home/auth.json" && -s "$home/auth.json" ]] ||
   unavailable "the review home is not signed in: GROK_HOME=$home grok login"
 
+# How long the sign-in refresh may take before it is stopped (seconds). A refresh is one
+# token request and one short model turn; past this it is waiting on something else, such
+# as an interactive sign-in. Overridable for tests.
+signin_limit="${GROK_SIGNIN_LIMIT_SECS:-120}"
+
+# Whether `file` holds any string of 20 or more characters from the review home's
+# credential, matched without printing it.
+holds_credential() {
+  local file="$1" secret
+  while IFS= read -r secret; do
+    if grep -qaF -- "$secret" "$file"; then
+      return 0
+    fi
+  done < <(jq -r '.. | strings | select(length >= 20)' "$home/auth.json" 2>/dev/null || true)
+  return 1
+}
+
+# Print up to 2000 bytes of a failed call's stderr, unless it holds credential material.
+echo_stderr() {
+  local file="$1"
+  if holds_credential "$file"; then
+    echo "(stderr withheld: it holds credential material)" >&2
+  else
+    head -c 2000 "$file" >&2
+  fi
+}
+
 mkdir -p "$home/runs" "$home/tmp"
 run="$(mktemp -d "$home/runs/pr-XXXXXX")"
 wt="$run/wt"
@@ -56,6 +83,47 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+
+# Refresh the review home's sign-in before the review. Under the pr-review sandbox Grok
+# cannot refresh it: a review started after the access token expired (about four hours
+# after the last refresh) got 401s for 45 minutes and then stopped, while the same call
+# outside the sandbox refreshed it (seen 2026-11-05, grok 1.0.70). So this one call runs
+# outside the sandbox, before anything from the PR is on disk, and is given nothing:
+# - a fixed prompt, one listing tool, one turn, no web, no subagents, no stdin;
+# - an empty working directory and an empty HOME, so none of the user's plugins, hooks,
+#   MCP servers or skills load (GROK_HOME still points at the login);
+# - GROK_AUTH_EARLY_INVALIDATION_SECS above the token's lifetime, so Grok treats the
+#   token as expiring and refreshes it now. With the default (300 s) a token with 20
+#   minutes left is not refreshed, and a longer review then fails part way.
+# It is stopped after `signin_limit` seconds: with no usable refresh token Grok falls back
+# to an interactive sign-in, which must not wait or open a browser here.
+mkdir "$run/signin" "$run/signin-home"
+env -i HOME="$run/signin-home" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
+  GROK_HOME="$home" GROK_MEMORY=0 GROK_AUTH_EARLY_INVALIDATION_SECS=86400 \
+  "$grok_bin" --cwd "$run/signin" \
+  --tools list_dir --disallowed-tools search_tool,use_tool \
+  --disable-web-search --no-subagents --max-turns 1 \
+  -p "Reply with the single word OK." </dev/null >/dev/null 2>"$run/signin.err" &
+signin_pid=$!
+waited=0
+while kill -0 "$signin_pid" 2>/dev/null && [[ "$waited" -lt "$signin_limit" ]]; do
+  sleep 1
+  waited=$((waited + 1))
+done
+signin_status=0
+if kill -0 "$signin_pid" 2>/dev/null; then
+  kill "$signin_pid" 2>/dev/null || true
+  wait "$signin_pid" 2>/dev/null || true
+  echo "the sign-in refresh did not finish in ${signin_limit}s and was stopped" >&2
+  signin_status=124
+else
+  wait "$signin_pid" || signin_status=$?
+fi
+if [[ "$signin_status" -ne 0 ]]; then
+  echo_stderr "$run/signin.err"
+  unavailable "the sign-in could not be refreshed (network, or the login expired:
+GROK_HOME=$home grok login)"
+fi
 
 git -C "$repo" worktree add --quiet --detach "$wt" "$head_sha"
 # Grok loads hooks, rules, skills and servers from these at the root it starts in. Their
@@ -74,7 +142,8 @@ env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
   "$grok_bin" --cwd "$wt" --sandbox pr-review \
   --tools read_file,grep,list_dir --disallowed-tools search_tool,use_tool \
   --disable-web-search --no-subagents \
-  --prompt-file "$run/prompt.md" >"$run/review.txt" 2>"$run/review.err" || status=$?
+  --prompt-file "$run/prompt.md" </dev/null >"$run/review.txt" 2>"$run/review.err" ||
+  status=$?
 
 # Grok prints these two lines to stderr when a long review compacts its own context and
 # carries on; the review still completes (seen 2026-11-05, grok 1.0.70). Any other line,
@@ -88,18 +157,11 @@ grep -avxE -e 'Auto-compacting conversation \([0-9]+% full\)\.\.\.' \
 if [[ "$status" -ne 0 || "$filter" -gt 1 || -s "$run/review.err.unexpected" ||
   ! -s "$run/review.txt" ]]; then
   echo "grok review failed (exit $status); its output is not used. stderr:" >&2
-  head -c 2000 "$run/review.err" >&2
+  echo_stderr "$run/review.err"
   exit 1
 fi
 
-# Any credential string of 20 or more characters, matched without printing it.
-leaked=no
-while IFS= read -r secret; do
-  if grep -qF -- "$secret" "$run/review.txt"; then
-    leaked=yes
-  fi
-done < <(jq -r '.. | strings | select(length >= 20)' "$home/auth.json" 2>/dev/null || true)
-if [[ "$leaked" == yes ]]; then
+if holds_credential "$run/review.txt"; then
   echo "grok review output contains credential material; deleted unread" >&2
   exit 2
 fi
