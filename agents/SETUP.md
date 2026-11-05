@@ -315,9 +315,9 @@ stopped after the clone is finished by the next one.
 - `claude/skills/security-audit/` is Cloudflare's security-audit skill, copied unchanged
   from
   https://github.com/cloudflare/security-audit-skill/tree/c1c8a8c1471069fb0e188eeaff69b8e8db6564a8/skills/security-audit
-  (2026-09-14), with the repo's MIT `LICENSE` added. It is vendored rather than installed with `npx skills add`, so it is
-  pinned, reviewed in a PR, and synced with history like every other skill; the cost is
-  updating by hand. To update: download that directory at the new commit over this one,
+  (2026-09-14), with the repo's MIT `LICENSE` added. It is vendored rather than installed
+  with `npx skills add`, so it is pinned, reviewed in a PR, and synced with history like
+  every other skill; the cost is updating by hand. To update: download that directory at the new commit over this one,
   read the diff (above all the two `validate-*.cjs` scripts agents run, which today read
   only their input file and use only the Node standard library), run
   `node --test claude/skills/security-audit/*.test.cjs`, and change the commit here. It is
