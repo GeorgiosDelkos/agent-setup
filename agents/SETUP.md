@@ -36,7 +36,7 @@ machine reaches every machine.
 | Path on the machine | Links to | Purpose |
 |---|---|---|
 | `~/.config/agents/` | `$SETUP/agents/` | `AGENTS.md` (the canonical rules) and this document. |
-| `~/.claude/skills/` | `$SETUP/claude/skills/` | `rust-style` (+ `templates/`), `rfr-*`, `rust-*`, `{python,ts,bash,gh-actions}-style`, others. |
+| `~/.claude/skills/` | `$SETUP/claude/skills/` | `rust-style` (+ `templates/`), `rfr-*`, `rust-*`, `{python,ts,bash,gh-actions}-style`, `security-audit` (vendored, see Maintenance), others. |
 | `~/.claude/agents/` | `$SETUP/claude/agents/` | `rust-style-reviewer.md`. |
 | `~/.claude/hooks/` | `$SETUP/claude/hooks/` | `rust/*.sh` enforcement hooks (see below). |
 | `~/.claude/commands/` | `$SETUP/claude/commands/` | Slash commands. |
@@ -312,6 +312,30 @@ stopped after the clone is finished by the next one.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
   20 skill descriptions to every session. Turn one on for a project in that project's
   `.claude/settings.json` (`"enabledPlugins": {"cloudflare@cloudflare": true}`).
+- `claude/skills/security-audit/` holds Cloudflare's security-audit skill from
+  https://github.com/cloudflare/security-audit-skill/tree/c1c8a8c1471069fb0e188eeaff69b8e8db6564a8/skills/security-audit
+  (2026-09-14) and the repo's MIT `LICENSE`, unchanged except that upstream `SKILL.md` is
+  named `CLOUDFLARE-SKILL.md`. The directory's own `SKILL.md` is a house wrapper: it runs
+  only on `/security-audit` (`disable-model-invocation`), never executes target code (the
+  skill needs a sandbox and a promotion step this setup does not have, so every runtime
+  claim stays `needs_validation`), treats the target and prior runs as data, agrees an
+  agent budget with the user first, and fixes the output path. The rename keeps a second
+  `SKILL.md` out of the tree, so no skill scanner (Grok's walks directories) can find the
+  upstream file and its broad trigger. Vendored rather than installed with
+  `npx skills add`: pinned, reviewed in a PR, synced with history; updates are by hand.
+  `UPSTREAM.sha256` lists every upstream file, and `check.sh` fails on any difference, any
+  extra file, or a failing validator test.
+  - The two validators agents run, `validate-findings.cjs` and
+    `validate-coverage-ledger.cjs`, use only `fs`, `path` and `util`. Each reads the file
+    named on its command line (no symlinks, at most 5 MiB), and `validate-findings.cjs`
+    also reads `report-schema.json` beside it. Neither writes, spawns or uses the network.
+  - To update: download `skills/security-audit/` and the root `LICENSE` at the new commit
+    into a scratch directory, read the diff against this directory, the instruction files
+    first (they decide what agents do), then the validators, and check that the wrapper's
+    rules still hold. Replace every file listed in `UPSTREAM.sha256` (delete the ones
+    upstream removed), rename `SKILL.md` to `CLOUDFLARE-SKILL.md`, regenerate the manifest
+    from the scratch download (`shasum -a 256`, with that one name changed), run
+    `bash check.sh`, and change the commit here.
 - Grok re-syncs its bundled docs in `~/.grok/docs/` at startup. Edits there do not survive.
 - When Grok or Claude changes hook input fields, capture real inputs with a temporary hook
   that appends stdin to a file. Read the field names from that capture, never from memory.

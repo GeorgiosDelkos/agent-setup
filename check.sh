@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Check this setup after any change: shell lint and format, Perl syntax, the 100-column limit
-# on the hooks, workflow lint (this repo's CI and the Rust CI templates), and the hook test
-# suite (fixtures plus real cargo clippy runs, a few minutes). CI runs the same script.
+# on the hooks, workflow lint (this repo's CI and the Rust CI templates), the vendored
+# security-audit skill against its pinned upstream, and the hook test suite (fixtures plus
+# real cargo clippy runs, a few minutes). CI runs the same script.
 #
 # Usage: bash check.sh            everything
 #        bash check.sh --quick    skip the test suite
@@ -58,12 +59,30 @@ perl_syntax() {
   done
 }
 
+# The vendored security-audit skill: every upstream file matches the pinned commit
+# (UPSTREAM.sha256), nothing else sits beside them but the house SKILL.md and the manifest,
+# and the validators agents run pass their own tests (agents/SETUP.md, Maintenance).
+# shellcheck disable=SC2329 # invoked indirectly, through step
+security_audit() {
+  local dir="$SETUP_DIR/claude/skills/security-audit" expected actual
+  (cd "$dir" && shasum -a 256 -c --quiet UPSTREAM.sha256) || return 1
+  expected="$({ awk '{ print $2 }' "$dir/UPSTREAM.sha256" && printf '%s\n' SKILL.md \
+    UPSTREAM.sha256; } | sort)"
+  actual="$(cd "$dir" && find . -mindepth 1 | sed 's|^\./||' | sort)"
+  if [[ "$actual" != "$expected" ]]; then
+    diff <(echo "$expected") <(echo "$actual") >&2
+    return 1
+  fi
+  node --test --test-reporter=dot "$dir"/validate-*.test.cjs
+}
+
 step shellcheck shellcheck -x "${shell_files[@]}"
 step shfmt shfmt -d -i 2 "${shell_files[@]}"
 step "perl syntax" perl_syntax
 step "100 columns" long_lines
 step actionlint actionlint "${workflow_files[@]}"
 step zizmor zizmor --offline --quiet "${workflow_files[@]}" "$SETUP_DIR/.github/dependabot.yml"
+step "security-audit skill" security_audit
 if [[ "${1:-}" != --quick ]]; then
   step "hook tests" bash "$HOOKS/rust/tests/run.sh"
   step "script tests" bash "$SETUP_DIR/claude/scripts/tests/grok-review.test.sh"
