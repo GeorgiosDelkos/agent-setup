@@ -1,0 +1,79 @@
+# Copy to .github/workflows/crap.yml, with templates/.cargo-crap.toml at the repo root. CRAP
+# scores of the code a PR changes (TST-21): it scores the base commit and the PR in one job and
+# fails when a function's score rose, or when a function the PR adds scores above THRESHOLD.
+# The report goes to the job summary. Costs two coverage runs of the test suite per PR.
+#
+# Not minikin/cargo-crap's own Action: it pins its inner actions by tag only, and it needs
+# `pull-requests: write` for its PR comment, in the job that runs the PR's code.
+# Its --fail-regression ignores new functions (a new function at CRAP 72 passed it, 2026-11-05),
+# hence the jq check below. A function that is renamed counts as new.
+permissions:
+  contents: read
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: crap
+env:
+  # The threshold in .cargo-crap.toml; change both together.
+  THRESHOLD: 30
+jobs:
+  crap:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    name: cargo crap (PR against base)
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+        with:
+          # The whole history, so the base commit can be checked out.
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+          components: llvm-tools-preview
+      # Newer than the other templates' v2.85.4, which knows cargo-crap only up to 0.3.1.
+      - name: cargo install cargo-llvm-cov, cargo-crap
+        uses: taiki-e/install-action@645d1ab48b3cb8591684a8b730b2ccf4cb3f9568 # tag=v2.87.33
+        with:
+          tool: cargo-llvm-cov,cargo-crap@0.9.0
+      - name: Score the base commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          head="$(git rev-parse HEAD)"
+          # The PR's config scores both sides, so a PR that changes it is compared under one
+          # set of rules (a different try-weight would make every score move).
+          cp .cargo-crap.toml "$RUNNER_TEMP/cargo-crap.toml"
+          git checkout --quiet "$BASE_SHA"
+          cp "$RUNNER_TEMP/cargo-crap.toml" .cargo-crap.toml
+          cargo llvm-cov --locked --workspace --all-features --lcov --output-path "$RUNNER_TEMP/base.info"
+          cargo crap --workspace --lcov "$RUNNER_TEMP/base.info" --format json --output "$RUNNER_TEMP/base.json"
+          git checkout --quiet --force "$head"
+      - name: Score the PR
+        run: |
+          cargo llvm-cov --locked --workspace --all-features --lcov --output-path "$RUNNER_TEMP/head.info"
+          cargo crap --workspace --lcov "$RUNNER_TEMP/head.info" --threshold "$THRESHOLD" \
+            --baseline "$RUNNER_TEMP/base.json" --format markdown --output "$RUNNER_TEMP/crap.md"
+          cat "$RUNNER_TEMP/crap.md" >>"$GITHUB_STEP_SUMMARY"
+      - name: Gate
+        run: |
+          status=0
+          cargo crap --workspace --lcov "$RUNNER_TEMP/head.info" --threshold "$THRESHOLD" \
+            --baseline "$RUNNER_TEMP/base.json" --fail-regression \
+            --format json --output "$RUNNER_TEMP/delta.json" || status=$?
+          # Exit 1 is the regression verdict; anything above it is a failed run.
+          if ((status > 1)); then exit "$status"; fi
+          new="$(jq -r --argjson t "$THRESHOLD" '.entries[]
+            | select(.status == "new" and .crap > $t)
+            | "::error file=\(.file | ltrimstr("./")),line=\(.line)::new function \(.function)"
+              + " scores CRAP \(.crap) (CC \(.cyclomatic), \(.coverage)% covered), above \($t):"
+              + " test its uncovered lines or split it"' "$RUNNER_TEMP/delta.json")"
+          if [[ -n "$new" ]]; then
+            echo "$new"
+            status=1
+          fi
+          exit "$status"

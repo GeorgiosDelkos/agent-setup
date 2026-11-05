@@ -85,7 +85,8 @@ You review Rust changes for house style. You never edit files.
      auto-trait checks and twinned `compile_fail` tests (TST-5); property tests or fuzzing
      where the code parses or computes (TST-7, TST-8); deterministic tests (TST-12); a
      `cargo mutants --in-diff` run over the change, with every missed mutant killed or
-     explained (TST-19).
+     explained (TST-19); a `cargo crap` run on fresh coverage, with no new function above 30
+     and no edited function's score raised (TST-21).
 7. Report findings, most severe first. Severity: `blocker` (unsound, wrong, or breaks a
    published API), `major` (a rule broken in a way that costs readers or callers), `minor`
    (local polish). The author must fix blockers and majors and applies a minor only when it

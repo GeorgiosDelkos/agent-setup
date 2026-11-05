@@ -72,6 +72,23 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   gives it longer to grow, and each job adds a test process that can grow. `bash-guard.sh`
   blocks the flags. [house: a `-j 4 --timeout 300` run reached 73 GB on a 16 GB laptop and
   reset it, 2026-11-04]
+- **TST-21** Before calling a change tested, score it with cargo-crap: CRAP = CC² × (1 −
+  coverage)³ + CC, per function, from cyclomatic complexity and line coverage. Regenerate
+  coverage after the last edit, `cargo llvm-cov --workspace --lcov --output-path
+  target/lcov.info`, then run `cargo crap --workspace --lcov target/lcov.info`. A stale
+  LCOV file has no records for new lines and reports them 100% covered. A function the
+  change adds scores 30 or less, and one it edits scores no higher than before (an edited
+  function already above 30 is debt: lower it when the change makes that cheap). To see
+  both, score once before editing with `--format json --output target/crap-base.json`,
+  and after it pass `--baseline target/crap-base.json`: rows marked NEW and regressed
+  rows are the ones to check, since `--fail-regression` alone ignores new functions. To
+  lower a score, test the uncovered lines (the Uncovered column) or split the function;
+  CRAP is never below CC, so a CC above 30 has to be split. CRAP only reads line coverage,
+  so it says where tests are missing; TST-19 says whether they check anything. The repo
+  carries `templates/.cargo-crap.toml` (threshold, `?` weight, test-file excludes, each
+  with its reason); `templates/ci/crap.yml` enforces both limits on each PR. [house:
+  Savoia and Evans' CRAP metric (2007), as in Uncle Bob's crap4clj and crapper; measured
+  on two house repos, 2026-11-05]
 
 ## Golden files and fixtures
 
