@@ -78,11 +78,15 @@ env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
 
 # Grok prints these two lines to stderr when a long review compacts its own context and
 # carries on; the review still completes (seen 2026-11-05, grok 1.0.70). Any other line,
-# such as a sandbox that could not be applied, still fails the run.
-grep -vxE -e 'Auto-compacting conversation \([0-9]+% full\)\.\.\.' \
-  -e 'Conversation compacted\.' "$run/review.err" >"$run/review.err.unexpected" || true
+# such as a sandbox that could not be applied, still fails the run. `-a`: GNU grep would
+# otherwise treat stderr holding a NUL or an invalid byte as binary and print no lines.
+# Exit 1 means every line was a notice; 2 is an error, which fails the run.
+filter=0
+grep -avxE -e 'Auto-compacting conversation \([0-9]+% full\)\.\.\.' \
+  -e 'Conversation compacted\.' "$run/review.err" >"$run/review.err.unexpected" || filter=$?
 
-if [[ "$status" -ne 0 || -s "$run/review.err.unexpected" || ! -s "$run/review.txt" ]]; then
+if [[ "$status" -ne 0 || "$filter" -gt 1 || -s "$run/review.err.unexpected" ||
+  ! -s "$run/review.txt" ]]; then
   echo "grok review failed (exit $status); its output is not used. stderr:" >&2
   head -c 2000 "$run/review.err" >&2
   exit 1

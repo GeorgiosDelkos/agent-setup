@@ -70,6 +70,18 @@ case "$STUB_MODE" in
     echo "finding"
     printf 'Conversation compacted.\nwarning: sandbox could not be applied\n' >&2
     ;;
+  warning-ending-in-notice)
+    echo "finding"
+    echo "warning: sandbox could not be applied; Conversation compacted." >&2
+    ;;
+  notice-then-text)
+    echo "finding"
+    echo "Auto-compacting conversation (93% full)... error" >&2
+    ;;
+  binary-warning)
+    echo "finding"
+    printf 'warning: sandbox\0 could not be applied\n' >&2
+    ;;
   empty) ;;
   leak) echo "the key is $STUB_SECRET" ;;
 esac
@@ -113,7 +125,6 @@ check "ok: worktree removed" "$(git -C "$repo" worktree list | grep -q runs &&
 check "ok: run dirs removed" "$([[ -z "$(ls -A "$home/runs")" ]] && echo yes || echo no)"
 check "ok: sessions emptied" "$([[ -z "$(ls -A "$home/sessions")" ]] && echo yes || echo no)"
 
-# ---- failed runs --------------------------------------------------------------------------
 # ---- compaction notices on stderr are not a failure ----------------------------------------
 out="$WORK/review-compacted.txt"
 code="$(run compacted "$out")"
@@ -121,7 +132,11 @@ check "compacted: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
 check "compacted: output written" "$([[ "$(cat "$out" 2>/dev/null)" == "finding: compacted" ]] &&
   echo yes || echo no)"
 
-for mode in fail stderr empty compacted-and-warning; do
+# ---- failed runs --------------------------------------------------------------------------
+# The last three pin the filter's anchoring and its binary handling: a warning that ends with
+# a notice, a notice with text after it, and a warning holding a NUL byte.
+for mode in fail stderr empty compacted-and-warning warning-ending-in-notice \
+  notice-then-text binary-warning; do
   out="$WORK/review-$mode.txt"
   code="$(run "$mode" "$out")"
   check "$mode: exit 1" "$([[ "$code" == 1 ]] && echo yes || echo no)"
