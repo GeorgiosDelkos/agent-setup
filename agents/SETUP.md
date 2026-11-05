@@ -46,6 +46,7 @@ machine reaches every machine.
 | `~/.grok/agents/rust-style-reviewer.md` | `$SETUP/claude/agents/…` | The reviewer, for Grok. |
 | `~/.claude/CLAUDE.md` | (file) | `@~/.config/agents/AGENTS.md`, plus `@~/.config/agents/AGENTS.local.md` when the local layer has one. |
 | `~/.claude/settings.json` | (file, merged) | Hooks, permissions, plugins. Grok reads its hooks too. |
+| `~/.grok-review/sandbox.toml` | (file, a copy of `$SETUP/grok/review-sandbox.toml`) | The `pr-review` sandbox profile for the Grok review in `review-pr`. `~/.grok-review` is a separate Grok home, with its own login, so the review cannot read the main `~/.grok`. It is a copy because grok refuses a symlinked `sandbox.toml`. Re-run `install.sh` after editing the shared file. |
 | `~/.cargo/config.toml` | (file, holds a marked copy of `$SETUP/cargo/config.toml`) | Shared Cargo settings: no dependency debug info in dev builds, which keeps each worktree's `target/` small. Local linkers and rustflags stay outside the markers. Re-run `install.sh` after editing the shared file. |
 | `~/Library/Application Support/JetBrains/Air/acp.json` | (file, merged from `$SETUP/air/acp.json`) | Grok and Claude Code as ACP agents in JetBrains Air. |
 | `~/Library/Application Support/JetBrains/Air/review/review-prompt.md` | `$SETUP/air/review-prompt.md` | Air's code-review task list, aligned with the review order in `AGENTS.md`. Air sends it as the user turn, so it outranks `AGENTS.md`. If Air replaces the link with a plain file, re-run `install.sh`. |
@@ -138,9 +139,11 @@ read those first.
    ```
 
    For JetBrains Air, also install Node (nvm), Claude Code, and Grok, and log in to both.
-   Grok, signed in, is also the second-model adversarial reviewer in `review-pr`. That
-   command runs it headless, with read-only tools under `--sandbox strict`. Without it,
-   `review-pr` reviews with the Claude agents alone.
+   Grok is also the second-model adversarial reviewer in `review-pr`. That command runs it
+   headless, from the separate home `~/.grok-review`, with read-only tools under the
+   `pr-review` sandbox profile. After `install.sh`, sign that home in once with
+   `GROK_HOME=~/.grok-review grok login`. A dedicated, revocable key is best. Without
+   that login, `review-pr` reviews with the Claude agents alone.
 
 2. Let the file sync bring `$SETUP` to the machine, then run:
 
@@ -219,12 +222,17 @@ subscriptions have changed several times. If it stops being allowed, either:
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
-  - Headless review mode, which `review-pr` uses. In a scratch repository, run the
-    command from `review-pr` ("Grok review") with `-p` in place of `--prompt-file`.
-    Ask it to list its tools, read a file in the worktree, read `~/.ssh/known_hosts`,
-    and run `echo hi > probe.txt`. Expected result: the tools are `read_file`,
-    `list_dir` and `grep`; the worktree file reads; the `~/.ssh` read is denied; no
-    shell runs; no `probe.txt` exists; stderr is empty.
+  - The Grok review sandbox, which `review-pr` uses.
+    - Setup: put a harmless probe file in a `mktemp -d` worktree, another in a new
+      folder under `~/.grok`, and another in a new folder under `~/Documents`.
+    - Run: the command from `review-pr` ("Grok review"), with `-p` in place of
+      `--prompt-file`. Ask it to list its tools, `read_file` each probe file, and run
+      `echo hi > probe.txt`.
+    - Expected: the tools are `read_file`, `list_dir` and `grep`; the worktree probe
+      reads; the other two report `Permission denied`; no `probe.txt` exists; the exit
+      status is 0 and stderr is empty.
+    - Use probe files, not real secrets. Asked to read `~/.ssh` and the like, the model
+      refuses on its own, and that tests nothing about the sandbox.
 - Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
   Perl syntax, the 100-column check and the hook test suite (`--quick` skips the suite).
   Every step must say `ok`.

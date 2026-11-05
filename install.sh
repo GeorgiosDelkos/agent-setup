@@ -296,6 +296,29 @@ setup_cargo() {
   echo "updated $local_file (previous copy in $BACKUP_DIR)"
 }
 
+# The Grok review home (claude/commands/review-pr.md, "Grok review"): GROK_HOME for review
+# runs, with its own login so the main ~/.grok is out of reach, and the pr-review sandbox
+# profile. The profile is copied, not linked: grok refuses a symlinked sandbox.toml.
+setup_grok_review() {
+  local home="$HOME/.grok-review" source="$SETUP_DIR/grok/review-sandbox.toml"
+  local target="$home/sandbox.toml"
+  mkdir -p "$home"
+  chmod 700 "$home"
+  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
+    echo "ok      $target"
+  else
+    if [[ -e "$target" || -L "$target" ]]; then
+      backup "$target"
+    fi
+    cp "$source" "$target"
+    chmod 600 "$target"
+    echo "copied  $target"
+  fi
+  if [[ ! -f "$home/auth.json" ]]; then
+    echo "note    Grok reviews need a login in the review home: GROK_HOME=$home grok login"
+  fi
+}
+
 main() {
   echo "AgentSetup: $SETUP_DIR"
 
@@ -332,6 +355,7 @@ main() {
     bash "$SETUP_DIR/install.local.sh"
   fi
   setup_cargo
+  setup_grok_review
   setup_air
   setup_git
   check_sync
