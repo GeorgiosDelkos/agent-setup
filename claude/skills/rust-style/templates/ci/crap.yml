@@ -6,7 +6,7 @@
 # takes more than a few minutes. Not required on day one: start it as advisory, make it
 # required once a few PRs show coverage is stable between runs (threads or timeouts can move
 # an unchanged function's score, and any rise above 0.01 fails). Duplicate candidates the PR
-# adds are warnings only.
+# adds or grows are warnings only.
 #
 # Not minikin/cargo-crap's own Action: it pins its inner actions by tag only, and it needs
 # `pull-requests: write` for its PR comment, in the job that runs the PR's code.
@@ -88,12 +88,14 @@ jobs:
               + " (CC \(.cyclomatic), \(.coverage)% covered): test its uncovered lines or split it"
             ' "$RUNNER_TEMP/delta.json")"
           # Duplicate groups the PR adds or grows are warnings: the author merges them or says
-          # in the PR why they stay apart. `// []`: absent when [duplicates] is off.
+          # in the PR why they stay apart. `// []`: absent when [duplicates] is off. The status
+          # is per group, not per member, so the annotation sits on the first member, which in
+          # a grown group may be an unchanged function; the message names every member.
           jq -r '(.duplicate_groups // [])[]
             | select(.status == "new" or .status == "grown")
             | .members[0] as $m
             | "::warning file=\($m.file | ltrimstr("./")),line=\($m.start_line)::"
-              + "duplicate candidate (similarity \(.score)): "
+              + "\(.status) duplicate candidate (similarity \(.score * 100 | round)%): "
               + ([.members[] | "\(.function) at \(.file | ltrimstr("./")):\(.start_line)"]
                  | join(", "))
             ' "$RUNNER_TEMP/delta.json"

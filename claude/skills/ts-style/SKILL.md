@@ -47,29 +47,57 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
   calling a change tested, run StrykerJS (`@stryker-mutator/vitest-runner`) with `--mutate` set to
   the changed files, and kill or explain each surviving mutant.
 - CRAP scores (CC² × (1 − coverage)³ + CC per function) with crap-typescript, after the last
-  edit, over the source files the branch changed:
+  edit, over the `.ts` and `.tsx` files the branch changed, committed or not, from the
+  directory that holds the Vitest config:
 
   ```bash
-  npx vitest run --coverage.enabled --coverage.reporter=json --coverage.include='src/**'
-  npx --before=2026-10-25 -y @barney-media/crap-typescript@2.0.0 --threshold 8 --agent \
-    $(git diff --name-only --diff-filter=d "$(git merge-base origin/main HEAD)" -- '*.ts' '*.tsx')
+  (
+    set -euo pipefail
+    base="$(git merge-base origin/main HEAD)"
+    files=()
+    while IFS= read -r file; do files+=("$file"); done < <(
+      {
+        git diff --name-only --relative --diff-filter=d "$base" -- '*.ts' '*.tsx'
+        git ls-files --others --exclude-standard -- '*.ts' '*.tsx'
+      } | sort -u
+    )
+    if ((${#files[@]} == 0)); then
+      echo "no changed .ts or .tsx files"
+      exit 0
+    fi
+    includes=()
+    for file in "${files[@]}"; do includes+=("--coverage.include=$file"); done
+    npx --no vitest run --coverage.enabled --coverage.reporter=json \
+      --coverage.reportsDirectory=coverage "${includes[@]}"
+    npx --before=2026-10-25 -y @barney-media/crap-typescript@2.0.0 --threshold 8 \
+      --agent --failures-only=false "${files[@]}"
+  )
   ```
 
-  A function the change adds or edits scores 8 or less; one already above 8 is debt: lower
-  it when the change makes that cheap, otherwise name it in the PR. Coverage here is the
+  A function the change adds scores 8 or less, and one it edits scores no higher than
+  before; one already above 8 is debt: lower it when the change makes that cheap, otherwise
+  name it in the PR. When unsure whether an edit raised a score, run the same commands in a
+  temporary worktree of the merge base, as TST-21 in `rust-style` does. Coverage here is the
   lower of statement and branch coverage, so at full coverage the limit is CC 8, the house
   complexity limit. Lower a score with tests over the untested branches, or by splitting the
   function. CRAP says where tests are missing; Stryker says whether they check anything.
-  - `--agent` lists only the functions above the threshold, and the exit code is 2 when
-    any function in the named files is, existing debt included: judge each row.
-  - It reuses `coverage/coverage-final.json` when the file exists, so rerun coverage after
-    the last edit. `--coverage.include` names the sources, so a file no test imports reads
-    0% instead of N/A, which never fails.
-  - Not `--changed`, which reads only `git status`. Test files are skipped by the tool.
-    `--diff-filter=d` drops deleted files, which the tool cannot open. When the branch
-    changed no `.ts` or `.tsx` file, skip the run: with no paths it scores the whole tree.
-  - Run with `npx` at an exact version, and `--before` holds its dependencies to that date;
-    move the two together. No package is added to the project.
+  - Every row of the named files is listed (`--failures-only=false`). A `failed` row is
+    above the threshold and a `skipped` row has no coverage (N/A): both count against a
+    function the change touches. The exit code is 2 when any row is above the threshold,
+    existing debt included: judge each row.
+  - Coverage is measured over exactly the changed files (`--coverage.include`), so a file
+    no test imports reads 0% instead of N/A. It is written to `coverage/`, where the tool
+    looks first, whatever the repo's own `reportsDirectory`; a stale report there would be
+    reused, so the commands always run together.
+  - The file list: `git diff` holds committed and staged work, `git ls-files --others` the
+    new files not yet added, `--diff-filter=d` drops deletions the tool cannot open, and
+    `--relative` makes paths match the current directory. Not the tool's `--changed`,
+    which reads only `git status`. Test files are skipped by the tool.
+  - `npx --no vitest` uses the project's own Vitest and fails instead of downloading one.
+    In a Jest repo, replace that line with `npx --no jest --coverage
+    --coverageReporters=json` plus one `--collectCoverageFrom=<file>` per changed file.
+  - The tool runs with `npx` at an exact version, and `--before` holds its dependencies to
+    that date; move the two together. No package is added to the project.
 
   The owner chose 8 over the 30 used for Rust and Python, 2026-11-05; the tool recommends 8
   for hard gates and defaults to 6. On hippius-console's tested `.ts` code, 15% of 5443
