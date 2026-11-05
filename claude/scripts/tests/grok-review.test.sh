@@ -62,6 +62,14 @@ case "$STUB_MODE" in
   ok) echo "finding: $seen" ;;
   fail) echo "partial"; exit 1 ;;
   stderr) echo "finding"; echo "warning: sandbox could not be applied" >&2 ;;
+  compacted)
+    echo "finding: compacted"
+    printf 'Auto-compacting conversation (93%% full)...\nConversation compacted.\n' >&2
+    ;;
+  compacted-and-warning)
+    echo "finding"
+    printf 'Conversation compacted.\nwarning: sandbox could not be applied\n' >&2
+    ;;
   empty) ;;
   leak) echo "the key is $STUB_SECRET" ;;
 esac
@@ -106,7 +114,14 @@ check "ok: run dirs removed" "$([[ -z "$(ls -A "$home/runs")" ]] && echo yes || 
 check "ok: sessions emptied" "$([[ -z "$(ls -A "$home/sessions")" ]] && echo yes || echo no)"
 
 # ---- failed runs --------------------------------------------------------------------------
-for mode in fail stderr empty; do
+# ---- compaction notices on stderr are not a failure ----------------------------------------
+out="$WORK/review-compacted.txt"
+code="$(run compacted "$out")"
+check "compacted: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
+check "compacted: output written" "$([[ "$(cat "$out" 2>/dev/null)" == "finding: compacted" ]] &&
+  echo yes || echo no)"
+
+for mode in fail stderr empty compacted-and-warning; do
   out="$WORK/review-$mode.txt"
   code="$(run "$mode" "$out")"
   check "$mode: exit 1" "$([[ "$code" == 1 ]] && echo yes || echo no)"

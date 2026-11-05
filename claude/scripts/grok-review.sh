@@ -76,7 +76,13 @@ env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
   --disable-web-search --no-subagents \
   --prompt-file "$run/prompt.md" >"$run/review.txt" 2>"$run/review.err" || status=$?
 
-if [[ "$status" -ne 0 || -s "$run/review.err" || ! -s "$run/review.txt" ]]; then
+# Grok prints these two lines to stderr when a long review compacts its own context and
+# carries on; the review still completes (seen 2026-11-05, grok 1.0.70). Any other line,
+# such as a sandbox that could not be applied, still fails the run.
+grep -vxE -e 'Auto-compacting conversation \([0-9]+% full\)\.\.\.' \
+  -e 'Conversation compacted\.' "$run/review.err" >"$run/review.err.unexpected" || true
+
+if [[ "$status" -ne 0 || -s "$run/review.err.unexpected" || ! -s "$run/review.txt" ]]; then
   echo "grok review failed (exit $status); its output is not used. stderr:" >&2
   head -c 2000 "$run/review.err" >&2
   exit 1
