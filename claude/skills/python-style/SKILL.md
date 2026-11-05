@@ -59,6 +59,33 @@ The global rules (AGENTS.md, Testing) apply; this is how in Python.
 - Coverage (`pytest-cov` with `--cov-branch`) shows untested code; it is a floor, not the
   goal. Before calling a change tested, run `mutmut`, restricted to the changed modules, and kill or
   explain each surviving mutant.
+- CRAP scores (CC² × (1 − coverage)³ + CC per function) with Uncle Bob's crapper, after the
+  last edit, so the coverage is current:
+
+  ```bash
+  uv run pytest --cov=<package> --cov-branch --cov-report=lcov:target/coverage/python/lcov.info
+  uvx --exclude-newer 2026-10-25 \
+    --from git+https://github.com/unclebob/crapper@6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d \
+    crapper --use-existing-coverage <package>
+  ```
+
+  A function the change adds or edits scores 30 or less; one already above 30 is debt:
+  lower it when the change makes that cheap, otherwise name it in the PR. Lower a score with
+  tests over the untested branches, or by splitting the function. CRAP says where tests are
+  missing; mutmut says whether they check anything.
+  - Always `--use-existing-coverage`: without it crapper deletes the report, reruns the
+    tests, and installs pytest and coverage into the project's interpreter when missing.
+    It reads `target/coverage/**/lcov.info`, hence the report path.
+  - No `--changed`, which reads only `git status` and misses work already committed on the
+    branch, and no `--threshold`, which exits 2 on the worst score in every file read,
+    existing debt included.
+  - Every run writes `.metrics/crap.edn` (for Uncle Bob's uml-viewer): add `.metrics/` to
+    `.gitignore`.
+  - crapper has no releases, so the pin is a commit, and `--exclude-newer` holds its
+    tree-sitter dependencies to that date; move the two together.
+
+  The owner chose crapper over crap4py (no dependencies, but unmaintained since June 2026),
+  2026-11-05. On hippius-hub it put 10 of 270 functions above 30, all untested CLI code.
 
 ## Supply chain
 

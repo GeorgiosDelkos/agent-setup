@@ -99,12 +99,15 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   ```
 
   Check the rows counted as new and regressed; `--fail-regression` alone ignores new
-  functions. Use the coverage job's flags (`--all-features` in the templates): with fewer
-  features, a feature-gated function in a covered file reads 100% covered locally and
-  fails CI. Rerun coverage after the last edit: a function added since the last run reads
-  100% covered in a file the report has, and 0% in a new file. [house: Savoia and Evans'
-  CRAP metric (2007), as in Uncle Bob's crap4clj and crapper; measured on two house
-  repos, 2026-11-05]
+  functions. The same run lists the duplicate candidates the change adds (functions of the
+  same structure, from `[duplicates]` in the config): merge each one, or say in the PR why
+  the two stay apart. CI warns on them and does not fail. Use the coverage job's flags
+  (`--all-features` in the templates): with fewer features, a feature-gated function in a
+  covered file reads 100% covered locally and fails CI. Rerun coverage after the last
+  edit: a function added since the last run reads 100% covered in a file the report has,
+  and 0% in a new file. Python and TypeScript have their own CRAP rules in `python-style`
+  and `ts-style`. [house: Savoia and Evans' CRAP metric (2007), as in Uncle Bob's
+  crap4clj and crapper; measured on two house repos, 2026-11-05]
 
 ## Golden files and fixtures
 

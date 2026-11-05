@@ -46,6 +46,34 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
 - Coverage (`@vitest/coverage-v8`) shows untested code; it is a floor, not the goal. Before
   calling a change tested, run StrykerJS (`@stryker-mutator/vitest-runner`) with `--mutate` set to
   the changed files, and kill or explain each surviving mutant.
+- CRAP scores (CC² × (1 − coverage)³ + CC per function) with crap-typescript, after the last
+  edit, over the source files the branch changed:
+
+  ```bash
+  npx vitest run --coverage.enabled --coverage.reporter=json --coverage.include='src/**'
+  npx --before=2026-10-25 -y @barney-media/crap-typescript@2.0.0 --threshold 8 --agent \
+    $(git diff --name-only --diff-filter=d "$(git merge-base origin/main HEAD)" -- '*.ts' '*.tsx')
+  ```
+
+  A function the change adds or edits scores 8 or less; one already above 8 is debt: lower
+  it when the change makes that cheap, otherwise name it in the PR. Coverage here is the
+  lower of statement and branch coverage, so at full coverage the limit is CC 8, the house
+  complexity limit. Lower a score with tests over the untested branches, or by splitting the
+  function. CRAP says where tests are missing; Stryker says whether they check anything.
+  - `--agent` lists only the functions above the threshold, and the exit code is 2 when
+    any function in the named files is, existing debt included: judge each row.
+  - It reuses `coverage/coverage-final.json` when the file exists, so rerun coverage after
+    the last edit. `--coverage.include` names the sources, so a file no test imports reads
+    0% instead of N/A, which never fails.
+  - Not `--changed`, which reads only `git status`. Test files are skipped by the tool.
+    `--diff-filter=d` drops deleted files, which the tool cannot open. When the branch
+    changed no `.ts` or `.tsx` file, skip the run: with no paths it scores the whole tree.
+  - Run with `npx` at an exact version, and `--before` holds its dependencies to that date;
+    move the two together. No package is added to the project.
+
+  The owner chose 8 over the 30 used for Rust and Python, 2026-11-05; the tool recommends 8
+  for hard gates and defaults to 6. On hippius-console's tested `.ts` code, 15% of 5443
+  functions were above 8 and 2.4% above 30.
 
 ## tsconfig.json strictness
 
