@@ -138,6 +138,9 @@ read those first.
    ```
 
    For JetBrains Air, also install Node (nvm), Claude Code, and Grok, and log in to both.
+   Grok, signed in, is also the second-model adversarial reviewer in `review-pr`, which runs
+   it headless (`grok --permission-mode plan --prompt-file …`). Without it, `review-pr`
+   reviews with the Claude agents alone.
 
 2. Let the file sync bring `$SETUP` to the machine, then run:
 
@@ -216,6 +219,9 @@ subscriptions have changed several times. If it stops being allowed, either:
   - `skills` has `rust-style`.
   - `agents` has `rust-style-reviewer`.
   - `configWarnings` has nothing new.
+  - Headless review mode, which `review-pr` uses: `grok --permission-mode plan -p "Reply
+    with OK"` prints `OK`. Asked to create a file in that mode, it plans and writes
+    nothing.
 - Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
   Perl syntax, the 100-column check and the hook test suite (`--quick` skips the suite).
   Every step must say `ok`.

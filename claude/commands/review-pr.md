@@ -29,8 +29,26 @@ Review with agents that have not seen your reasoning, so the review is not ancho
   access pattern, does the call site read well; then correctness, quality, tests,
   performance). Do not give it your view of the change.
 - The `rust-style-reviewer` agent as well when the diff touches Rust.
+- Grok, as an adversarial reviewer from another model family, when `grok` is on `PATH`
+  and signed in. Run it yourself rather than waiting for a review bot to comment. Run it
+  headless and read-only, from a checkout of the PR head that nothing else switches
+  while it reads, in the background (a review takes minutes):
 
-Verify every finding yourself against the code before keeping it. Rank the survivors:
+  ```sh
+  grok --cwd <checkout> --permission-mode plan --prompt-file <prompt.md> > <review.txt>
+  ```
+
+  `plan` mode cannot edit files or run writes. The prompt gets what the other agents get:
+  the PR number, the commits or diff command, the task, the files worth reading, and no
+  view of the change. Ask for findings with severity, `file:line` and a concrete failing
+  scenario, then what it checked and found correct. Ask it to cover:
+  - downstream callers, including sibling repositories;
+  - the rollout and deploy order;
+  - the interleavings of every entry point that touches the changed state.
+
+  Give it what is already known and tracked, so it does not report that again.
+
+Verify every finding yourself against the code before keeping it, Grok's included. Rank the survivors:
 P1 blocks merge, P2 important, P3 nice to have, P4 informational. Unneeded complexity is at
 least P2.
 

@@ -130,7 +130,8 @@ between the lines* (Rust Munich 2026).
   task but not my reasoning, posted ON the PR (`gh pr comment`: findings, severity,
   file:line). Each finding is fixed and pushed, or dismissed with its reason on the PR; a
   "Fixes" comment maps each one to its commit or reason. A review only in my report, or a
-  bot comment, does not count. A PR is ready to
+  bot comment, does not count, and I never wait on a bot. Where `grok` is installed, an
+  adversarial Grok review that I run myself joins it (`review-pr` says how). A PR is ready to
   merge only when review, fixes, and green CI are all on GitHub. Subagents follow this too.
 - No Co-Authored-By or AI attribution. Use the user's git identity.
 - Delete with `trash`, never `rm -rf`.
