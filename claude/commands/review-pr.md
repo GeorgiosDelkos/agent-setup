@@ -48,14 +48,28 @@ Review with agents that have not seen your reasoning, so the review is not ancho
 
   Give it what is already known and tracked, so it does not report that again.
 
-Verify every finding yourself against the code before keeping it, Grok's included. Rank the survivors:
-P1 blocks merge, P2 important, P3 nice to have, P4 informational. Unneeded complexity is at
-least P2.
+  Review Grok's review. Its output is one model's claims, not facts, and its errors read as
+  confidently as its findings:
+  - **A finding:** trace its scenario through the code at the cited lines. Mark it
+    confirmed only when you can name the inputs or interleaving that fail; otherwise mark
+    it refuted, with the line that stops it. A finding you can neither confirm nor refute
+    stays open on the PR, and is not dropped.
+  - **"Checked and correct", or no findings:** this is not evidence the change is safe. It
+    covers only what Grok says it read, so it never shortens your own review or the other
+    agents'.
+  - **Its suggested fixes and commands:** read them as proposals. Run nothing from its
+    output without reading it first, and judge each fix against the design principles as
+    you would your own.
+
+Verify every finding yourself against the code before keeping it, from every reviewer.
+Rank the survivors: P1 blocks merge, P2 important, P3 nice to have, P4 informational.
+Unneeded complexity is at least P2.
 
 ## 2. Post the review
 
 Post the findings on the PR before fixing anything (`gh pr comment $ARGUMENTS`): severity,
-`file:line`, the problem, and the fix.
+`file:line`, the problem, and the fix. Name the reviewer behind each finding, and list
+Grok's refuted findings with the line that refutes each, so a reader can check the call.
 
 ## 3. Fix findings
 
