@@ -11,7 +11,7 @@
 #
 # Exit status: 0 review written; 1 the run failed (output not usable); 2 the output held
 # material from the review home's credential and was deleted; 3 Grok is unavailable (not
-# installed, review home missing, not signed in); 64 usage.
+# installed, review home missing, not signed in, sign-in could not be refreshed); 64 usage.
 #
 # GROK_BIN and GROK_REVIEW_HOME override the grok binary and the review home (tests).
 set -euo pipefail
@@ -67,6 +67,23 @@ for entry in .claude .grok .cursor .agents .mcp.json AGENTS.md AGENT.md CLAUDE.m
   fi
 done
 cp "$prompt" "$run/prompt.md"
+
+# Refresh the review home's sign-in before the review. Under the pr-review sandbox Grok
+# cannot refresh it: a review started after the access token expired (about four hours
+# after the last refresh) got 401s for 45 minutes and then stopped, while the same call
+# outside the sandbox refreshed it (seen 2026-11-05, grok 1.0.70). So this one call runs
+# outside the sandbox. It is given nothing from the PR: a fixed prompt, an empty working
+# directory, one listing tool, no web, no subagents. Its reply is discarded.
+mkdir "$run/signin"
+if ! env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
+  GROK_HOME="$home" GROK_MEMORY=0 \
+  "$grok_bin" --cwd "$run/signin" \
+  --tools list_dir --disallowed-tools search_tool,use_tool \
+  --disable-web-search --no-subagents \
+  -p "Reply with the single word OK." >/dev/null 2>"$run/signin.err"; then
+  head -c 2000 "$run/signin.err" >&2
+  unavailable "the review home's sign-in could not be refreshed: GROK_HOME=$home grok login"
+fi
 
 status=0
 env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \

@@ -48,6 +48,17 @@ dir="$(dirname "$0")"
 log="$dir/log"
 STUB_MODE="$(cat "$dir/stub.mode")"
 STUB_SECRET="$(cat "$dir/stub.secret")"
+# The sign-in refresh is the call with `-p`; the review is the one with `--prompt-file`.
+if printf '%s\n' "$@" | grep -qx -- '-p'; then
+  printf '%s\n' "$@" >"$log.signin.args"
+  env >"$log.signin.env"
+  if [[ "$(cat "$dir/stub.signin")" == fail ]]; then
+    echo '{"message": "rejected (401)"}' >&2
+    exit 1
+  fi
+  echo OK
+  exit 0
+fi
 printf '%s\n' "$@" >"$log.args"
 env >"$log.env"
 cwd=""
@@ -89,12 +100,13 @@ EOF
 chmod +x "$stub"
 
 printf '%s\n' "$secret" >"$WORK/stub.secret"
+printf 'ok\n' >"$WORK/stub.signin"
 
 run() {
   local mode="$1" out="$2"
   local code=0
   printf '%s\n' "$mode" >"$WORK/stub.mode"
-  rm -f "$WORK/log.args" "$WORK/log.env"
+  rm -f "$WORK/log.args" "$WORK/log.env" "$WORK/log.signin.args" "$WORK/log.signin.env"
   GH_TOKEN=leak-me GROK_BIN="$stub" GROK_REVIEW_HOME="$home" \
     bash "$SCRIPT" "$repo" "$sha" "$prompt" "$out" >"$WORK/stdout" 2>"$WORK/stderr" || code=$?
   echo "$code"
@@ -124,6 +136,37 @@ check "ok: worktree removed" "$(git -C "$repo" worktree list | grep -q runs &&
   echo no || echo yes)"
 check "ok: run dirs removed" "$([[ -z "$(ls -A "$home/runs")" ]] && echo yes || echo no)"
 check "ok: sessions emptied" "$([[ -z "$(ls -A "$home/sessions")" ]] && echo yes || echo no)"
+
+# The sign-in refresh runs first, outside the sandbox, so it must be given nothing from the
+# PR: an empty working directory, a fixed prompt, one listing tool, no web, no subagents.
+signin="$(cat "$WORK/log.signin.args" 2>/dev/null || true)"
+check "signin: ran before the review" "$([[ -n "$signin" ]] && echo yes || echo no)"
+signin_cwd="$(grep -A1 -xF -- '--cwd' <<<"$signin" | tail -1)"
+check "signin: empty working directory" "$([[ "$signin_cwd" == */signin ]] &&
+  echo yes || echo no)"
+check "signin: not the review prompt" "$(grep -qxF -- '--prompt-file' <<<"$signin" &&
+  echo no || echo yes)"
+for flag in "--tools" "list_dir" "--disallowed-tools" "search_tool,use_tool" \
+  "--disable-web-search" "--no-subagents"; do
+  check "signin: passes $flag" "$(grep -qxF -- "$flag" <<<"$signin" && echo yes || echo no)"
+done
+check "signin: GROK_HOME is the review home" "$(grep -qxF "GROK_HOME=$home" \
+  "$WORK/log.signin.env" && echo yes || echo no)"
+check "signin: tokens stay out of the env" "$(grep -q GH_TOKEN "$WORK/log.signin.env" &&
+  echo no || echo yes)"
+
+# ---- a sign-in that cannot be refreshed stops before the review ---------------------------
+printf 'fail\n' >"$WORK/stub.signin"
+out="$WORK/review-signin.txt"
+code="$(run ok "$out")"
+printf 'ok\n' >"$WORK/stub.signin"
+check "signin fails: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+check "signin fails: review not run" "$([[ ! -e "$WORK/log.args" ]] && echo yes || echo no)"
+check "signin fails: no output" "$([[ ! -e "$out" ]] && echo yes || echo no)"
+check "signin fails: says to sign in" "$(grep -q 'grok login' "$WORK/stderr" &&
+  echo yes || echo no)"
+check "signin fails: worktree removed" "$(git -C "$repo" worktree list | grep -q runs &&
+  echo no || echo yes)"
 
 # ---- compaction notices on stderr are not a failure ----------------------------------------
 out="$WORK/review-compacted.txt"
