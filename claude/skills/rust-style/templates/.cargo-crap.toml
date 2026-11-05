@@ -5,7 +5,7 @@
 
 # Savoia and Evans' cut-off, also the tool's default and Uncle Bob's: above it a function is
 # complex and under-tested. CRAP is never below CC, so a function with CC above 30 can only
-# pass by being split. crap.yml reads its own copy of this number (THRESHOLD); change both.
+# pass by being split. crap.yml's gate reads this line, so keep it as `threshold = <number>`.
 threshold = 30.0
 
 # `?` adds nothing to CC. Line coverage marks a `?` line covered whether or not its error path
@@ -19,7 +19,10 @@ try-weight = 0.0
 # Each flagged function lists its uncovered line ranges, which says where the tests go.
 uncovered-hints = true
 
-# Test modules kept in their own file (`#[cfg(test)] mod tests;`) are scored like product
-# code: cargo-crap skips only an inline `#[cfg(test)] mod` and `#[test]` functions. Add the
-# repo's own test file names here. tests/, benches/ and examples/ are excluded by default.
-exclude = ["**/tests.rs", "**/*_tests.rs"]
+# Test modules kept in their own file (`#[cfg(test)] mod tests;`, which is tests.rs or
+# tests/mod.rs) are scored like product code: cargo-crap skips only an inline
+# `#[cfg(test)] mod` and `#[test]` functions. Add the repo's own test file names here. A
+# crate's top-level tests/, benches/ and examples/ are excluded by default. Excluded files
+# still in the LCOV report make each run print a "source/LCOV scope mismatch" warning; with
+# these excludes that warning is expected.
+exclude = ["**/tests.rs", "**/*_tests.rs", "**/tests/**"]
