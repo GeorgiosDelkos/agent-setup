@@ -257,7 +257,7 @@ The steps are rule REPO-1 in `rust-style/topics/repo.md`. In short:
    `low-level = true`: the edit hook then requires `topics/low-level.md`, and the crate merges
    `templates/low-level/` (lint additions, `clippy.toml` additions, `rustfmt.toml`, design
    doc skeleton). The low-level topic says what such a crate looks like.
-2. Copy `clippy.toml`, `deny.toml`, and `.pre-commit-config.yaml` from
+2. Copy `clippy.toml`, `deny.toml`, `.cargo-crap.toml`, and `.pre-commit-config.yaml` from
    `~/.claude/skills/rust-style/templates/`. There is no `rustfmt.toml`: default rustfmt.
 3. Merge `Cargo.lints.toml` as `[workspace.lints]`, with `[lints] workspace = true` in each
    member; add the crate's custom cfgs to `unexpected_cfgs`.

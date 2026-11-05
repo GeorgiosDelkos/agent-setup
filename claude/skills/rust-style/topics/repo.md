@@ -22,6 +22,8 @@ workflows. Tags and IDs as in `../SKILL.md`. For depth: `rfr-project-structure`,
     with no `unsafe` adds `unsafe_code = "forbid"` (UNS-1).
   - `templates/clippy.toml`: repo root. Add product names to `doc-valid-idents`.
   - `templates/deny.toml`: `cargo deny check` in CI.
+  - `templates/.cargo-crap.toml`: repo root; CRAP scores (TST-21). Add the repo's own test
+    file names to `exclude`.
   - `templates/lib.rs-header.rs`: top of every published library's `lib.rs`.
   - `templates/ci/`: workflows from `jonhoo/rust-ci-conf` plus house gates; delete the ones
     whose header says they do not apply.
@@ -95,7 +97,8 @@ workflows. Tags and IDs as in `../SKILL.md`. For depth: `rfr-project-structure`,
     (`cargo nextest run` plus `cargo test --doc`, `--locked`), scheduled nightly and
     `cargo update` runs with `-D deprecated`, `cargo deny` on manifest changes and daily;
   - every crate whose suite runs in a few minutes: `cargo mutants` over the PR diff
-    (`mutants.yml`, TST-19);
+    (`mutants.yml`, TST-19), and CRAP scores of the PR against its base (`crap.yml`,
+    TST-21; two suite runs per PR);
   - published libraries: macOS and Windows, docs (`cargo docs-rs`, warnings as errors),
     `cargo semver-checks`, `cargo hack --feature-powerset --depth 2 check`, MSRV, minimal
     versions;

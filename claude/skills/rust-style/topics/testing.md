@@ -72,6 +72,39 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   gives it longer to grow, and each job adds a test process that can grow. `bash-guard.sh`
   blocks the flags. [house: a `-j 4 --timeout 300` run reached 73 GB on a 16 GB laptop and
   reset it, 2026-11-04]
+- **TST-21** Before calling a change tested, score it with cargo-crap: CRAP = CC² × (1 −
+  coverage)³ + CC per function, from cyclomatic complexity and line coverage. A function
+  the change adds scores at most the threshold in the repo's `.cargo-crap.toml` (a copy of
+  `templates/.cargo-crap.toml`: 30), and no function scores higher than on the branch's
+  base. A function already above the threshold is debt: lower it when the change makes
+  that cheap. A renamed function counts as new. To lower a score, test the uncovered lines
+  (the Uncovered column) or split the function; CRAP is never below CC, so a CC above the
+  threshold has to be split. CRAP reads only line coverage, so it says where tests are
+  missing; TST-19 says whether they check anything. `templates/ci/crap.yml` runs the same
+  comparison on each PR. Author and reviewer run it the same way, scoring the base in a
+  temporary worktree (a second build):
+
+  ```bash
+  base="$(git merge-base origin/main HEAD)"
+  git worktree add --detach "$TMPDIR/crap-base" "$base"
+  cp .cargo-crap.toml "$TMPDIR/crap-base/"   # one config scores both sides
+  (cd "$TMPDIR/crap-base" &&
+    cargo llvm-cov --locked --all-features --ignore-run-fail --lcov \
+      --output-path lcov.info &&
+    cargo crap --workspace --lcov lcov.info --format json \
+      --output "$TMPDIR/crap-base.json")
+  git worktree remove --force "$TMPDIR/crap-base"
+  cargo llvm-cov --locked --all-features --lcov --output-path target/lcov.info
+  cargo crap --workspace --lcov target/lcov.info --baseline "$TMPDIR/crap-base.json"
+  ```
+
+  Check the rows counted as new and regressed; `--fail-regression` alone ignores new
+  functions. Use the coverage job's flags (`--all-features` in the templates): with fewer
+  features, a feature-gated function in a covered file reads 100% covered locally and
+  fails CI. Rerun coverage after the last edit: a function added since the last run reads
+  100% covered in a file the report has, and 0% in a new file. [house: Savoia and Evans'
+  CRAP metric (2007), as in Uncle Bob's crap4clj and crapper; measured on two house
+  repos, 2026-11-05]
 
 ## Golden files and fixtures
 
