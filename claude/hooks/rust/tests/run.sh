@@ -1224,6 +1224,54 @@ printf '// mine, committed\n' >>"$TR/src/lib.rs"
 git -C "$TR" -c user.name=t -c user.email=t@t commit -q -am mine
 expect "untested: a committed untested edit still asks" 2 check-on-stop.sh \
   "$(cstop t2 "$TR")" "No test run since this Rust changed"
+# Only files a move changed are git's. Each case in its own repo and session, so no earlier
+# check of the same state lets it pass.
+untested_after() {
+  local session="$1" repo="$WORK/untested-$1" move="$2"
+  new_crate_repo "$repo" "" plain
+  if [[ "$move" == merge ]]; then
+    # The branch to merge exists before the session's test run: switching to it and back
+    # afterwards would rewrite src/lib.rs, which then really is git's (see the hook).
+    git -C "$repo" checkout -q -b side
+    printf 'other\n' >"$repo/other.txt"
+    git -C "$repo" add other.txt
+    git -C "$repo" -c user.name=t -c user.email=t@t commit -q -m other
+    git -C "$repo" checkout -q main
+  fi
+  prompt "$session" "$repo"
+  ran_tests "$session"
+  sleep 1.1
+  printf '// mine\n' >>"$repo/src/lib.rs"
+  if [[ "$move" != dirty ]]; then
+    git -C "$repo" -c user.name=t -c user.email=t@t commit -q -am mine
+  fi
+  sleep 1.1
+  case "$move" in
+  branch | dirty) git -C "$repo" checkout -q -b elsewhere ;;
+  merge) git -C "$repo" -c user.name=t -c user.email=t@t merge -q --no-edit side ;;
+  esac
+  expect "untested: $3" 2 check-on-stop.sh "$(cstop "$session" "$repo")" \
+    "No test run since this Rust changed"
+}
+untested_after t4 branch "a committed edit still asks after a new branch"
+untested_after t5 merge "a committed edit still asks after a merge that does not touch it"
+untested_after t6 dirty "an uncommitted edit carried across a checkout asks"
+# An edit committed within a second of a checkout that wrote the file: its mtime is inside
+# the slack, but HEAD no longer holds what the checkout left.
+QUICK="$WORK/untested-quick"
+new_crate_repo "$QUICK" "" plain
+git -C "$QUICK" checkout -q -b review
+printf '// theirs\n' >>"$QUICK/src/lib.rs"
+git -C "$QUICK" -c user.name=t -c user.email=t@t commit -q -am theirs
+git -C "$QUICK" checkout -q main
+prompt t7 "$QUICK"
+ran_tests t7
+sleep 1.1
+git -C "$QUICK" checkout -q review
+printf '// mine, at once\n' >>"$QUICK/src/lib.rs"
+git -C "$QUICK" -c user.name=t -c user.email=t@t commit -q -am mine
+expect "untested: an edit committed in the checkout's second still asks" 2 check-on-stop.sh \
+  "$(cstop t7 "$QUICK")" "No test run since this Rust changed"
 # A second repo's baseline is written after the edit that first touches it; the session's
 # start stamp, from its first prompt, still counts that edit.
 TR2="$WORK/tests-ran-2"

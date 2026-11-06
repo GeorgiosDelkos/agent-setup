@@ -211,7 +211,8 @@ printf 'ok\n' >"$WORK/stub.signin"
 check "signin hangs: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
 check "signin hangs: stopped at the limit" "$([[ "$elapsed" -lt 20 ]] && echo yes || echo no)"
 check "signin hangs: review not run" "$([[ ! -e "$WORK/log.args" ]] && echo yes || echo no)"
-stub_sleep="sleep $(cat "$WORK/stub.sleep")"
+# Anchored: `sleep 60.123` must not match another run's `sleep 60.1234`.
+stub_sleep="^sleep $(sed 's/\./\\./' "$WORK/stub.sleep")\$"
 check "signin hangs: no stub left running" "$(pgrep -f "$stub_sleep" >/dev/null &&
   echo no || echo yes)"
 
