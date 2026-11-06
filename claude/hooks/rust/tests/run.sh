@@ -649,8 +649,16 @@ commit_all "$GATE" "more work"
 expect "gate: 28 lines since the review blocked" 2 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')" "changes 28 lines"
 run_hook review-done.sh \
-  "$(subagent_stop grok-child "$GATE" '{"subagentType": "rust-style-reviewer"}')"
+  "$(subagent_stop grok-child "$GATE" '{"subagentType": "user:rust-style-reviewer"}')"
 expect "gate: a Grok reviewer in its own session counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+lines "$GATE/src/lib.rs" 58 25
+commit_all "$GATE" "more after the prefixed review"
+expect "gate: Rust after that review is blocked again" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop grok-bare "$GATE" '{"subagentType": "rust-style-reviewer"}')"
+expect "gate: a bare Grok reviewer name counts" 0 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 printf '# Notes\n%.0s' {1..30} >"$GATE/NOTES.md"
 commit_all "$GATE" "docs"
