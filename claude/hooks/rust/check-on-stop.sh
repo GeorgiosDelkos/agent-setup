@@ -13,7 +13,8 @@
 # for a subagent; lint warnings on changed lines only), then, in a repo that opted in to the
 # house rules (house_opted_in), house-check.pl and the column limit on changed lines. Changed
 # lines are the hunks since that base; an untracked or non-git file counts as all changed.
-# Last, Rust files this session modified after its last test run (tests-ran.sh) ask for one.
+# Last, Rust files this session modified after its last test run (tests-ran.sh) ask for one;
+# a file a checkout, reset or clean merge wrote, and nothing changed since, is not counted.
 # A root under the session scratchpad is skipped unless it is on a git branch (scratch_exempt).
 #
 # A state that was already checked is not checked again, and a second stop in a row always
@@ -170,7 +171,46 @@ untested_files() {
     my $run = (stat $ENV{STAMP})[9];
     $since = $run if defined $run && $run > $since;
     my $modified = (stat $F[1])[9];
-    print $F[1] if defined $modified && $modified > $since;'
+    print $F[1] if defined $modified && $modified > $since;' | not_written_by_git "$1"
+}
+
+# The files read on stdin (from the `root<TAB>file` pairs $1) less the ones git wrote and the
+# session has not changed since: a checkout, reset, clean merge, rebase or pull rewrites
+# every file it touches, so its mtime alone made reviewing a branch read as editing all of
+# it. A file counts as git's when it matches HEAD and was last written no later than the
+# root's latest such HEAD move (the reflog keeps whole seconds, hence the 1s of slack).
+#
+# A commit is not such a move: a file the session edited and then committed matches HEAD
+# too, and is still untested. Nor is a conflicted merge, which logs only its commit: the
+# merged files are new code, and asking for a test run on them is right.
+not_written_by_git() {
+  local pairs="$1" root moved dirty git_wrote=""
+  # No associative array: the hooks run under macOS's bash 3.2.
+  while IFS= read -r root; do
+    if ! is_git_root "$root"; then
+      continue
+    fi
+    moved="$(git -C "$root" reflog show --date=unix --format='%gd %gs' HEAD 2>/dev/null |
+      awk '$2 ~ /^(checkout|reset|merge|rebase|pull)/ {
+        sub(/^HEAD@\{/, "", $1); sub(/\}$/, "", $1); print $1; exit }')"
+    if [[ -z "$moved" ]]; then
+      continue
+    fi
+    # Changed against HEAD, or not in it at all: an untracked file matches no commit.
+    dirty="$(
+      git -C "$root" diff --name-only HEAD 2>/dev/null || true
+      git -C "$root" ls-files --others --exclude-standard 2>/dev/null || true
+    )"
+    git_wrote+="$(awk -F '\t' -v root="$root" '$1 == root { print $2 }' <<<"$pairs" |
+      ROOT="$root" DIRTY="$dirty" MOVED="$moved" perl -MTime::HiRes=stat -lne '
+        BEGIN { %dirty = map { ("$ENV{ROOT}/$_" => 1) } split /\n/, $ENV{DIRTY}; }
+        my $modified = (stat $_)[9];
+        print if defined $modified && !$dirty{$_} && $modified <= $ENV{MOVED} + 1;')"$'\n'
+  done < <(cut -f 1 <<<"$pairs" | sort -u)
+  # Every line of stdin not in that list. The list always has a line (`%s\n`): an empty
+  # first input would make `NR == FNR` hold for stdin too, and swallow it.
+  awk 'NR == FNR { if ($0 != "") wrote[$0] = 1; next } !($0 in wrote)' \
+    <(printf '%s\n' "$git_wrote") -
 }
 
 pairs="$(files_to_check)"

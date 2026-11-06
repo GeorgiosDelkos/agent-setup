@@ -1204,6 +1204,26 @@ ran_tests t2
 expect "untested: a test run after the change passes" 0 check-on-stop.sh "$(cstop t2 "$TR")"
 printf '\n[profile.dev]\nopt-level = 1\n' >>"$TR/Cargo.toml"
 expect "untested: a manifest-only change does not ask" 0 check-on-stop.sh "$(cstop t2 "$TR")"
+# A file git wrote (checking out a branch under review) is not an edit: no ask. Editing it
+# afterwards is, and so is a commit of an untested edit.
+git -C "$TR" add -A
+git -C "$TR" -c user.name=t -c user.email=t@t commit -q -m tested
+git -C "$TR" checkout -q -b review
+printf '// from the branch under review\n' >>"$TR/src/lib.rs"
+git -C "$TR" -c user.name=t -c user.email=t@t commit -q -am "someone else's change"
+git -C "$TR" checkout -q -
+ran_tests t2
+sleep 1.1
+git -C "$TR" checkout -q review
+expect "untested: a file a checkout wrote does not ask" 0 check-on-stop.sh "$(cstop t2 "$TR")"
+sleep 1.1
+printf '// mine\n' >>"$TR/src/lib.rs"
+expect "untested: editing it after the checkout asks" 2 check-on-stop.sh \
+  "$(cstop t2 "$TR")" "No test run since this Rust changed"
+printf '// mine, committed\n' >>"$TR/src/lib.rs"
+git -C "$TR" -c user.name=t -c user.email=t@t commit -q -am mine
+expect "untested: a committed untested edit still asks" 2 check-on-stop.sh \
+  "$(cstop t2 "$TR")" "No test run since this Rust changed"
 # A second repo's baseline is written after the edit that first touches it; the session's
 # start stamp, from its first prompt, still counts that edit.
 TR2="$WORK/tests-ran-2"
