@@ -657,8 +657,20 @@ commit_all "$GATE" "more after the prefixed review"
 expect "gate: Rust after that review is blocked again" 2 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 run_hook review-done.sh \
+  "$(subagent_stop grok-other "$GATE" '{"subagentType": "user:other-agent"}')"
+expect "gate: a different Grok agent is not this reviewer" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh \
   "$(subagent_stop grok-bare "$GATE" '{"subagentType": "rust-style-reviewer"}')"
 expect "gate: a bare Grok reviewer name counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+lines "$GATE/src/lib.rs" 83 25
+commit_all "$GATE" "more after the bare review"
+expect "gate: Rust after the bare review is blocked again" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop grok-plugin "$GATE" '{"subagentType": "plugin:rust-style-reviewer"}')"
+expect "gate: a plugin-prefixed Grok reviewer counts" 0 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 printf '# Notes\n%.0s' {1..30} >"$GATE/NOTES.md"
 commit_all "$GATE" "docs"
@@ -1312,10 +1324,10 @@ run_hook tests-ran.sh "$(bash_cmd t1 'pytest-cov')"
 check "tests-ran: pytest-cov is not a Python check" \
   "$([[ ! -e "$py_stamp" ]] && echo yes)"
 trash "$ts_stamp" 2>/dev/null || true
-run_hook tests-ran.sh "$(bash_cmd t1 'echo typescript')"
-check "tests-ran: typescript is not tsc" "$([[ ! -e "$ts_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'cat tsconfig.json')"
+check "tests-ran: tsconfig is not tsc" "$([[ ! -e "$ts_stamp" ]] && echo yes)"
 
-# Formatters do not stamp. Runners do. make and just stamp every language.
+# Formatters do not stamp. Runners do. make and just stamp every language skill.
 bash_stamp="$STATE_TMP/claude-rust-hooks/t1.checks-bash-style"
 act_stamp="$STATE_TMP/claude-rust-hooks/t1.checks-gh-actions-style"
 clear_lang_stamps() {
@@ -1339,6 +1351,14 @@ check "tests-ran: ruff check stamps python" "$([[ -e "$py_stamp" ]] && echo yes)
 clear_lang_stamps
 run_hook tests-ran.sh "$(bash_cmd t1 'ruff format --check src')"
 check "tests-ran: ruff format --check stamps python" \
+  "$([[ -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff format src --check')"
+check "tests-ran: ruff format src --check stamps python" \
+  "$([[ -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff format --diff src')"
+check "tests-ran: ruff format --diff stamps python" \
   "$([[ -e "$py_stamp" ]] && echo yes)"
 clear_lang_stamps
 run_hook tests-ran.sh "$(bash_cmd t1 'prettier --write .')"
@@ -1480,6 +1500,28 @@ expect "lang-stop: a later Python edit does not repeat the Rust finding" 2 \
 check "lang-stop: the Python stop does not repeat Rust" \
   "$([[ "$out" != *dbg!* && "$out" != *"this Rust changed"* ]] && echo yes)" "$out"
 
+# A language check must not drop a Rust file the subagent has not fixed.
+KEEP="$WORK/keep-rust"
+new_crate_repo "$KEEP" "" plain
+prompt mxkeep "$KEEP"
+printf '\nfn bad() {\n    let _: u8 = "x";\n}\n' >>"$KEEP/src/lib.rs"
+run_hook fmt-on-edit.sh "$(edit mxkeep "$KEEP/src/lib.rs" 'x' worker)"
+expect "lang-stop: a subagent Rust error blocks" 2 check-on-stop.sh \
+  "$(subagent_stop mxkeep "$KEEP" '{"agent_id": "worker"}')" "mismatched types"
+printf 'x = 1\n' >"$KEEP/app.py"
+run_hook fmt-on-edit.sh "$(edit mxkeep "$KEEP/app.py" 'x = 1' worker)"
+run_hook tests-ran.sh "$(bash_cmd mxkeep 'uv run pytest -q')"
+expect "lang-stop: pytest leaves the Rust error for later" 0 check-on-stop.sh \
+  "$(subagent_stop mxkeep "$KEEP" '{"agent_id": "worker"}')"
+keep_edited="$STATE_TMP/claude-rust-hooks/mxkeep.worker.edited"
+check "lang-stop: the unfixed Rust file stays recorded" \
+  "$(grep -q 'src/lib.rs$' "$keep_edited" && echo yes)" \
+  "$(cat "$keep_edited" 2>/dev/null || true)"
+printf 'pub fn extra() {}\n' >"$KEEP/src/extra.rs"
+run_hook fmt-on-edit.sh "$(edit mxkeep "$KEEP/src/extra.rs" 'x' worker)"
+expect "lang-stop: a later file still shows the unfixed Rust error" 2 check-on-stop.sh \
+  "$(subagent_stop mxkeep "$KEEP" '{"agent_id": "worker"}')" "mismatched types"
+
 # cargo is required only for a Rust stop. jq, git, perl, and shasum stay required.
 NOCARGO="$WORK/nocargo-bin"
 mkdir -p "$NOCARGO"
@@ -1519,6 +1561,16 @@ printf 'fn main() { let _ = 1; }\n' >"$RN/src/main.rs"
 run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
 check "lang-stop: Rust without cargo still names the missing tool" "$(
   [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *cargo* ]] && echo yes
+)" "exit $code: $out"
+MXN="$WORK/mixed-nocargo"
+new_crate_repo "$MXN" "" plain
+prompt mxn "$MXN"
+printf '\nfn marker() {}\n' >>"$MXN/src/main.rs"
+printf 'x = 1\n' >"$MXN/app.py"
+run_hook check-on-stop.sh "$(cstop mxn "$MXN")" "$NOCARGO"
+check "lang-stop: missing cargo still asks about Python" "$(
+  [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *"this Python changed"* ]] &&
+    echo yes
 )" "exit $code: $out"
 
 # ---- 4. bash guard ---------------------------------------------------------------------------

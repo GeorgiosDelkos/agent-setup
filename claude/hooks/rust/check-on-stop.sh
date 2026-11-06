@@ -60,8 +60,9 @@ pair_kind() {
   return 0
 }
 
-# kind<TAB>root<TAB>file rows, each file once, under its deepest root. deepest_root keys
-# root then file; this keeps the kind on the row.
+# kind<TAB>root<TAB>file rows, each file once, under its deepest root. A recorded path
+# inside a nested git repo also lies under any directory root above it; counted under
+# both, it was reported twice and diffed as all-new under the outer one.
 deepest_tagged() {
   awk -F '\t' '{
     if (!($3 in best) || length($2) > length(best[$3])) {
@@ -256,64 +257,75 @@ if [[ "$run_rust" -eq 0 && "$run_lang" -eq 0 ]]; then
 fi
 internal=0
 findings=""
+# Missing cargo must not skip the language ask, and must not store a Rust
+# fingerprint for a check that did not run.
+cargo_missing=0
 if [[ "$run_rust" -eq 1 ]]; then
   if [[ ${#files[@]} -gt 0 ]]; then
-    need_tools block-stop cargo
-    ranges="$(ranges_for "$pairs")"
-    clippy="$(clippy_output "${files[@]}")"
-    located='^/[^:]*:[0-9]+:[0-9]+: '
-    # Cargo's own errors and unknown-lint warnings, in their original order (a build-script
-    # failure's cause lines follow its `error:` line).
-    unlocated="$(
-      grep -vE "$located" <<<"$clippy" | grep -v '^warning: ' | grep -v '^$' || true
-      grep -E '^warning: unknown lint' <<<"$clippy" || true
-    )"
-    errors="$(grep -E "$located"'error' <<<"$clippy" || true)"
-    if is_subagent; then
-      errors="$(printf '%s\n' "${files[@]}" | awk 'NR == FNR { own[$0] = 1; next }
+    if ! command -v cargo >/dev/null 2>&1; then
+      echo "Rust hooks ($(basename "$0")): missing tool(s): cargo. Install them" \
+        "(~/.config/agents/SETUP.md, 'Install on a new machine'); the Rust checks are off" \
+        "until then." >&2
+      cargo_missing=1
+    else
+      ranges="$(ranges_for "$pairs")"
+      clippy="$(clippy_output "${files[@]}")"
+      located='^/[^:]*:[0-9]+:[0-9]+: '
+      # Cargo's own errors and unknown-lint warnings, in their original order (a build-script
+      # failure's cause lines follow its `error:` line).
+      unlocated="$(
+        grep -vE "$located" <<<"$clippy" | grep -v '^warning: ' | grep -v '^$' || true
+        grep -E '^warning: unknown lint' <<<"$clippy" || true
+      )"
+      errors="$(grep -E "$located"'error' <<<"$clippy" || true)"
+      if is_subagent; then
+        errors="$(printf '%s\n' "${files[@]}" | awk 'NR == FNR { own[$0] = 1; next }
     { path = $0; sub(/:[0-9]+:[0-9]+: .*$/, "", path); if (path in own) print }' - \
-        <(printf '%s\n' "$errors"))"
-    fi
-    warnings="$(grep -E "$located"'warning' <<<"$clippy" | in_changed_lines "$ranges" || true)"
-
-    # House rules only where the repo asked for them; elsewhere the repo's own conventions win.
-    house=""
-    house_files=()
-    while IFS= read -r file; do
-      house_files+=("$file")
-    done < <(opted_in_files "${files[@]}")
-    if [[ ${#house_files[@]} -gt 0 ]]; then
-      code=0
-      house="$(perl "$RUST_HOOKS_DIR/house-check.pl" "${house_files[@]}" 2>/dev/null)" || code=$?
-      if [[ $code -gt 1 ]]; then
-        internal_error "house-check.pl exited $code; its findings are missing from this check"
-        internal=1
+          <(printf '%s\n' "$errors"))"
       fi
-    fi
-    for file in ${house_files[@]+"${house_files[@]}"}; do
-      if [[ "$file" == *.rs ]]; then
-        house+=$'\n'"$(column_findings "$file")"
-      fi
-    done
-    house="$(in_changed_lines "$ranges" <<<"$house" || true)"
+      warnings="$(grep -E "$located"'warning' <<<"$clippy" | in_changed_lines "$ranges" || true)"
 
-    # Located findings sorted: compiler errors first, then by file and line.
-    sorted="$(printf '%s\n%s\n%s\n' "$errors" "$warnings" "$house" | grep -v '^$' | sort -u |
-      awk '{
+      # House rules only where the repo asked for them; elsewhere the repo's own conventions win.
+      house=""
+      house_files=()
+      while IFS= read -r file; do
+        house_files+=("$file")
+      done < <(opted_in_files "${files[@]}")
+      if [[ ${#house_files[@]} -gt 0 ]]; then
+        code=0
+        house="$(perl "$RUST_HOOKS_DIR/house-check.pl" "${house_files[@]}" 2>/dev/null)" || code=$?
+        if [[ $code -gt 1 ]]; then
+          internal_error "house-check.pl exited $code; its findings are missing from this check"
+          internal=1
+        fi
+      fi
+      for file in ${house_files[@]+"${house_files[@]}"}; do
+        if [[ "$file" == *.rs ]]; then
+          house+=$'\n'"$(column_findings "$file")"
+        fi
+      done
+      house="$(in_changed_lines "$ranges" <<<"$house" || true)"
+
+      # Located findings sorted: compiler errors first, then by file and line.
+      sorted="$(printf '%s\n%s\n%s\n' "$errors" "$warnings" "$house" | grep -v '^$' | sort -u |
+        awk '{
     rank = ($0 ~ /^[^:]*:[0-9]+:[0-9]+: error/) ? 0 : 1
     path = $0; sub(/:[0-9]+:.*$/, "", path)
     line = $0; sub(/^[^:]*:/, "", line); sub(/:.*$/, "", line)
     printf "%d\t%s\t%d\t%s\n", rank, path, line, $0
   }' | sort -t "$(printf '\t')" -k1,1n -k2,2 -k3,3n | cut -f 4- || true)"
-    error_count="$(grep -cE '^[^:]*:[0-9]+:[0-9]+: error' <<<"$sorted" || true)"
-    findings="$(
-      if [[ -n "$unlocated" ]]; then printf '%s\n' "$unlocated"; fi
-      if [[ -n "$sorted" ]]; then
-        head -n "$((error_count > MAX_FINDINGS ? error_count : MAX_FINDINGS))" <<<"$sorted"
-      fi
-    )"
+      error_count="$(grep -cE '^[^:]*:[0-9]+:[0-9]+: error' <<<"$sorted" || true)"
+      findings="$(
+        if [[ -n "$unlocated" ]]; then printf '%s\n' "$unlocated"; fi
+        if [[ -n "$sorted" ]]; then
+          head -n "$((error_count > MAX_FINDINGS ? error_count : MAX_FINDINGS))" <<<"$sorted"
+        fi
+      )"
+    fi
   fi
-  printf '%s' "$rust_state" >"$checked"
+  if [[ "$cargo_missing" -eq 0 ]]; then
+    printf '%s' "$rust_state" >"$checked"
+  fi
 fi
 if [[ "$run_lang" -eq 1 ]]; then
   printf '%s' "$lang_state" >"$checked_lang"
@@ -366,8 +378,15 @@ if [[ "$run_lang" -eq 1 ]]; then
   ask_unchecked "$lang" bash-style checks-bash-style || untested=1
   ask_unchecked "$lang" gh-actions-style checks-gh-actions-style || untested=1
 fi
+if [[ "$cargo_missing" -eq 1 ]]; then
+  exit 2
+fi
+# A language-only stop must not drop a Rust file whose check did not run. A subagent's
+# next stop sees only `edited`, and its compiler errors are filtered to those files.
 if [[ -z "$findings" && "$untested" -eq 0 ]]; then
-  : >"$edited"
+  if [[ "$run_rust" -eq 1 ]]; then
+    : >"$edited"
+  fi
   exit "$internal"
 fi
 if [[ -n "$findings" ]]; then

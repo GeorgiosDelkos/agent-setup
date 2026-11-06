@@ -18,13 +18,10 @@ need_tools fail-open jq
 # Skill files read whole by the shell command $1, one path per line: every house skill
 # path that is an argument of a `cat`/`bat` simple command, unless the output is cut short.
 shell_reads() {
-  local name lang_re="" skill_path
-  for name in $HOUSE_LANG_SKILLS; do
-    lang_re+="${lang_re:+|}${name%-style}"
-  done
+  local skill_path
   skill_path='[^[:space:]"'"'"';&|]*skills/'
   skill_path+='(rust-style/(SKILL|topics/[a-z-]+)'
-  skill_path+="|(${lang_re})-style/SKILL)\\.md"
+  skill_path+="|(${HOUSE_LANG_SKILLS// /|})/SKILL)\\.md"
   if grep -qE '\|[[:space:]]*(head|tail|sed|awk|grep)\b' <<<"$1"; then
     return 0
   fi

@@ -26,8 +26,8 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 read_hook_input
-# Grok names a user agent as its type, and a plugin agent as `plugin:name`. Either form of
-# this reviewer counts; a prefix that is not this agent does not.
+# Grok names a user agent as `user:name` and a plugin agent as `plugin:name`. Any prefix
+# of this reviewer counts. A prefix of a different agent does not.
 case "$(hook_field '.agent_type // .subagentType')" in
 rust-style-reviewer | *:rust-style-reviewer) ;;
 *) exit 0 ;;

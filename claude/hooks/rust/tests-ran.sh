@@ -10,10 +10,12 @@
 # CI runs the tests anyway. A Python, TypeScript, shell, or Actions check is recorded the
 # same way, including the repo's own tool when it has not adopted the house one (eslint,
 # mypy): the reminder is that something checked the change. A formatter does not count
-# (`ruff format`, `shfmt -w`): it rewrites and does not check. `shfmt -d` and
-# `ruff format --check` do. A project runner counts on that same cheap side: `check.sh`
+# (`ruff format`, `shfmt -w`): it rewrites and does not check. `shfmt -d` does, and so
+# does `ruff format` with `--check` or `--diff` anywhere in that simple command.
+# A project runner counts on that same cheap side: `check.sh`
 # for shell, npm/pnpm/yarn/bun and `node --test` for TypeScript, tox, nox, and unittest
-# for Python. `make` and `just` with test, lint, or check stamp every language.
+# for Python. `make` and `just` with test, lint, or check stamp every language skill.
+# They do not stamp the Rust test run: make test is not cargo test.
 set -euo pipefail
 
 input="$(cat)"
@@ -56,7 +58,7 @@ end='([^[:alnum:]_-]|$)'
 # ruff format rewrites. ruff format --check and any other ruff command judge.
 ruff_counts() {
   local rest
-  rest="$(perl -pe 's/(^|[^[:alnum:]_-])ruff[[:space:]]+format(?![[:space:]]+--check)//g' \
+  rest="$(perl -pe 's/(^|[^[:alnum:]_-])ruff[[:space:]]+format(?![^;&|\n]*--(check|diff))//g' \
     <<<"$command")"
   grep -qE "${bound}ruff${end}" <<<"$rest"
 }
@@ -74,8 +76,8 @@ shfmt_counts() {
   return 0
 }
 
-# make and just name no language. One of them stamps every language: the reminder errs
-# toward not asking.
+# make and just name no language. One of them stamps every language skill, not the
+# Rust test run: the reminder errs toward not asking.
 runner="${bound}(make|just)[[:space:]]+(test|lint|check)${end}"
 node_run="${bound}(npm|pnpm|yarn|bun)[[:space:]]+(run[[:space:]]+)?(test|lint|check)${end}"
 node_run+="|${bound}"'node[[:space:]]+--test'"${end}"
