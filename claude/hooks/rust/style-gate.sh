@@ -3,8 +3,9 @@
 # this agent has the house style in context. Any .rs edit, or an edit to a Rust repo's
 # manifest, lint, toolchain, or CI config, needs the core rust-style skill. On top of that,
 # each topic file under rust-style/topics/ is required when the edit's new text or path
-# touches its area. One message lists everything still missing, so the agent loads it all in
-# one round.
+# touches its area. Python, TypeScript, shell, and GitHub Actions edits need that language's
+# skill (common.sh lang_skill_for). One message lists everything still missing, so the agent
+# loads it all in one round.
 #
 # The block is a JSON deny on stdout (`hookSpecificOutput.permissionDecision`), the canonical
 # form for both Claude Code and Grok: Grok turns only the first stderr line into the deny
@@ -95,34 +96,58 @@ rust_topics() {
   return 0
 }
 
+# Appends one skill to the deny list when its file exists and this agent has not loaded it.
+# A missing install is not required: the block has no once-escape, so the agent could never
+# lift it. $1 is the skill name, $2 the marker file under the agent state directory.
+note_missing_skill() {
+  local name="$1" marker="$2" file
+  file="$SKILLS_DIR/$name/SKILL.md"
+  if [[ -f "$file" && ! -f "$(agent_file "$marker")" ]]; then
+    missing+="  the $name skill (Claude: Skill tool; Grok: read_file $file)"$'\n'
+    summary+=" $file"
+  fi
+}
+
 path="$(tool_path)"
 if scratch_exempt "$path"; then
   exit 0
 fi
+rust=0
+topics=""
 if [[ "$path" == *.rs ]]; then
+  rust=1
   topics="$(rust_topics "$path")"
 elif is_repo_config "$path"; then
+  rust=1
   topics="repo"
-else
+fi
+lang="$(lang_skill_for "$path")"
+if [[ "$rust" -eq 0 && -z "$lang" ]]; then
   exit 0
 fi
 
 missing=""
 summary=""
-if [[ ! -f "$(agent_file style-loaded)" ]]; then
-  missing+="  the rust-style skill (Claude: Skill tool; Grok: read_file"
-  missing+=" $RUST_STYLE_DIR/SKILL.md)"$'\n'
-  summary+=" $RUST_STYLE_DIR/SKILL.md (Claude: Skill rust-style)"
-fi
-# A PreToolUse block has no block-once escape, so a topic file that is not installed must
-# not be required: the agent could never read it and every edit would stay blocked.
-for topic in $topics; do
-  topic_file="$RUST_STYLE_DIR/topics/$topic.md"
-  if [[ -f "$topic_file" && ! -f "$(agent_file "topic-$topic")" ]]; then
-    missing+="  Read $topic_file"$'\n'
-    summary+=" $topic_file"
+if [[ "$rust" -eq 1 ]]; then
+  # The core skill is named even when SKILL.md is absent. Skipping it would let a Rust
+  # edit through with no style loaded. note_missing_skill is the opposite rule, for a
+  # topic or language skill the agent cannot read.
+  if [[ ! -f "$(agent_file style-loaded)" ]]; then
+    missing+="  the rust-style skill (Claude: Skill tool; Grok: read_file"
+    missing+=" $RUST_STYLE_DIR/SKILL.md)"$'\n'
+    summary+=" $RUST_STYLE_DIR/SKILL.md (Claude: Skill rust-style)"
   fi
-done
+  for topic in $topics; do
+    topic_file="$RUST_STYLE_DIR/topics/$topic.md"
+    if [[ -f "$topic_file" && ! -f "$(agent_file "topic-$topic")" ]]; then
+      missing+="  Read $topic_file"$'\n'
+      summary+=" $topic_file"
+    fi
+  done
+fi
+if [[ -n "$lang" ]]; then
+  note_missing_skill "$lang" "skill-$lang"
+fi
 
 if [[ -z "$missing" ]]; then
   exit 0

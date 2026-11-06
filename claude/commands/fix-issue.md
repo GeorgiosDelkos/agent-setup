@@ -60,9 +60,9 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
 
 ## 7. Review, fix, and mark ready
 
-Run the `review-pr` command (through the Skill tool) on the new PR number: it reviews
-with fresh-context agents, posts the review on the PR, fixes the findings, pushes, and
-marks the PR ready.
+Run the `review-pr` command on the new PR number: read `~/.claude/commands/review-pr.md`
+and follow it (Claude may load it with the Skill tool). It reviews with fresh-context
+agents, posts the review on the PR, fixes the findings, pushes, and marks the PR ready.
 
 ## 8. Comment on the issue
 

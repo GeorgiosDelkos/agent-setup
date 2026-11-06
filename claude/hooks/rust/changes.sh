@@ -185,27 +185,26 @@ session_caused() {
   [[ "$baseline_state" != "$(repo_state "$root")" ]]
 }
 
-# The `root<TAB>file` pairs on stdin with each file kept once, under its deepest root. A
-# recorded path inside a nested git repo also lies under any non-git directory root above
-# it; counted under both, it was reported twice and diffed as all-new under the outer one.
-deepest_root() {
-  awk -F '\t' '{ if (!($2 in best) || length($1) > length(best[$2])) best[$2] = $1 }
-    END { for (f in best) printf "%s\t%s\n", best[f], f }' | sort
-}
-
-# Changed .rs and Cargo.toml paths under root $1 (absolute, possibly deleted): in git, the
-# changes since base $2 plus untracked files; unioned with the paths recorded in the list
-# files $3.... One per line, sorted. Scratchpad paths are kept (callers apply scratch_exempt).
-changed_files() {
-  local root="$1" base="$2"
-  shift 2
+# Paths under root $1 (absolute, possibly deleted) matching regex $3: in git, the changes
+# since base $2 plus untracked files; unioned with the paths recorded in the list files
+# $4.... One per line, sorted. Scratchpad paths are kept (callers apply scratch_exempt).
+changed_matching() {
+  local root="$1" base="$2" regex="$3"
+  shift 3
   {
     if is_git_root "$root"; then
       git -C "$root" -c core.quotepath=off diff --name-only --no-renames "$base" --
       git -C "$root" -c core.quotepath=off ls-files --others --exclude-standard
     fi | awk -v root="$root/" '{ print root $0 }'
     cat /dev/null "$@" 2>/dev/null | awk -v root="$root/" 'index($0, root) == 1' || true
-  } | grep -E '(\.rs|/Cargo\.toml)$' | sort -u || true
+  } | grep -E "$regex" | sort -u || true
+}
+
+# Changed .rs and Cargo.toml paths under root $1. See changed_matching.
+changed_files() {
+  local root="$1" base="$2"
+  shift 2
+  changed_matching "$root" "$base" '(\.rs|/Cargo\.toml)$' "$@"
 }
 
 # Changed line ranges of the existing files $3... under root $1, measured from base $2, as

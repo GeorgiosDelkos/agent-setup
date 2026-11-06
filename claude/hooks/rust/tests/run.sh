@@ -133,6 +133,10 @@ edit() {
 skill() {
   jq -nc --arg s "$1" '{session_id: $s, tool_name: "Skill", tool_input: {skill: "rust-style"}}'
 }
+load_skill() {
+  jq -nc --arg s "$1" --arg n "$2" \
+    '{session_id: $s, tool_name: "Skill", tool_input: {skill: $n}}'
+}
 read_file() {
   jq -nc --arg s "$1" --arg p "$2" \
     '{session_id: $s, tool_name: "Read", tool_input: {file_path: $p}}'
@@ -325,6 +329,71 @@ expect "repo: workflow outside Rust passes" 0 style-gate.sh \
   "$(edit g3 "$WORK/notrust/.github/workflows/ci.yml" 'on: push')"
 run_hook style-loaded.sh "$(read_file g3 "$SKILL/topics/repo.md")"
 expect "repo: passes after topic read" 0 style-gate.sh "$(edit g3 "$LIB/Cargo.toml" '[lints]')"
+
+# Language skills. A missing install is not required: the block has no escape.
+expect "lang: python passes when its skill is absent" 0 style-gate.sh \
+  "$(edit g10 "$WORK/app.py" 'x = 1')"
+LANG_SKILLS="$FAKE_HOME/.claude/skills"
+for name in python-style ts-style bash-style gh-actions-style; do
+  mkdir -p "$LANG_SKILLS/$name"
+  printf '# %s\n' "$name" >"$LANG_SKILLS/$name/SKILL.md"
+done
+expect "lang: python blocked until loaded" 2 style-gate.sh \
+  "$(edit g10 "$WORK/app.py" 'x = 1')" "python-style/SKILL.md"
+run_hook style-loaded.sh "$(load_skill g10 python-style)"
+expect "lang: python passes after Skill load" 0 style-gate.sh \
+  "$(edit g10 "$WORK/app.py" 'x = 1')"
+expect "lang: typescript blocked" 2 style-gate.sh \
+  "$(edit g11 "$WORK/app.ts" 'const x = 1')" "ts-style/SKILL.md"
+run_hook style-loaded.sh "$(grok_read g11 "$LANG_SKILLS/ts-style/SKILL.md")"
+expect "lang: typescript passes after read_file" 0 style-gate.sh \
+  "$(grok_edit g11 "$WORK/app.ts" 'const x = 1')"
+expect "lang: shell blocked" 2 style-gate.sh \
+  "$(edit g12 "$WORK/run.sh" 'echo hi')" "bash-style/SKILL.md"
+run_hook style-loaded.sh "$(bash_cmd g12 "cat $LANG_SKILLS/bash-style/SKILL.md")"
+expect "lang: shell passes after cat" 0 style-gate.sh \
+  "$(edit g12 "$WORK/run.sh" 'echo hi')"
+run_hook style-loaded.sh "$(bash_cmd g20 "head -5 $LANG_SKILLS/bash-style/SKILL.md")"
+expect "lang: a partial read does not load the skill" 2 style-gate.sh \
+  "$(edit g20 "$WORK/partial.sh" 'echo hi')" "bash-style/SKILL.md"
+expect "lang: workflow outside a Rust repo blocked" 2 style-gate.sh \
+  "$(edit g13 "$WORK/notrust/.github/workflows/ci.yml" 'on: push')" \
+  "gh-actions-style"
+expect "lang: dependabot blocked" 2 style-gate.sh \
+  "$(edit g13 "$WORK/notrust/.github/dependabot.yml" 'version: 2')" \
+  "gh-actions-style"
+run_hook style-loaded.sh \
+  "$(sliced_read g14 "$LANG_SKILLS/python-style/SKILL.md" read_file 1 5)"
+expect "lang: grok sliced SKILL.md still loads" 0 style-gate.sh \
+  "$(grok_edit g14 "$WORK/other.py" 'y = 1')"
+run_hook style-loaded.sh \
+  "$(sliced_read g15 "$LANG_SKILLS/ts-style/SKILL.md" Read "" 5)"
+expect "lang: claude sliced SKILL.md does not load" 2 style-gate.sh \
+  "$(edit g15 "$WORK/app.tsx" 'const x = 1')" "ts-style/SKILL.md"
+mkdir -p "$WORK/proj/node_modules/pkg"
+expect "lang: node_modules is not gated" 0 style-gate.sh \
+  "$(edit g16 "$WORK/proj/node_modules/pkg/x.py" 'x = 1')"
+expect "lang: a Rust workflow lists every skill" 2 style-gate.sh \
+  "$(edit g17 "$LIB/.github/workflows/ci.yml" 'on: push')" "gh-actions-style"
+check "lang: a Rust workflow also names repo.md" \
+  "$([[ "$out" == *topics/repo.md* ]] && echo yes)" "$out"
+check "lang: a Rust workflow also names rust-style" \
+  "$([[ "$out" == *rust-style/SKILL.md* ]] && echo yes)" "$out"
+run_hook style-loaded.sh "$(load_skill g18 python-style)"
+expect "lang: a subagent does not inherit the load" 2 style-gate.sh \
+  "$(edit g18 "$WORK/app.py" 'x = 1' subpy)" "python-style/SKILL.md"
+printf 'x = 1\n' >"$WORK/app.py"
+run_hook fmt-on-edit.sh "$(edit g19 "$WORK/app.py" 'x = 2')"
+edited_list="$STATE_TMP/claude-rust-hooks/g19.main.edited"
+check "fmt: records an existing python file" \
+  "$(grep -q 'app\.py$' "$edited_list" && echo yes)" \
+  "$(cat "$edited_list" 2>/dev/null || true)"
+printf 'x = 1\n' >"$WORK/proj/node_modules/pkg/x.py"
+before="$(cat "$edited_list")"
+run_hook fmt-on-edit.sh "$(edit g19 "$WORK/proj/node_modules/pkg/x.py" 'x = 2')"
+check "fmt: does not record node_modules" \
+  "$([[ "$(cat "$edited_list")" == "$before" ]] && echo yes)" \
+  "$(cat "$edited_list")"
 
 # A relative Grok target_file resolves against the hook input's cwd.
 grok_rel() {
@@ -580,8 +649,28 @@ commit_all "$GATE" "more work"
 expect "gate: 28 lines since the review blocked" 2 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')" "changes 28 lines"
 run_hook review-done.sh \
-  "$(subagent_stop grok-child "$GATE" '{"subagentType": "rust-style-reviewer"}')"
+  "$(subagent_stop grok-child "$GATE" '{"subagentType": "user:rust-style-reviewer"}')"
 expect "gate: a Grok reviewer in its own session counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+lines "$GATE/src/lib.rs" 58 25
+commit_all "$GATE" "more after the prefixed review"
+expect "gate: Rust after that review is blocked again" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop grok-other "$GATE" '{"subagentType": "user:other-agent"}')"
+expect "gate: a different Grok agent is not this reviewer" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop grok-bare "$GATE" '{"subagentType": "rust-style-reviewer"}')"
+expect "gate: a bare Grok reviewer name counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+lines "$GATE/src/lib.rs" 83 25
+commit_all "$GATE" "more after the bare review"
+expect "gate: Rust after the bare review is blocked again" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh \
+  "$(subagent_stop grok-plugin "$GATE" '{"subagentType": "plugin:rust-style-reviewer"}')"
+expect "gate: a plugin-prefixed Grok reviewer counts" 0 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 printf '# Notes\n%.0s' {1..30} >"$GATE/NOTES.md"
 commit_all "$GATE" "docs"
@@ -1217,6 +1306,272 @@ check "settings: tests-ran also runs after a failing command" "$(jq -e '
   [.hooks.PostToolUseFailure[] | select(.matcher == "Bash") | .hooks[].command
     | select(test("tests-ran"))] | length == 1' "$HOOKS/../../settings.json" >/dev/null &&
   echo yes)"
+
+# Language checks are their own stamps. A substring of the tool name is not a run.
+py_stamp="$STATE_TMP/claude-rust-hooks/t1.checks-python-style"
+ts_stamp="$STATE_TMP/claude-rust-hooks/t1.checks-ts-style"
+run_hook tests-ran.sh "$(bash_cmd t1 'npx eslint .')"
+check "tests-ran: eslint stamps the TypeScript check" \
+  "$([[ -e "$ts_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'uv run ty check')"
+check "tests-ran: ty check stamps the Python check" \
+  "$([[ -e "$py_stamp" ]] && echo yes)"
+trash "$py_stamp" 2>/dev/null || true
+run_hook tests-ran.sh "$(bash_cmd t1 'echo city check')"
+check "tests-ran: city check is not a Python check" \
+  "$([[ ! -e "$py_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'pytest-cov')"
+check "tests-ran: pytest-cov is not a Python check" \
+  "$([[ ! -e "$py_stamp" ]] && echo yes)"
+trash "$ts_stamp" 2>/dev/null || true
+run_hook tests-ran.sh "$(bash_cmd t1 'cat tsconfig.json')"
+check "tests-ran: tsconfig is not tsc" "$([[ ! -e "$ts_stamp" ]] && echo yes)"
+
+# Formatters do not stamp. Runners do. make and just stamp every language skill.
+bash_stamp="$STATE_TMP/claude-rust-hooks/t1.checks-bash-style"
+act_stamp="$STATE_TMP/claude-rust-hooks/t1.checks-gh-actions-style"
+clear_lang_stamps() {
+  local stamp
+  for stamp in "$py_stamp" "$ts_stamp" "$bash_stamp" "$act_stamp"; do
+    trash "$stamp" 2>/dev/null || true
+  done
+}
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'shfmt -w -i 2 run.sh')"
+check "tests-ran: shfmt -w does not stamp bash" \
+  "$([[ ! -e "$bash_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'shfmt -d -i 2 run.sh')"
+check "tests-ran: shfmt -d stamps bash" "$([[ -e "$bash_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff format src')"
+check "tests-ran: ruff format does not stamp python" \
+  "$([[ ! -e "$py_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff check src')"
+check "tests-ran: ruff check stamps python" "$([[ -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff format --check src')"
+check "tests-ran: ruff format --check stamps python" \
+  "$([[ -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff format src --check')"
+check "tests-ran: ruff format src --check stamps python" \
+  "$([[ -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'ruff format --diff src')"
+check "tests-ran: ruff format --diff stamps python" \
+  "$([[ -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'prettier --write .')"
+check "tests-ran: prettier does not stamp TypeScript" \
+  "$([[ ! -e "$ts_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'oxfmt')"
+check "tests-ran: oxfmt does not stamp TypeScript" \
+  "$([[ ! -e "$ts_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'cmake --build .')"
+check "tests-ran: cmake is not make" \
+  "$([[ ! -e "$py_stamp" && ! -e "$bash_stamp" ]] && echo yes)"
+run_hook tests-ran.sh "$(bash_cmd t1 'make test')"
+check "tests-ran: make test stamps every language" "$(
+  [[ -e "$py_stamp" && -e "$ts_stamp" && -e "$bash_stamp" && -e "$act_stamp" ]] &&
+    echo yes
+)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'bash check.sh')"
+check "tests-ran: bash check.sh stamps bash only" \
+  "$([[ -e "$bash_stamp" && ! -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'npm test')"
+check "tests-ran: npm test stamps TypeScript, not Python" \
+  "$([[ -e "$ts_stamp" && ! -e "$py_stamp" ]] && echo yes)"
+clear_lang_stamps
+run_hook tests-ran.sh "$(bash_cmd t1 'tox')"
+check "tests-ran: tox stamps python" "$([[ -e "$py_stamp" ]] && echo yes)"
+
+# A Python repo asks once for a Python check. cargo does not satisfy it.
+PY="$WORK/py-only"
+mkdir -p "$PY"
+printf 'x = 1\n' >"$PY/app.py"
+git -C "$PY" init -q -b main
+old_commit "$PY" init
+prompt py1 "$PY"
+printf 'x = 2\n' >"$PY/app.py"
+expect "lang-stop: a Python change asks once" 2 check-on-stop.sh \
+  "$(cstop py1 "$PY")" "No check since this Python changed"
+check "lang-stop: the message names the file" \
+  "$([[ "$out" == *"$PY/app.py"* ]] && echo yes)" "$out"
+expect "lang-stop: the next stop in the same state passes" 0 check-on-stop.sh \
+  "$(cstop py1 "$PY")"
+printf 'x = 3\n' >"$PY/app.py"
+run_hook tests-ran.sh "$(bash_cmd py1 'cargo test')"
+expect "lang-stop: cargo test does not cover Python" 2 check-on-stop.sh \
+  "$(cstop py1 "$PY")" "No check since this Python changed"
+printf 'x = 4\n' >"$PY/app.py"
+run_hook tests-ran.sh "$(bash_cmd py1 'uv run pytest -q')"
+expect "lang-stop: pytest after the write passes" 0 check-on-stop.sh \
+  "$(cstop py1 "$PY")"
+printf 'echo hi\n' >"$PY/run.sh"
+expect "lang-stop: a shell change asks" 2 check-on-stop.sh \
+  "$(cstop py1 "$PY")" "No check since this shell changed"
+printf 'echo bye\n' >>"$PY/run.sh"
+run_hook tests-ran.sh "$(bash_cmd py1 'shellcheck run.sh && shfmt -d -i 2 run.sh')"
+expect "lang-stop: shellcheck and shfmt cover the shell change" 0 check-on-stop.sh \
+  "$(cstop py1 "$PY")"
+
+# A subagent is asked only about the language file it recorded.
+PY2="$WORK/py-sub"
+mkdir -p "$PY2"
+printf 'a = 1\n' >"$PY2/app.py"
+printf 'b = 1\n' >"$PY2/other.py"
+git -C "$PY2" init -q -b main
+old_commit "$PY2" init
+prompt py2 "$PY2"
+printf 'b = 2\n' >"$PY2/other.py"
+run_hook fmt-on-edit.sh "$(edit py2 "$PY2/other.py" 'b = 2')"
+printf 'a = 2\n' >"$PY2/app.py"
+run_hook fmt-on-edit.sh "$(edit py2 "$PY2/app.py" 'a = 2' pysub)"
+expect "lang-stop: a subagent asks about its own file" 2 check-on-stop.sh \
+  "$(subagent_stop py2 "$PY2" '{"agent_id": "pysub"}')" \
+  "No check since this Python changed"
+check "lang-stop: a subagent is not shown the parent's file" \
+  "$([[ "$out" == *app.py* && "$out" != *other.py* ]] && echo yes)" "$out"
+
+# Recording only a Python file must not run clippy on the crate it sits in.
+PYC="$WORK/py-in-crate"
+new_crate_repo "$PYC" "" plain
+prompt pyc "$PYC"
+printf 'x = 1\n' >"$PYC/app.py"
+run_hook fmt-on-edit.sh "$(edit pyc "$PYC/app.py" 'x = 1' pyonly)"
+printf 'not toml\n' >"$PYC/Cargo.toml"
+expect "lang-stop: a python-only subagent does not run clippy" 2 check-on-stop.sh \
+  "$(subagent_stop pyc "$PYC" '{"agent_id": "pyonly"}')" \
+  "No check since this Python changed"
+check "lang-stop: that stop has no cargo error" \
+  "$([[ "$out" != *error:* ]] && echo yes)" "$out"
+
+# TypeScript and workflow stops ask once, and a stamp after the write clears the ask.
+TS="$WORK/ts-only"
+mkdir -p "$TS"
+printf 'export const n = 1\n' >"$TS/app.ts"
+git -C "$TS" init -q -b main
+old_commit "$TS" init
+prompt ts1 "$TS"
+printf 'export const n = 2\n' >"$TS/app.ts"
+expect "lang-stop: a TypeScript change asks once" 2 check-on-stop.sh \
+  "$(cstop ts1 "$TS")" "No check since this TypeScript changed"
+printf 'export const n = 3\n' >"$TS/app.ts"
+run_hook tests-ran.sh "$(bash_cmd ts1 'npx vitest run')"
+expect "lang-stop: vitest after the write passes" 0 check-on-stop.sh \
+  "$(cstop ts1 "$TS")"
+WF="$WORK/wf-only"
+mkdir -p "$WF/.github/workflows"
+printf 'name: ci\n' >"$WF/.github/workflows/ci.yml"
+git -C "$WF" init -q -b main
+old_commit "$WF" init
+prompt wf1 "$WF"
+printf 'name: ci\non: push\n' >"$WF/.github/workflows/ci.yml"
+expect "lang-stop: a workflow change asks once" 2 check-on-stop.sh \
+  "$(cstop wf1 "$WF")" "No check since this workflow changed"
+printf 'name: ci\non: pull_request\n' >"$WF/.github/workflows/ci.yml"
+run_hook tests-ran.sh "$(bash_cmd wf1 'actionlint')"
+expect "lang-stop: actionlint after the write passes" 0 check-on-stop.sh \
+  "$(cstop wf1 "$WF")"
+
+# Vendor trees are not a language change at stop time. The Python repo above already
+# passed its check; these files must not open it again.
+mkdir -p "$PY/node_modules/pkg" "$PY/.venv/lib"
+printf 'x = 1\n' >"$PY/node_modules/pkg/x.py"
+printf 'y = 1\n' >"$PY/.venv/lib/y.py"
+expect "lang-stop: node_modules and .venv are not a Python change" 0 check-on-stop.sh \
+  "$(cstop py1 "$PY")"
+
+# A Python edit in a repo that also has Rust must not repeat the Rust finding.
+MX="$WORK/mixed"
+new_crate_repo "$MX" "" plain
+prompt mx "$MX"
+printf '\nfn main_extra() { dbg!(1); }\n' >>"$MX/src/main.rs"
+expect "lang-stop: a Rust change in a mixed repo runs clippy" 2 check-on-stop.sh \
+  "$(cstop mx "$MX")" "dbg!"
+expect "lang-stop: that Rust state passes on the next stop" 0 check-on-stop.sh \
+  "$(cstop mx "$MX")"
+printf 'x = 1\n' >"$MX/app.py"
+expect "lang-stop: a later Python edit does not repeat the Rust finding" 2 \
+  check-on-stop.sh "$(cstop mx "$MX")" "No check since this Python changed"
+check "lang-stop: the Python stop does not repeat Rust" \
+  "$([[ "$out" != *dbg!* && "$out" != *"this Rust changed"* ]] && echo yes)" "$out"
+
+# A language check must not drop a Rust file the subagent has not fixed.
+KEEP="$WORK/keep-rust"
+new_crate_repo "$KEEP" "" plain
+prompt mxkeep "$KEEP"
+printf '\nfn bad() {\n    let _: u8 = "x";\n}\n' >>"$KEEP/src/lib.rs"
+run_hook fmt-on-edit.sh "$(edit mxkeep "$KEEP/src/lib.rs" 'x' worker)"
+expect "lang-stop: a subagent Rust error blocks" 2 check-on-stop.sh \
+  "$(subagent_stop mxkeep "$KEEP" '{"agent_id": "worker"}')" "mismatched types"
+printf 'x = 1\n' >"$KEEP/app.py"
+run_hook fmt-on-edit.sh "$(edit mxkeep "$KEEP/app.py" 'x = 1' worker)"
+run_hook tests-ran.sh "$(bash_cmd mxkeep 'uv run pytest -q')"
+expect "lang-stop: pytest leaves the Rust error for later" 0 check-on-stop.sh \
+  "$(subagent_stop mxkeep "$KEEP" '{"agent_id": "worker"}')"
+keep_edited="$STATE_TMP/claude-rust-hooks/mxkeep.worker.edited"
+check "lang-stop: the unfixed Rust file stays recorded" \
+  "$(grep -q 'src/lib.rs$' "$keep_edited" && echo yes)" \
+  "$(cat "$keep_edited" 2>/dev/null || true)"
+printf 'pub fn extra() {}\n' >"$KEEP/src/extra.rs"
+run_hook fmt-on-edit.sh "$(edit mxkeep "$KEEP/src/extra.rs" 'x' worker)"
+expect "lang-stop: a later file still shows the unfixed Rust error" 2 check-on-stop.sh \
+  "$(subagent_stop mxkeep "$KEEP" '{"agent_id": "worker"}')" "mismatched types"
+
+# cargo is required only for a Rust stop. jq, git, perl, and shasum stay required.
+NOCARGO="$WORK/nocargo-bin"
+mkdir -p "$NOCARGO"
+IFS=':' read -ra nocargo_dirs <<<"$PATH"
+for dir in "${nocargo_dirs[@]}"; do
+  [[ -d "$dir" ]] || continue
+  for tool in "$dir"/*; do
+    [[ -x "$tool" && ! -d "$tool" ]] || continue
+    name="$(basename "$tool")"
+    case "$name" in
+    cargo | cargo-*) continue ;;
+    esac
+    if [[ ! -e "$NOCARGO/$name" ]]; then
+      ln -s "$tool" "$NOCARGO/$name"
+    fi
+  done
+done
+PYN="$WORK/py-nocargo"
+mkdir -p "$PYN"
+printf 'x = 1\n' >"$PYN/app.py"
+git -C "$PYN" init -q -b main
+old_commit "$PYN" init
+prompt pyn "$PYN"
+printf 'x = 2\n' >"$PYN/app.py"
+run_hook check-on-stop.sh "$(cstop pyn "$PYN")" "$NOCARGO"
+check "lang-stop: Python without cargo still asks" "$(
+  [[ $code -eq 2 && "$out" == *"this Python changed"* && "$out" != *"missing tool"* ]] &&
+    echo yes
+)" "exit $code: $out"
+RN="$WORK/rust-nocargo"
+mkdir -p "$RN/src"
+printf 'fn main() {}\n' >"$RN/src/main.rs"
+git -C "$RN" init -q -b main
+old_commit "$RN" init
+prompt rn "$RN"
+printf 'fn main() { let _ = 1; }\n' >"$RN/src/main.rs"
+run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
+check "lang-stop: Rust without cargo still names the missing tool" "$(
+  [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *cargo* ]] && echo yes
+)" "exit $code: $out"
+MXN="$WORK/mixed-nocargo"
+new_crate_repo "$MXN" "" plain
+prompt mxn "$MXN"
+printf '\nfn marker() {}\n' >>"$MXN/src/main.rs"
+printf 'x = 1\n' >"$MXN/app.py"
+run_hook check-on-stop.sh "$(cstop mxn "$MXN")" "$NOCARGO"
+check "lang-stop: missing cargo still asks about Python" "$(
+  [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *"this Python changed"* ]] &&
+    echo yes
+)" "exit $code: $out"
 
 # ---- 4. bash guard ---------------------------------------------------------------------------
 
