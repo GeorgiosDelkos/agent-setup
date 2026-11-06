@@ -68,7 +68,9 @@ if printf '%s\n' "$@" | grep -qx -- '-p'; then
       echo "refresh failed for $STUB_SECRET" >&2
       exit 1
       ;;
-    hang) exec sleep 60 ;;
+    # A duration unique to this test run (stub.sleep), so the check below finds this
+    # stub and not some other process sleeping 60s on the machine.
+    hang) exec sleep "$(cat "$dir/stub.sleep")" ;;
   esac
   echo OK
   exit 0
@@ -200,6 +202,7 @@ check "signin fails: worktree removed" "$(git -C "$repo" worktree list | grep -q
   echo no || echo yes)"
 
 # A sign-in that waits (an interactive fallback) is stopped at the limit.
+printf '60.%s\n' "$$" >"$WORK/stub.sleep"
 printf 'hang\n' >"$WORK/stub.signin"
 start=$SECONDS
 code="$(run ok "$WORK/review-hang.txt")"
@@ -208,7 +211,8 @@ printf 'ok\n' >"$WORK/stub.signin"
 check "signin hangs: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
 check "signin hangs: stopped at the limit" "$([[ "$elapsed" -lt 20 ]] && echo yes || echo no)"
 check "signin hangs: review not run" "$([[ ! -e "$WORK/log.args" ]] && echo yes || echo no)"
-check "signin hangs: no stub left running" "$(pgrep -f "sleep 60" >/dev/null &&
+stub_sleep="sleep $(cat "$WORK/stub.sleep")"
+check "signin hangs: no stub left running" "$(pgrep -f "$stub_sleep" >/dev/null &&
   echo no || echo yes)"
 
 # A failed sign-in's stderr is not echoed when it holds the credential.
