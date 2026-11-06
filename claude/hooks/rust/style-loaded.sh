@@ -15,10 +15,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 read_hook_input
 need_tools fail-open jq
 
-# Skill files read whole by the shell command $1, one path per line: every rust-style path
-# that is an argument of a `cat`/`bat` simple command, unless the output is cut short.
+# Skill files read whole by the shell command $1, one path per line: every house skill
+# path that is an argument of a `cat`/`bat` simple command, unless the output is cut short.
 shell_reads() {
-  local skill_path='[^[:space:]"'"'"';&|]*skills/rust-style/(SKILL|topics/[a-z-]+)\.md'
+  local name lang_re="" skill_path
+  for name in $HOUSE_LANG_SKILLS; do
+    lang_re+="${lang_re:+|}${name%-style}"
+  done
+  skill_path='[^[:space:]"'"'"';&|]*skills/'
+  skill_path+='(rust-style/(SKILL|topics/[a-z-]+)'
+  skill_path+="|(${lang_re})-style/SKILL)\\.md"
   if grep -qE '\|[[:space:]]*(head|tail|sed|awk|grep)\b' <<<"$1"; then
     return 0
   fi
@@ -29,10 +35,18 @@ shell_reads() {
 }
 
 record() {
-  local path="$1"
-  if [[ "$path" == */skills/rust-style/SKILL.md ]]; then
+  local path="$1" name
+  case "$path" in
+  */skills/rust-style/SKILL.md)
     touch "$(agent_file style-loaded)"
-  fi
+    ;;
+  */skills/*/SKILL.md)
+    name="$(basename "$(dirname "$path")")"
+    if is_house_lang "$name"; then
+      touch "$(agent_file "skill-$name")"
+    fi
+    ;;
+  esac
   local topic_re='/skills/rust-style/topics/([a-z-]+)\.md$'
   if [[ "$path" =~ $topic_re ]]; then
     touch "$(agent_file "topic-${BASH_REMATCH[1]}")"
@@ -40,13 +54,13 @@ record() {
 }
 
 # True when this Read/read_file asked for less than the whole file. A numeric limit,
-# or an offset past line 1, is a slice. Grok's read_file drops both for SKILL.md and
-# returns that file whole, so the same input still put the skill in context. A topic
-# file is not in that set: the rest of it stayed unread, and must not open the gate.
+# or an offset past line 1, is a slice. Grok's read_file drops both for a file named
+# SKILL.md and returns that file whole, so the same input still put the skill in context.
+# A topic file is not in that set: the rest of it stayed unread, and must not open the gate.
 read_is_sliced() {
   local path="$1" tool answer
   tool="$(hook_field '.tool_name // .toolName')"
-  if [[ "$tool" == "read_file" && "$path" == */skills/rust-style/SKILL.md ]]; then
+  if [[ "$tool" == "read_file" && "$path" == */skills/*/SKILL.md ]]; then
     return 1
   fi
   answer="$(jq -r 'if ((.tool_input.limit | type) == "number")
@@ -55,9 +69,15 @@ read_is_sliced() {
   [[ "$answer" == "yes" ]]
 }
 
-if [[ "$(hook_field '.tool_input.skill')" == "rust-style" ]]; then
-  touch "$(agent_file style-loaded)"
-fi
+skill_name="$(hook_field '.tool_input.skill')"
+case "$skill_name" in
+rust-style) touch "$(agent_file style-loaded)" ;;
+*)
+  if is_house_lang "$skill_name"; then
+    touch "$(agent_file "skill-$skill_name")"
+  fi
+  ;;
+esac
 read_path="$(tool_path)"
 if ! read_is_sliced "$read_path"; then
   record "$read_path"

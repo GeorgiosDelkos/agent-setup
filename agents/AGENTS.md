@@ -157,7 +157,9 @@ between the lines* (Rust Munich 2026).
 ## Languages
 
 Before the first edit in a repo, load the matching skill (`~/.claude/skills/`). It holds the
-tooling, config templates, and idioms, so they are not repeated here.
+tooling, config templates, and idioms, so they are not repeated here. The edit hook blocks
+that edit until the skill is in context (Claude: the Skill tool; Grok: `read_file` of its
+`SKILL.md`, which returns the file whole).
 
 - Rust: `rust-style`. Python: `python-style`. TS/Node: `ts-style`. Shell: `bash-style`.
   GitHub Actions: `gh-actions-style`.
