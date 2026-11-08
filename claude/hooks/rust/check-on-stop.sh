@@ -17,6 +17,8 @@
 # and Python, TypeScript, shell, and workflow files modified after that language's last
 # check ask for one. The two are separate state (`checked` and `checked-lang`): a language
 # edit does not re-run clippy or repeat Rust findings already shown.
+# A file a checkout, reset, clean merge, rebase or pull wrote, and nothing changed since, is
+# not counted (not_written_by_git).
 # A root under the session scratchpad is skipped unless it is on a git branch (scratch_exempt).
 #
 # A state that was already checked is not checked again, and a second stop in a row always
@@ -189,14 +191,107 @@ opted_in_files() {
 }
 
 # Prints paths from `stamp<TAB>path` rows on stdin modified after that stamp and after the
-# session file $1, when it exists. Sub-second times: an edit and a check often share a second.
+# session file $1, when it exists, less the files git wrote since then (not_written_by_git
+# over the `root<TAB>file` pairs $2). Sub-second times: an edit and a check often share a second.
 newer_than() {
   STAMP="$1" perl -MTime::HiRes=stat -F'\t' -lane '
     my $since = (stat $F[0])[9] // 0;
     my $run = (stat $ENV{STAMP})[9];
     $since = $run if defined $run && $run > $since;
     my $modified = (stat $F[1])[9];
-    print $F[1] if defined $modified && $modified > $since;'
+    print $F[1] if defined $modified && $modified > $since;' | not_written_by_git "$2" "$1"
+}
+
+# The files read on stdin (from the `root<TAB>file` pairs $1) less the ones git wrote and the
+# session has not changed since: a checkout, reset, clean merge, rebase or pull rewrites
+# every file it touches, so its mtime alone made reviewing a branch read as editing all of
+# it. A file counts as git's when it matches HEAD, a HEAD move since the session's cutoff
+# (its start or the check stamp $2) changed it (`git diff` of the move's old and new commit),
+# HEAD still holds the content that move left (so a commit in the 1s of slack still asks),
+# and it was last written no later than that move. The reflog keeps whole seconds, and a
+# move logs after it writes, hence the 1s of slack. An ignored file is in no commit's diff,
+# so it is never git's.
+#
+# A commit is not such a move: a file the session edited and then committed matches HEAD
+# too, and is still untested; a later move that does not change it (`checkout -b`, a merge
+# of an unrelated branch, `stash`, which logs a reset to HEAD) leaves it counted. Nor is a
+# conflicted merge, which logs only its commit: the merged files are new code. Missed, as
+# the cost of judging by what git wrote: a rebase or `pull --rebase` of the session's own
+# commits, or switching away from them and back, rewrites its files with its own content,
+# and they read as git's.
+not_written_by_git() {
+  local pairs="$1" stamp="$2" root start cutoff dirty written file commit rel
+  local head_blob moved_blob
+  local git_wrote=""
+  # No associative array: the hooks run under macOS's bash 3.2.
+  while IFS= read -r root; do
+    if ! is_git_root "$root"; then
+      continue
+    fi
+    start="$(session_file started)"
+    if [[ ! -f "$start" ]]; then
+      start="$(baseline_file "$root")"
+    fi
+    cutoff="$(perl -e 'my $m = 0; for (@ARGV) { my $t = (stat $_)[9];
+      $m = $t if defined $t && $t > $m } print int($m)' "$start" "$stamp")"
+    # `<time><TAB><commit><TAB><path>` for each file a move since the cutoff changed.
+    written="$(git_moves_since "$root" "$cutoff")"
+    if [[ -z "$written" ]]; then
+      continue
+    fi
+    # Changed against HEAD, or not in it at all: an untracked file matches no commit.
+    dirty="$(
+      git -c core.quotepath=off -C "$root" diff --name-only HEAD 2>/dev/null || true
+      git -c core.quotepath=off -C "$root" ls-files --others --exclude-standard \
+        2>/dev/null || true
+    )"
+    # `<file><TAB><commit>` for each candidate: clean, changed by a move, written no later
+    # than the latest move that changed it, whose new commit is named.
+    while IFS=$'\t' read -r file commit; do
+      # HEAD's content for the path must be what that move left, not a later commit's.
+      rel="${file#"$root"/}"
+      head_blob="$(git -C "$root" rev-parse -q --verify "HEAD:$rel" 2>/dev/null || true)"
+      moved_blob="$(git -C "$root" rev-parse -q --verify "$commit:$rel" 2>/dev/null || true)"
+      if [[ -n "$head_blob" && "$head_blob" == "$moved_blob" ]]; then
+        git_wrote+="$file"$'\n'
+      fi
+    done < <(awk -F '\t' -v root="$root" '$1 == root { print $2 }' <<<"$pairs" |
+      ROOT="$root" DIRTY="$dirty" WRITTEN="$written" perl -MTime::HiRes=stat -lne '
+        BEGIN {
+          %dirty = map { ("$ENV{ROOT}/$_" => 1) } split /\n/, $ENV{DIRTY};
+          for (split /\n/, $ENV{WRITTEN}) {
+            my ($time, $commit, $path) = split /\t/, $_, 3;
+            next if defined $latest{$path} && $time <= $latest{$path};
+            ($latest{$path}, $commit{$path}) = ($time, $commit);
+          }
+        }
+        my $modified = (stat $_)[9];
+        print "$_\t$commit{$_}" if defined $modified && !$dirty{$_} && defined $latest{$_}
+          && $modified <= $latest{$_} + 1;')
+  done < <(cut -f 1 <<<"$pairs" | sort -u)
+  # Every line of stdin not in that list. The list always has a line (`%s\n`): an empty
+  # first input would make `NR == FNR` hold for stdin too, and swallow it.
+  awk 'NR == FNR { if ($0 != "") wrote[$0] = 1; next } !($0 in wrote)' \
+    <(printf '%s\n' "$git_wrote") -
+}
+
+# `<time><TAB><new commit><TAB><root>/<path>` for each file a HEAD move (checkout, reset,
+# clean merge, rebase,
+# pull) in the reflog of $1 at or after epoch second $2 changed, from the diff of the move's
+# old and new commit (the next older reflog entry's commit is the old one). Nothing for a
+# repo with no reflog.
+git_moves_since() {
+  local root="$1" cutoff="$2" time old new
+  while read -r time old new; do
+    git -c core.quotepath=off -C "$root" diff --name-only "$old" "$new" 2>/dev/null |
+      awk -v time="$time" -v new="$new" -v root="$root" \
+        '{ print time "\t" new "\t" root "/" $0 }' || true
+  done < <({ git -C "$root" reflog show --date=unix --format='%gd %H %gs' HEAD 2>/dev/null ||
+    true; } | awk -v cutoff="$cutoff" '
+      { sub(/^HEAD@\{/, "", $1); sub(/\}$/, "", $1)
+        time[NR] = $1; sha[NR] = $2; move[NR] = ($3 ~ /^(checkout|reset|merge|rebase|pull)/) }
+      END { for (i = 1; i < NR; i++)
+              if (move[i] && time[i] >= cutoff) print time[i], sha[i + 1], sha[i] }')
 }
 
 # The files among the `root<TAB>file` pairs $1 that skill $2 covers, modified after this
@@ -215,7 +310,7 @@ unchecked_files() {
       fi
       printf '%s\t%s\n' "$since" "$file"
     fi
-  done <<<"$1" | newer_than "$(session_file "$3")"
+  done <<<"$1" | newer_than "$(session_file "$3")" "$1"
 }
 
 tagged="$(changed_pairs)"
