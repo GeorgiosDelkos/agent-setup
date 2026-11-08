@@ -7,7 +7,16 @@
 # builds its own `target/`: on 2026-11-03 73 worktrees held 567 GB and filled the disk.
 # Downside accepted: a debugger cannot step into dependency source. Release builds and CI are
 # unaffected. Cargo config beats Cargo.toml, so this also overrides a repo's own
-# `[profile.dev.package."*"] debug` setting (its other keys there still apply). A repo that
-# needs dependency debug info sets it in its own `.cargo/config.toml`, which beats this file.
+# `[profile.dev.package."*"]` `debug` and `strip` settings (its other keys there still apply).
+# A repo that needs dependency debug info sets it in its own `.cargo/config.toml`, which beats
+# this file.
+#
+# `strip = false` because `debug = false` makes Cargo default to `strip = "debuginfo"`, and
+# rustc 1.95 and 1.96 on macOS strip with a bundled `rust-objcopy --strip-debug` that writes
+# proc-macro dylibs dyld refuses to load ("mis-aligned LINKEDIT string pool", seen with
+# sqlx-macros 0.8.6). rustc 1.99.1's objcopy is fixed. Release builds on 1.95 and 1.96 strip
+# the same way and still fail; the fix there is a newer toolchain. The cost is small: a
+# dependency proc-macro dylib keeps only std's debug symbol table, about 1.5% of its size.
 [profile.dev.package."*"]
 debug = false
+strip = false
