@@ -2,6 +2,9 @@
 # PostToolUse (Edit|Write|MultiEdit|search_replace|write|hashline_edit): rustfmt the edited
 # .rs file immediately and record it for the stop hooks. An edited Cargo.toml is recorded
 # too (not formatted), so check-on-stop.sh runs clippy and house-check over the change.
+# Python, TypeScript, shell, and workflow files are recorded the same way and not formatted:
+# the stop check asks for that language's tests, and formatting them here would fight a
+# repo that has not adopted the house tool.
 #
 # Two lists per agent: `edited` is cleared by check-on-stop.sh once clean; `touched` is never
 # cleared and feeds review-done.sh, which snapshots files whose clippy run passed too. The
@@ -44,7 +47,11 @@ if [[ ! -f "$file_path" ]]; then
 fi
 case "$file_path" in
 *.rs | */Cargo.toml | Cargo.toml) ;;
-*) exit 0 ;;
+*)
+  if [[ -z "$(lang_skill_for "$file_path")" ]]; then
+    exit 0
+  fi
+  ;;
 esac
 
 file_path="$(physical_path "$file_path")"

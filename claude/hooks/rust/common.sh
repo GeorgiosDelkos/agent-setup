@@ -18,8 +18,13 @@ export LC_ALL=C
 # $HOME, so a staging copy runs against itself.
 # shellcheck disable=SC2034 # read by the hooks that source this file
 RUST_HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC2034 # read by style-gate.sh, which sources this file
+SKILLS_DIR="$HOME/.claude/skills"
 # shellcheck disable=SC2034 # read by the hooks that source this file
-RUST_STYLE_DIR="$HOME/.claude/skills/rust-style"
+RUST_STYLE_DIR="$SKILLS_DIR/rust-style"
+# Membership of the language skills. The check command and the stop reminder for each
+# one stay next to that tool: they are not the same text.
+HOUSE_LANG_SKILLS='python-style ts-style bash-style gh-actions-style'
 RUST_HOOKS_STATE="${TMPDIR:-/tmp}/claude-rust-hooks"
 mkdir -p "$RUST_HOOKS_STATE"
 
@@ -108,6 +113,44 @@ tool_path() {
     path="$cwd/$path"
   fi
   printf '%s' "$path"
+}
+
+# True when $1 is one of the language skills in HOUSE_LANG_SKILLS.
+is_house_lang() {
+  case " $HOUSE_LANG_SKILLS " in
+  *" $1 "*) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+# Candidates for the stop check's one walk of a repo. Loose on purpose: any YAML is a
+# candidate, and lang_skill_for drops a file that is not a workflow or Dependabot config,
+# so this pattern and that case cannot drift apart.
+# shellcheck disable=SC2034 # read by check-on-stop.sh, which sources this file
+SCAN_RE='(\.(rs|py|pyi|ts|tsx|mts|cts|js|jsx|mjs|cjs|sh|bash|yml|yaml)$|/Cargo\.toml$)'
+
+# House skill an edit of $1 must have loaded, or nothing. Rust is not here: style-gate.sh
+# handles it, with its topic files. A skill that is not installed is still named; the gate
+# skips a missing file, or the block could never be lifted.
+#
+# The first case matches any ancestor directory with that name, not a path relative to the
+# git root. A checkout that itself lives under a directory named target, dist, or vendor
+# is not gated. Those names are the dependency trees, and resolving the git root on every
+# edit is the walk this avoids.
+lang_skill_for() {
+  local path="$1"
+  case "$path" in
+  */node_modules/* | */target/* | */vendor/* | */dist/* | */__pycache__/* | */.venv/* | */venv/*)
+    return 0
+    ;;
+  esac
+  case "$path" in
+  *.py | *.pyi) printf '%s' python-style ;;
+  *.ts | *.tsx | *.mts | *.cts | *.js | *.jsx | *.mjs | *.cjs) printf '%s' ts-style ;;
+  *.sh | *.bash) printf '%s' bash-style ;;
+  */.github/workflows/*.yml | */.github/workflows/*.yaml) printf '%s' gh-actions-style ;;
+  */.github/dependabot.yml | */.github/dependabot.yaml) printf '%s' gh-actions-style ;;
+  esac
 }
 
 session_id() {
