@@ -9,5 +9,12 @@
 # unaffected. Cargo config beats Cargo.toml, so this also overrides a repo's own
 # `[profile.dev.package."*"] debug` setting (its other keys there still apply). A repo that
 # needs dependency debug info sets it in its own `.cargo/config.toml`, which beats this file.
+# rustc 1.99.1 on macOS 27 writes proc-macro dylibs that dyld refuses to load ("mis-aligned
+# LINKEDIT string pool", seen on sqlx-macros 0.8.6) when it strips them, and `debug = false`
+# makes the default `strip = "debuginfo"`. Stripping by hand with `xcrun strip -S` gives a
+# dylib that loads, so the fault is in rustc's own strip step. `strip = false` keeps the
+# disk saving, since no debug info is generated; only the standard library's prebuilt debug
+# info stays in dev binaries.
 [profile.dev.package."*"]
 debug = false
+strip = false
