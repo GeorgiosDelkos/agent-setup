@@ -76,11 +76,12 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
 
   A function the change adds scores 8 or less, and one it edits scores no higher than
   before; one already above 8 is debt: lower it when the change makes that cheap, otherwise
-  name it in the PR. When unsure whether an edit raised a score, run the same commands in a
-  temporary worktree of the merge base
-  (`git worktree add --detach <dir> "$(git merge-base origin/main HEAD)"`). Coverage here is the
-  lower of statement and branch coverage, so at full coverage the limit is CC 8, the house
-  complexity limit. Lower a score with tests over the untested branches, or by splitting the
+  name it in the PR. When unsure whether an edit raised a score, score the base: `git
+  worktree add --detach <dir> "$base"`, and in that worktree run the last two commands (Vitest,
+  then crap-typescript) with `files` set to the changed files that exist there; compare the
+  rows, then `git worktree remove <dir>`. The whole block would score nothing there: at the
+  merge base the diff is empty. Coverage here is the lower of statement and branch coverage,
+  so at full coverage the limit is CC 8, the house complexity limit. Lower a score with tests over the untested branches, or by splitting the
   function. CRAP says where tests are missing; Stryker says whether they check anything.
   - Every row of the named files is listed (`--failures-only=false`). A `failed` row is
     above the threshold and a `skipped` row has no coverage (N/A): both count against a
@@ -100,7 +101,7 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
   - The tool runs with `npx` at an exact version, and `--before` holds its dependencies to
     that date; move the two together. No package is added to the project.
 
-  The owner chose 8 over the 30 used for Rust and Python, 2026-11-05; the tool recommends 8
+  The owner chose 8 over the 30 used for Python, 2026-11-05; the tool recommends 8
   for hard gates and defaults to 6. On hippius-console's tested `.ts` code, 15% of 5443
   functions were above 8 and 2.4% above 30.
 

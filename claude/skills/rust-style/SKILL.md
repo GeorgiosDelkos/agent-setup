@@ -18,7 +18,8 @@ call site, readable with partial context):
 ## How to read this skill
 
 - **IDs.** Every rule has a stable ID (`ERR-4`). Hooks, the reviewer and commit messages
-  name rules by ID.
+  name rules by ID. A retired ID is never reused; a one-line note where the rule stood
+  says why it went.
 - **Tags.** `[ref: T C J B]` means the references do this: T Tokio (with bytes, loom), C
   Cranelift (with regalloc2), J Jon Gjengset's crates, B *Rust for Rustaceans* or the API
   Guidelines. `[house: reason]` means the rule is stricter than, or differs from, at least
@@ -311,10 +312,11 @@ auto traits as API) are in `topics/library-api.md`.
   interface (returned from a `Read`/`Write` impl, or to a caller that only takes
   `io::Error`) implements `From<E> for io::Error` with the closest `ErrorKind`; otherwise
   skip it (API-15). [ref: T]
-- **ERR-10** Fail on the first error by default. A checker whose report a user fixes in
-  one round (a verifier, a linter, a config validator) collects every error with its
-  location instead: fatal stops, non-fatal continues. [ref: C for checkers; house: the
-  default, so one compiler's verifier is not copied into every function]
+- **ERR-10** Fail on the first error by default. A checker (a verifier, a linter, a config
+  validator) reports every error with its location instead, so the user can fix them in one
+  pass. It stops early only at an error that makes the later checks meaningless, such as
+  input that does not parse. [ref: C for checkers; house: the default, so one compiler's
+  verifier is not copied into every function]
 
 ## Panics and assertions (PAN)
 
@@ -371,9 +373,10 @@ auto traits as API) are in `topics/library-api.md`.
   there (a missing `From` impl, an unhandled corner case). Never restate the code. [ref: B
   (Jon, *Towards Impeccable Rust*) J; Jon, *Don't make me read between the lines*]
 - **DOC-6** Structures with non-trivial invariants state them once (module docs or an `#
-  Invariants` section on the type). A method that breaks one partway through argues in a
-  `// Post-invariant:` comment that it holds again before the method returns; a method that
-  never breaks one needs no comment. [ref: C T]
+  Invariants` section on the type). A method that writes the fields an invariant covers
+  argues in a `// Post-invariant:` comment that it holds again before the method returns. A
+  method whose every mutation goes through methods that keep the invariant needs no
+  comment. [ref: C T]
 - **DOC-7** Every claim in a comment or doc is true and checkable. "Cannot overflow" comes
   with the bound that proves it. A claim about a dependency cites its docs. Reliance on
   undocumented behaviour says so and is pinned by a test. Every workaround links the
@@ -393,13 +396,12 @@ auto traits as API) are in `topics/library-api.md`.
 - **DOC-11** Rule IDs (`ERR-3`) go in reviews and commit messages, never in code comments:
   a comment states the reason itself `[check]`. [house: the reader of the code has no
   skill loaded]
-- **DOC-12** In libraries and services, `Debug` and `Display` of a type that holds stored
-  or secret data (map contents, payloads, credentials, headers) print sizes, kinds,
-  counters and cursors, never the data; the module or type docs say so. Their error
-  messages follow the same rule: `"key too large: 70000 bytes (limit 65536)"`, not the key.
-  A name the user gave the program to act on (a path, a URL, a key on the command line)
-  belongs in the error, as in ERR-5's `"cannot open {path}"`. [house: logs leak what
-  `Debug` prints]
+- **DOC-12** `Debug`, `Display` and error messages never print stored data (map contents,
+  payloads) or secrets (tokens, passwords, cookie and `Authorization` headers, the userinfo
+  of a URL). They print sizes, kinds, counters and cursors instead (`"value too large: 70000
+  bytes (limit 65536)"`), and the type's docs say so. A name the caller gave to act on, such
+  as a path, a URL with its userinfo removed, or a lookup name, belongs in the error, as in
+  ERR-5's `"cannot open {path}"`. [house: logs leak what `Debug` prints]
 - **DOC-13** Docs say what a call does not do and what it costs, wherever a reader would
   otherwise guess: which lock it takes, whether it allocates, blocks, waits on the network or
   runs user code ("Does not publish. It does not wait on the network."). [house]
@@ -425,8 +427,9 @@ auto traits as API) are in `topics/library-api.md`.
   function; never `drop(writeln!(io::stderr(), ..))` to dodge the lint. `-v`/`-q` set the
   default filter; `RUST_LOG` still overrides it. [ref: J]
 
-LOG-4 (log the input before panicking) is retired: a panic marks a broken invariant, and
-the `expect` or `unreachable!` message (PAN-3, PAN-6) states which.
+LOG-4 (log the input before panicking) is retired: bad input returns a `Result` (PAN-1), so a
+panic comes from internal state or API misuse, and recording what triggered it is the
+binary's choice (a panic hook, `RUST_BACKTRACE`), not every call site's.
 
 ## Lint suppression (LNT)
 

@@ -79,8 +79,8 @@ The global rules (AGENTS.md, Testing) apply; this is how in Python.
   A function the change adds scores 30 or less, and one it edits scores no higher than
   before; one already above 30 is debt: lower it when the change makes that cheap, otherwise
   name it in the PR. When unsure whether an edit raised a score, run the same commands in a
-  temporary worktree of the merge base
-  (`git worktree add --detach <dir> "$(git merge-base origin/main HEAD)"`). Lower a score with
+  temporary worktree of the merge base (`git worktree add --detach <dir> "$(git merge-base
+  origin/main HEAD)"`), then remove it (`git worktree remove <dir>`). Lower a score with
   tests over the untested branches, or by splitting the function. CRAP says where tests are
   missing; mutmut says whether they check anything.
   - Always `--use-existing-coverage`: without it crapper deletes the report, reruns the
