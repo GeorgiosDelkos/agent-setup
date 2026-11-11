@@ -52,8 +52,8 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
 
 ## 6. Open the PR
 
-`gh pr create --draft` (an issue's fix is code, so it is tier 1 or 2 and gets a review),
-so CI waits for the review's fixes, with:
+`gh pr create --draft`, so CI waits for the review's fixes (a tier 0 fix, prose only, opens
+ready instead), with:
 
 - a title under 70 characters;
 - a description that maps the changes to the issue's requirements;

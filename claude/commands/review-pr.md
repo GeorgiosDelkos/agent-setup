@@ -26,9 +26,9 @@ when the body names none, or the diff fits a higher tier than it names, judge it
 same rule, use the higher tier, and say which you chose. Every reviewer has not seen your
 reasoning, so the review is not anchored on it:
 
-- **Tier 0:** no reviewer. Read the diff, confirm nothing in it is code, a rule, a skill,
-  a command, a hook, CI, a bump or a rename; if something is, it is tier 1. Then go to
-  step 4.
+- **Tier 0:** no reviewer. Read the diff and confirm it touches only prose files nothing
+  acts on and ignore files. If it touches anything else, it is tier 1 or 2 by the same
+  rule: review it at that tier. Otherwise go to step 4.
 - **Tier 1:** the other model family from the one running this command. Claude runs Grok
   ("Grok review" below) when `grok` is on `PATH` and its review home is signed in; Grok runs
   Claude ("Claude review" below) when `claude` is on `PATH`. Run it yourself rather than
@@ -170,8 +170,8 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
 - Commit the fixes on top of the PR, never squashed into it, so the review history stays.
   Subject in the imperative, at most 72 characters; the body maps each finding to its fix.
 - Push the branch with a regular push, never a force push.
-- If the PR is a draft you opened, no finding is open, and every required review is on the
-  PR, mark it ready (`gh pr ready $ARGUMENTS`), which starts CI on the reviewed head.
+- If the PR is a draft you opened, no finding is open, and every review its tier requires
+  completed and is posted (a failed or skipped run does not count), mark it ready (`gh pr ready $ARGUMENTS`), which starts CI on the reviewed head.
 
 ## 6. Post the fixes
 

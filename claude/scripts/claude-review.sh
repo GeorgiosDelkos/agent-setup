@@ -13,7 +13,8 @@
 # before using it on someone else's PR. There is no credential check on the output: the
 # login lives in the keychain, which the read-only tools cannot reach.
 #
-# Exit status: 0 review written; 1 the run failed or wrote nothing (output not usable);
+# Exit status: 0 review written; 1 the run failed, wrote nothing, or the head could not be
+# checked out (output not usable);
 # 3 claude is not installed; 64 usage.
 #
 # CLAUDE_BIN overrides the claude binary (tests).
@@ -30,6 +31,8 @@ head_sha="$2"
 prompt="$3"
 output="$4"
 [[ -d "$repo" && -f "$prompt" && -n "$head_sha" ]] || usage
+# Absolute: cleanup runs `git -C "$repo"` after `cd /`, where a relative path would miss.
+repo="$(cd "$repo" && pwd -P)"
 
 claude_bin="${CLAUDE_BIN:-$(command -v claude || true)}"
 if [[ -z "$claude_bin" || ! -x "$claude_bin" ]]; then
@@ -46,16 +49,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-git -C "$repo" worktree add --quiet --detach "$wt" "$head_sha"
-# Claude loads hooks, rules and servers from these at the root it starts in. Their changes,
-# if any, are in the diff the prompt carries; the copies here must not run. The same list
-# as grok-review.sh.
-for entry in .claude .grok .cursor .agents .mcp.json AGENTS.md AGENT.md CLAUDE.md \
-  CLAUDE.local.md; do
-  if [[ -e "$wt/$entry" || -L "$wt/$entry" ]]; then
-    trash "$wt/$entry"
-  fi
-done
+if ! git -C "$repo" worktree add --quiet --detach "$wt" "$head_sha"; then
+  echo "claude review failed: cannot check out $head_sha in $repo" >&2
+  exit 1
+fi
+# Claude and Grok load hooks, rules and servers from these: at the root they start in, and
+# rule files from any directory they read (a nested CLAUDE.md or AGENTS.md). Their changes,
+# if any, are in the diff the prompt carries; no copy here may run.
+while IFS= read -r -d '' entry; do
+  trash "$entry"
+done < <(find "$wt" -path "$wt/.git" -prune -o \( -name .claude -o -name .grok -o -name .cursor \
+  -o -name .agents -o -name .mcp.json -o -name AGENTS.md -o -name AGENT.md -o -name CLAUDE.md \
+  -o -name CLAUDE.local.md \) -prune -print0)
 
 status=0
 (cd "$wt" && "$claude_bin" -p --tools Read,Grep,Glob --strict-mcp-config \

@@ -27,6 +27,11 @@ git init -q "$repo"
 mkdir -p "$repo/.claude"
 printf '{}\n' >"$repo/.claude/settings.json"
 printf 'rules\n' >"$repo/CLAUDE.md"
+# Rule files below the root load when the reviewer reads that directory.
+mkdir -p "$repo/src"
+printf 'rules\n' >"$repo/src/AGENTS.md"
+printf 'rules\n' >"$repo/src/CLAUDE.md"
+printf '{}\n' >"$repo/.mcp.json"
 printf 'code\n' >"$repo/main.txt"
 git -C "$repo" add -A
 git -C "$repo" -c user.name=t -c user.email=t@t commit -qm init
@@ -42,12 +47,17 @@ cat >"$stub" <<'EOF'
 printf '%s\n' "$@" >"$STUB_LOG.args"
 pwd -P >"$STUB_LOG.cwd"
 cat >"$STUB_LOG.stdin"
-if [[ ! -e .claude && ! -e CLAUDE.md && -f main.txt ]]; then
+if [[ -z "$(find . \( -name AGENTS.md -o -name CLAUDE.md -o -name .claude -o -name .mcp.json \) \
+  -print -quit)" && -f main.txt ]]; then
   echo stripped >"$STUB_LOG.tree"
 fi
 case "${STUB_MODE:-ok}" in
 ok) echo "finding: clean" ;;
-fail) echo "boom" >&2; exit 7 ;;
+fail)
+  echo "partial review"
+  echo "boom" >&2
+  exit 7
+  ;;
 empty) : ;;
 esac
 EOF
@@ -71,6 +81,7 @@ check "ok: runs in a worktree, not the repo" \
 args="$(tr '\n' ' ' <"$WORK/log.args")"
 check "ok: read-only tools, no MCP, plan mode" "$(yes_if grep -qF -- \
   '-p --tools Read,Grep,Glob --strict-mcp-config --permission-mode plan' <<<"$args")"
+check "ok: prompt not in argv" "$(yes_if test -z "$(grep -F 'review this' "$WORK/log.args")")"
 check "ok: worktree removed" "$(yes_if test "$(git -C "$repo" worktree list | wc -l)" -eq 1)"
 check "ok: run dir removed" "$(yes_if test -z "$(ls -A "$WORK/tmp")")"
 
@@ -83,6 +94,20 @@ check "fail: no output" "$(yes_if test ! -e "$WORK/out")"
 run empty
 check "empty: exit 1" "$(yes_if test "$code" -eq 1)"
 check "empty: no output" "$(yes_if test ! -e "$WORK/out")"
+
+# A relative repo path is cleaned up too, and a head not in the clone is a failed review.
+code=0
+(cd "$WORK" && STUB_MODE=ok STUB_LOG="$WORK/log" CLAUDE_BIN="$stub" TMPDIR="$WORK/tmp/" \
+  bash "$SCRIPT" repo "$sha" "$prompt" "$WORK/rel" >/dev/null 2>&1) || code=$?
+check "relative repo: exit 0" "$(yes_if test "$code" -eq 0)"
+check "relative repo: worktree removed" \
+  "$(yes_if test "$(git -C "$repo" worktree list | wc -l)" -eq 1)"
+code=0
+CLAUDE_BIN="$stub" TMPDIR="$WORK/tmp/" bash "$SCRIPT" "$repo" \
+  0000000000000000000000000000000000000000 "$prompt" "$WORK/bad" >/dev/null 2>"$WORK/err" ||
+  code=$?
+check "bad head: exit 1" "$(yes_if test "$code" -eq 1)"
+check "bad head: says why" "$(yes_if grep -q 'cannot check out' "$WORK/err")"
 
 code=0
 CLAUDE_BIN="$WORK/missing" bash "$SCRIPT" "$repo" "$sha" "$prompt" "$WORK/out" \

@@ -153,10 +153,10 @@ between the lines* (Rust Munich 2026).
   far a defect would reach and how hard it is to undo. The PR body states the tier and why
   ("Review tier 1: new CLI flag"), so the owner can overrule it. When the diff fits a
   higher tier than the body states, the higher tier holds:
-  - **Tier 0, nothing acts on it:** prose no program or agent follows (a README, a
-    changelog, a typo in a doc comment) and ignore files. Self-check plus green CI; open
-    it ready. Not tier 0: code, rules, skills, commands, hooks and CI, a dependency or
-    action bump, a rename, a `// SAFETY:` argument.
+  - **Tier 0, nothing acts on it:** files of prose no program or agent follows (a README, a
+    changelog) and ignore files. Self-check plus green CI; open it ready. Not tier 0: any
+    source file (its doc comments included), rules, skills, commands, hooks and CI, a
+    dependency or action bump, a rename.
   - **Tier 1, normal:** one reviewer with fresh context, from the other model family: a
     Claude author gets Grok, a Grok author gets Claude (`review-pr` says how to run each).
     The other model is the least anchored on the author's reasoning. When it is
