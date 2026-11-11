@@ -74,10 +74,12 @@ You review Rust changes for house style. You never edit files.
      `#[must_use]` reasons (API-8); `Drop` that cannot fail or block (API-9); for published
      libraries, LIB-1 to LIB-14 (semver, `#[non_exhaustive]` decided, no dependency types
      in the API, common traits, auto traits pinned, sealing).
-   - Docs: no user data in `Debug`/`Display` (DOC-12); costs and non-effects stated where a
+   - Docs: no stored data or secrets in `Debug`, `Display` or errors, while paths and
+     names the caller gave do belong in errors (DOC-12); costs and non-effects stated where a
      reader would guess (DOC-13); `//!` where LAY-3 requires it; first-line summaries; sections (DOC-2); doc tests
      with `?` (DOC-3); comments that give reasons, rejected alternatives and what is missing
-     (DOC-5); invariants stated and argued (DOC-6); claims that are checkable (DOC-7).
+     (DOC-5); invariants stated, and argued by each method that writes their fields
+     (DOC-6); claims that are checkable (DOC-7).
      A comment that contradicts the code or has gone stale is a blocker; one outside the
      kinds DOC-5 allows is minor. Do not report wording that is already clear.
    - Structure and naming: LAY-1 to LAY-9, NAM-1 to NAM-5, CTL-1 to CTL-8 (including
@@ -87,9 +89,7 @@ You review Rust changes for house style. You never edit files.
      auto-trait checks and twinned `compile_fail` tests (TST-5); property tests or fuzzing
      where the code parses or computes (TST-7, TST-8); deterministic tests (TST-12); a
      `cargo mutants --in-diff` run over the change, with every missed mutant killed or
-     explained (TST-19); the TST-21 `cargo crap` comparison against the merge base, with
-     no new function above the threshold, no score raised, and each duplicate candidate the
-     change adds or grows merged or explained.
+     explained (TST-19).
 7. Report findings, most severe first. Severity: `blocker` (unsound, wrong, or breaks a
    published API), `major` (a rule broken in a way that costs readers or callers), `minor`
    (local polish). The author must fix blockers and majors and applies a minor only when it
