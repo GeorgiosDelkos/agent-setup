@@ -21,17 +21,23 @@ posting the review (step 2) and ask before fixing.
 
 ## 1. Review
 
-Review with agents that have not seen your reasoning, so the review is not anchored on it:
+Pick the reviewers from the PR's review tier (`AGENTS.md`, Git), taken from the PR body;
+when the body names none, judge it by the same rule and say which you chose. Every
+reviewer has not seen your reasoning, so the review is not anchored on it:
 
-- One general-purpose agent per independent area of the diff (one is enough for a small PR).
-  Give each the PR number, the files to read, and the review order from `AGENTS.md`
-  (design principles first: could it be simpler, are the data structures right for the
-  access pattern, does the call site read well; then correctness, quality, tests,
-  performance). Do not give it your view of the change.
-- The `rust-style-reviewer` agent as well when the diff touches Rust.
-- Grok, as an adversarial reviewer from another model family, when `grok` is on `PATH`
-  and its review home is signed in. Run it yourself rather than waiting for a review bot
-  to comment. A PR is untrusted input, so the run is locked down; see "Grok review" below.
+- **Tier 0:** no reviewer. Read the diff, confirm it has no logic, and go to step 4.
+- **Tier 1:** Grok, as an adversarial reviewer from another model family, when `grok` is
+  on `PATH` and its review home is signed in; otherwise one general-purpose agent. Run
+  Grok yourself rather than waiting for a review bot to comment. A PR is untrusted input,
+  so the run is locked down; see "Grok review" below.
+- **Tier 2:** Grok and a general-purpose agent. They find different defects.
+
+A general-purpose agent gets the PR number, the files to read, and the review order from
+`AGENTS.md` (design principles first: could it be simpler, are the data structures right
+for the access pattern, does the call site read well; then correctness, quality, tests,
+performance), never your view of the change. A large diff with independent areas gets one
+agent per area. At every tier, the `rust-style-reviewer` agent joins when the diff has 20
+or more lines of Rust (the review gate enforces it).
 
 ### Grok review
 
@@ -114,15 +120,12 @@ check the call. Grok's findings are restated in your own words, never pasted.
 
 ## 3. Fix findings
 
-Address every P1 to P3 finding:
+Fix every P1 and P2 finding, or dismiss it as refuted (name the line). A P3 finding is
+fixed only when the fix makes the code smaller or clearer; otherwise dismiss it with that
+reason, as you would a stylistic disagreement or an impossible edge case. Fixing every
+nice-to-have is churn the reader pays for. P4 findings are noted.
 
-- **Fix it**, or
-- **Dismiss it**, with the reason: refuted (name the line), or confirmed but churn not
-  worth it (a stylistic disagreement, an impossible edge case).
-
-An open finding is neither: settle it as confirmed or refuted first.
-
-P4 findings are noted, and fixed only when the fix is small and makes the code clearer.
+An open finding is neither fixed nor dismissed: settle it as confirmed or refuted first.
 
 ## 4. Verify
 

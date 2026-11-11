@@ -56,13 +56,15 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
 
 - a title under 70 characters;
 - a description that maps the changes to the issue's requirements;
-- "Closes #$ARGUMENTS" (or "Refs #$ARGUMENTS" if it does not close it fully).
+- "Closes #$ARGUMENTS" (or "Refs #$ARGUMENTS" if it does not close it fully);
+- the review tier and why (`AGENTS.md`, Git).
 
 ## 7. Review, fix, and mark ready
 
 Run the `review-pr` command on the new PR number: read `~/.claude/commands/review-pr.md`
-and follow it (Claude may load it with the Skill tool). It reviews with fresh-context
-agents, posts the review on the PR, fixes the findings, pushes, and marks the PR ready.
+and follow it (Claude may load it with the Skill tool). It reviews with the
+fresh-context reviewers its tier calls for, posts the review on the PR, fixes the findings,
+pushes, and marks the PR ready.
 
 ## 8. Comment on the issue
 

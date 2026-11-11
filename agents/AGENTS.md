@@ -148,18 +148,31 @@ between the lines* (Rust Munich 2026).
 
 - Small commits, one logical change. Imperative subject <=72 chars; body explains why.
 - Format, lint, and run relevant tests before committing.
-- Work on a feature branch and open a PR. Before a PR, review it adversarially.
-- Open PRs as drafts (`gh pr create --draft`). Post the review, push its fixes, then
-  `gh pr ready`. CI written to `gh-actions-style` skips drafts, so the ready run is the one
-  that counts; elsewhere the draft still runs CI.
-- Every PR I open gets a review from an agent with fresh context, given the diff and the
-  task but not my reasoning, posted ON the PR (`gh pr comment`: findings, severity,
-  file:line). Each finding is fixed and pushed, or dismissed with its reason on the PR; a
-  "Fixes" comment maps each one to its commit or reason. A review only in my report, or a
-  bot comment, does not count, and I never wait on a bot. Where `grok` is installed, an
-  adversarial Grok review that I run myself joins it (`review-pr` says how). Its findings
-  are claims to verify, and its silence is no proof of safety. A PR is ready to
-  merge only when review, fixes, and green CI are all on GitHub. Subagents follow this too.
+- Work on a feature branch and open a PR. Read the whole diff yourself before opening it.
+- A review exists to catch what the author cannot see, so its effort follows the risk: how
+  far a defect would reach and how hard it is to undo. The PR body states the tier and why
+  ("Review tier 1: new CLI flag"), so the owner can overrule it:
+  - **Tier 0, no logic** (docs and comment wording, ignore files, version bumps, renames):
+    self-check plus green CI. Open it ready, not as a draft.
+  - **Tier 1, normal:** one reviewer with fresh context. That is Grok through `review-pr`
+    where it is installed (another model is the least anchored on my reasoning), otherwise
+    a Claude agent.
+  - **Tier 2, wide or hard to undo** (hooks or install code that runs in every session or
+    on every machine, `unsafe`, concurrency, auth and secrets, persisted formats, a
+    published API): Grok and a Claude agent, which find different defects.
+
+  The `rust-style-reviewer` gate for 20 or more lines of Rust applies at every tier.
+- A reviewed PR opens as a draft (`gh pr create --draft`). Post the review, push its fixes,
+  then `gh pr ready`. CI written to `gh-actions-style` skips drafts, so the ready run is the
+  one that counts.
+- A reviewer gets the diff and the task, never my reasoning. The review is posted ON the
+  PR (`gh pr comment`: findings, severity, file:line); one only in my report, or a bot
+  comment, does not count, and I never wait on a bot. Every finding is a claim: verify it
+  against the code before acting, and say which were wrong. Fix blockers and majors. Fix a
+  minor only when the fix makes the code smaller or clearer; dismiss the rest with the
+  reason. A "Fixes" comment maps each finding to its commit or reason. A clean review is no
+  proof of safety. Ready to merge means review (at tier 1 and 2), fixes, and green CI are
+  all on GitHub. Subagents follow this too.
 - No Co-Authored-By or AI attribution. Use the user's git identity.
 - Delete with `trash`, never `rm -rf`.
 - Prune finished worktrees. Claude Code keeps any worktree with commits and never rechecks
