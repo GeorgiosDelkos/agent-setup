@@ -326,6 +326,49 @@ setup_grok_review() {
   fi
 }
 
+# Team memory is mandatory (AGENTS.md, Team memory), so check that both agents reach
+# hippius-mem. Registration with the bearer token is `hippius-mem install`'s job; the token
+# never enters this public repo. Claude reaches the shared loopback daemon over HTTP. Grok is
+# moved onto the same daemon instead of starting its own stdio server, because a team note
+# records that concurrent writer processes under one identity are not serialized on S3 and
+# can permanently lose ops.
+setup_memory() {
+  local claude_json="$HOME/.claude.json" grok_config="$HOME/.grok/config.toml"
+  local token_file="$HOME/.config/hippius-mem/mcp-token" url relative
+  if ! command -v hippius-mem >/dev/null; then
+    echo "missing hippius-mem: team memory is mandatory; install it with" \
+      "https://github.com/thenervelab/hippius-mem/blob/db9261b1/FOR-AGENTS.md"
+    return 0
+  fi
+  url="$(jq -r '.mcpServers["hippius-mem"].url // empty' "$claude_json" 2>/dev/null || true)"
+  if [[ -z "$url" ]]; then
+    echo "missing hippius-mem in Claude: run \`hippius-mem install --agent claude\`, then" \
+      "re-run install.sh"
+    return 0
+  fi
+  echo "ok      hippius-mem for Claude ($url)"
+
+  if ! command -v grok >/dev/null; then
+    return 0
+  fi
+  if grep -qxF "url = \"$url\"" "$grok_config" 2>/dev/null; then
+    echo "ok      hippius-mem for Grok ($url)"
+    return 0
+  fi
+  if [[ ! -s "$token_file" ]]; then
+    echo "skip    hippius-mem for Grok: no daemon token in $token_file"
+    return 0
+  fi
+  if [[ -f "$grok_config" ]]; then
+    relative="${grok_config#"$HOME"/}"
+    mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
+    cp "$grok_config" "$BACKUP_DIR/$relative"
+  fi
+  grok mcp add --scope user --transport http hippius-mem "$url" \
+    --header "Authorization: Bearer $(cat "$token_file")" >/dev/null
+  echo "updated hippius-mem for Grok: shared daemon $url (previous config in $BACKUP_DIR)"
+}
+
 main() {
   echo "AgentSetup: $SETUP_DIR"
 
@@ -363,6 +406,7 @@ main() {
   fi
   setup_cargo
   setup_grok_review
+  setup_memory
   setup_air
   setup_git
   check_sync

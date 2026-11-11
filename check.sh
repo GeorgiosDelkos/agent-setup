@@ -46,7 +46,7 @@ done < <(grep -l '^jobs:' "$SETUP_DIR"/claude/skills/rust-style/templates/ci/*.y
 # shellcheck disable=SC2329 # invoked indirectly, through step
 long_lines() {
   ! awk 'length > 100 { print FILENAME ":" FNR ": " length " columns"; found = 1 }
-    END { exit !found }' "$HOOKS"/*/*.sh "$HOOKS"/rust/*.pl "$HOOKS/rust/tests/run.sh" \
+    END { exit !found }' "$HOOKS"/*/*.sh "$HOOKS"/rust/*.pl "$HOOKS"/*/tests/run.sh \
     "$SETUP_DIR"/claude/scripts/*.sh "$SETUP_DIR"/claude/scripts/tests/*.sh
 }
 
@@ -85,6 +85,7 @@ step zizmor zizmor --offline --quiet "${workflow_files[@]}" "$SETUP_DIR/.github/
 step "security-audit skill" security_audit
 if [[ "${1:-}" != --quick ]]; then
   step "hook tests" bash "$HOOKS/rust/tests/run.sh"
+  step "memory hook tests" bash "$HOOKS/memory/tests/run.sh"
   step "script tests" bash "$SETUP_DIR/claude/scripts/tests/grok-review.test.sh"
 fi
 
