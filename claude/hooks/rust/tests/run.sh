@@ -1630,6 +1630,9 @@ run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
 check "lang-stop: Rust without cargo still names the missing tool" "$(
   [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *cargo* ]] && echo yes
 )" "exit $code: $out"
+check "lang-stop: Rust without cargo does not ask for a cargo test run" "$(
+  [[ "$out" != *"No test run since this Rust changed"* ]] && echo yes
+)" "$out"
 # The next turn's stop, with the same Rust, was told already: it passes and keeps the file.
 run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
 check "lang-stop: missing cargo blocks once per Rust state" "$([[ $code -eq 0 ]] && echo yes)" \
@@ -1705,9 +1708,14 @@ PS="$STATE_TMP/claude-rust-hooks"
 mkdir -p "$PS/review-prunetest"
 touch -t 202001010000 "$PS/prune-old.main.edited" "$PS/review-prunetest/old.abc"
 touch "$PS/prune-new.main.edited" "$PS/review-prunetest/new.abc"
+# A live session keeps its old files: started and baselines are written once.
+touch -t 202001010000 "$PS/prune-live.started"
+touch "$PS/prune-live.main.edited"
 rm -f "$PS/pruned"
 prompt prune1 "$WORK"
 check "prune: old session file deleted" "$([[ ! -e "$PS/prune-old.main.edited" ]] && echo yes)"
+check "prune: a live session's old file kept" "$([[ -e "$PS/prune-live.started" ]] && echo yes)"
+check "prune: the prompting session is marked seen" "$([[ -e "$PS/prune1.seen" ]] && echo yes)"
 check "prune: old snapshot deleted" "$([[ ! -e "$PS/review-prunetest/old.abc" ]] && echo yes)"
 check "prune: recent files kept" "$([[ -e "$PS/prune-new.main.edited" &&
   -e "$PS/review-prunetest/new.abc" ]] && echo yes)"

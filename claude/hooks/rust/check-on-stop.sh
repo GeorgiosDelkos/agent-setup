@@ -474,8 +474,8 @@ ask_unchecked() {
 }
 
 untested=0
-# Without cargo the tests cannot run either; ask with the missing-tool message only.
-if [[ "$run_rust" -eq 1 && "$cargo_missing" -ne 2 ]]; then
+# Without cargo the tests cannot run either; the missing-tool message is the only ask.
+if [[ "$run_rust" -eq 1 && "$cargo_missing" -eq 0 ]]; then
   ask_unchecked "$pairs" rust tests-ran || untested=1
 fi
 if [[ "$run_lang" -eq 1 ]]; then
