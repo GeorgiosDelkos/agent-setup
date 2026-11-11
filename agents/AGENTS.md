@@ -151,9 +151,12 @@ between the lines* (Rust Munich 2026).
 - Work on a feature branch and open a PR. Read the whole diff yourself before opening it.
 - A review exists to catch what the author cannot see, so its effort follows the risk: how
   far a defect would reach and how hard it is to undo. The PR body states the tier and why
-  ("Review tier 1: new CLI flag"), so the owner can overrule it:
-  - **Tier 0, no logic** (docs and comment wording, ignore files, version bumps, renames):
-    self-check plus green CI. Open it ready, not as a draft.
+  ("Review tier 1: new CLI flag"), so the owner can overrule it. When the diff fits a
+  higher tier than the body states, the higher tier holds:
+  - **Tier 0, nothing acts on it:** prose no program or agent follows (a README, a
+    changelog, a typo in a doc comment) and ignore files. Self-check plus green CI; open
+    it ready. Not tier 0: code, rules, skills, commands, hooks and CI, a dependency or
+    action bump, a rename, a `// SAFETY:` argument.
   - **Tier 1, normal:** one reviewer with fresh context, from the other model family: a
     Claude author gets Grok, a Grok author gets Claude (`review-pr` says how to run each).
     The other model is the least anchored on the author's reasoning. When it is
@@ -173,11 +176,13 @@ between the lines* (Rust Munich 2026).
   whichever model wrote it: Claude judges Grok's findings and Grok judges Claude's. Each
   finding is a claim, never accepted or dropped on the reviewer's word. It is confirmed
   (name the input that fails), refuted (name the line that stops it), or left open, which
-  blocks `gh pr ready`, and the posted review shows each verdict. Fix blockers and majors. Fix a
-  minor only when the fix makes the code smaller or clearer; dismiss the rest with the
-  reason. A "Fixes" comment maps each finding to its commit or reason. A clean review is no
-  proof of safety. Ready to merge means review (at tier 1 and 2), fixes, and green CI are
-  all on GitHub. Subagents follow this too.
+  blocks `gh pr ready`, and the posted review shows each verdict. A required review that
+  failed or came back empty blocks it too, until it is rerun or replaced by the stated
+  fallback. Fix blockers and majors. Fix a minor only when the fix makes the code smaller or
+  clearer; dismiss the rest with the reason. When there were findings, a "Fixes" comment
+  maps each to its commit or reason. A clean review is no proof of safety. Ready to merge
+  means review (at tier 1 and 2), fixes, and green CI are all on GitHub. Subagents follow
+  this too.
 - Before opening a follow-up issue from a PR, ask whether the work belongs to this PR: its
   stated purpose, a defect it causes or exposes, or code it already changes. If it does,
   fix it in this PR. An issue is only for work outside that, and related leftovers share

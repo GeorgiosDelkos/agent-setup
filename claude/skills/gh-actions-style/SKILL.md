@@ -18,8 +18,8 @@ Global rules live in `~/.config/agents/AGENTS.md`. This skill adds only CI rules
 - Before committing: `actionlint .github/workflows/` and `zizmor .github/workflows/`.
   Fix everything.
 - Security gates (e.g. `cargo audit`) block. Never `continue-on-error`.
-- Draft PRs get no CI: PRs open as drafts for their review (`AGENTS.md`, Git), and a run
-  before the review's fixes is wasted. `pull_request` lists
+- Draft PRs get no CI: a reviewed PR opens as a draft (`AGENTS.md`, Git), and a run before
+  the review's fixes is wasted. A tier 0 PR opens ready, and `opened` runs it. `pull_request` lists
   `types: [opened, synchronize, reopened, ready_for_review]`, and every job it starts carries
   `if: ${{ !github.event.pull_request.draft }}` (false on push and schedule, so those run).
   A skipped job reports success, which is safe for a required check only when the job has no
