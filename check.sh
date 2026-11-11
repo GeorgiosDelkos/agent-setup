@@ -88,6 +88,7 @@ if [[ "${1:-}" != --quick ]]; then
   step "memory hook tests" bash "$HOOKS/memory/tests/run.sh"
   step "script tests" bash "$SETUP_DIR/claude/scripts/tests/grok-review.test.sh"
   step "claude review script tests" bash "$SETUP_DIR/claude/scripts/tests/claude-review.test.sh"
+  step "install tests" bash "$SETUP_DIR/tests/install.test.sh"
 fi
 
 exit "$failed"

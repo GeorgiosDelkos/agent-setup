@@ -37,25 +37,55 @@ link() {
   echo "linked  $target -> $source"
 }
 
-# Merge the shared JSON text $1 into the file $2. Shared keys win key by key; local-only keys
-# (and the whole file, on a fresh machine) are kept. Arrays such as hook lists are taken from
-# the shared copy. The previous file goes to the backup dir, at its path relative to $HOME.
+# The merge for merge_json, with three inputs: $l the local file, $s the shared copy, $p the
+# shared copy as of the last merge (null before the first). Objects merge key by key, the
+# shared value winning. A key the shared copy had last time and has dropped since is deleted,
+# so a setting or hook event removed from the shared file leaves every machine. An array is
+# the shared one plus the local entries that neither the shared copy has nor it had last
+# time: those are another tool's (a hook another tool registered under PreToolUse), while an
+# entry the shared copy dropped goes. Without $p, arrays are taken from the shared copy
+# whole, as before this record existed, because no local entry can be told apart yet.
+# shellcheck disable=SC2016 # jq variables, not shell ones
+MERGE_JQ='
+def merge($l; $s; $p):
+  if ($s | type) == "object" and ($l | type) == "object" then
+    reduce ((($l | keys) + ($s | keys)) | unique)[] as $k ({};
+      if $s | has($k) then
+        .[$k] = merge($l[$k]; $s[$k]; (if ($p | type) == "object" then $p[$k] else null end))
+      elif ($p | type) == "object" and ($p | has($k)) then .
+      else .[$k] = $l[$k]
+      end)
+  elif ($s | type) == "array" and ($l | type) == "array" and ($p | type) == "array" then
+    $s + [$l[] | select(. as $x | ($s | index([$x])) == null and ($p | index([$x])) == null)]
+  else $s
+  end;
+merge($l; $s; $p)'
+
+# Merge the shared JSON text $1 into the file $2 (MERGE_JQ says how; local-only keys, and
+# the whole file on a fresh machine, are kept). The shared copy is recorded under
+# ~/.local/state/agent-setup/ for the next merge. The previous file goes to the backup dir,
+# at its path relative to $HOME.
 merge_json() {
-  local shared="$1" local_file="$2" merged relative
+  local shared="$1" local_file="$2" merged relative last
+  relative="${local_file#"$HOME"/}"
+  last="$HOME/.local/state/agent-setup/$relative"
+  mkdir -p "$(dirname "$last")"
   if [[ ! -f "$local_file" ]]; then
     mkdir -p "$(dirname "$local_file")"
     printf '%s\n' "$shared" >"$local_file"
+    printf '%s\n' "$shared" >"$last"
     echo "copied  $local_file"
     return 0
   fi
 
-  merged="$(jq -s '.[0] * .[1]' "$local_file" <(printf '%s\n' "$shared"))"
+  merged="$(jq -n --slurpfile l "$local_file" --argjson s "$shared" \
+    --argjson p "$(cat "$last" 2>/dev/null || echo null)" '$l[0] as $l | '"$MERGE_JQ")"
+  printf '%s\n' "$shared" >"$last"
   if [[ "$merged" == "$(jq . "$local_file")" ]]; then
     echo "ok      $local_file"
     return 0
   fi
 
-  relative="${local_file#"$HOME"/}"
   mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
   cp "$local_file" "$BACKUP_DIR/$relative"
   printf '%s\n' "$merged" >"$local_file"
@@ -64,8 +94,8 @@ merge_json() {
 
 # Register Grok and Claude Code as ACP agents in JetBrains Air. The Claude adapter is pinned
 # and installed globally. The grok, node, and script paths are absolute because Air, started
-# from the Dock, may not see the shell's PATH (~/.grok/bin, nvm). Merged like settings.json: shared agents win, agents
-# added locally in Air stay.
+# from the Dock, may not see the shell's PATH (~/.grok/bin, nvm). Merged like settings.json:
+# shared agents win, agents added locally in Air stay.
 setup_air() {
   local air_dir="$HOME/Library/Application Support/JetBrains/Air"
   local acp_version="0.94.0" pkg="@agentclientprotocol/claude-agent-acp"
@@ -437,10 +467,13 @@ main() {
   setup_git
   check_sync
   # Sync drops the executable bit, so restore it on everything that is run directly.
-  chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh "$SETUP_DIR/claude/statusline.sh" \
-    "$SETUP_DIR"/claude/scripts/*.sh
+  chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh \
+    "$SETUP_DIR/claude/statusline.sh" "$SETUP_DIR"/claude/scripts/*.sh
   check_tools
   echo "Done. Start new Claude Code and Grok sessions to pick up the changes."
 }
 
-main "$@"
+# Run unless sourced: tests/install.test.sh sources this file to test merge_json.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
