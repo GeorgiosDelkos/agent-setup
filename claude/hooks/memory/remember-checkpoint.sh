@@ -6,9 +6,10 @@
 #
 # State is counts, not a once-per-session flag: recall-gate.sh counts allowed edits, and
 # this hook and recall-seen.sh store the count they saw. So a session is asked again after
-# later work (at most every ASK_INTERVAL_SECS), and a Stop that another hook blocked in the
-# same round (the clippy check) does not use up the question: the agent fixes that, which
-# edits, and is asked at the next stop.
+# later work, at most every ASK_INTERVAL_SECS. The downside of the interval, taken to cut
+# the extra turns (2026-11-11): the fix for a stop another hook blocked in the same round
+# (the clippy check), and edits in a session's last half hour, may go unasked. The rule in
+# AGENTS.md still asks the agent to remember them.
 # Not asked: sessions that never recalled (hippius-mem was unavailable, so remember would
 # fail too), sessions that only answered questions, subagents, a hook-driven continuation
 # (common.sh stop_is_exempt, the loop guard), and HIPPIUS_MEM_HOOKS_BYPASS=1.
