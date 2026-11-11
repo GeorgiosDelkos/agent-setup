@@ -46,8 +46,7 @@ done < <(grep -l '^jobs:' "$SETUP_DIR"/claude/skills/rust-style/templates/ci/*.y
 # shellcheck disable=SC2329 # invoked indirectly, through step
 long_lines() {
   ! awk 'length > 100 { print FILENAME ":" FNR ": " length " columns"; found = 1 }
-    END { exit !found }' "$HOOKS"/*/*.sh "$HOOKS"/rust/*.pl "$HOOKS"/*/tests/run.sh \
-    "$SETUP_DIR"/claude/scripts/*.sh "$SETUP_DIR"/claude/scripts/tests/*.sh
+    END { exit !found }' "${shell_files[@]}" "$HOOKS"/rust/*.pl
 }
 
 # shellcheck disable=SC2329 # invoked indirectly, through step
