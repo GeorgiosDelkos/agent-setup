@@ -13,7 +13,7 @@ on:
   schedule:
     - cron:  '7 7 * * *'
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ github.event.pull_request.draft }}
   cancel-in-progress: true
 name: rolling
 jobs:

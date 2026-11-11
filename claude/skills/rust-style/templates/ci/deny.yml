@@ -24,7 +24,7 @@ on:
     - cron: '0 2 * * *'
 # See check.yml for information about how the concurrency cancellation and workflow triggering works
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ github.event.pull_request.draft }}
   cancel-in-progress: true
 name: deny
 jobs:

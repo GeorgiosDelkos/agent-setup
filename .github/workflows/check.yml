@@ -9,6 +9,9 @@
 #
 # Draft PRs get no run (gh-actions-style): ready_for_review starts the one that counts. The
 # job has no `needs:`, so its skipped result on a draft is safe as a required check.
+# The concurrency group includes the draft flag: a push to a draft just before `gh pr ready` can
+# register its skipped run after the ready run, and in one shared group it cancelled that run
+# (PRs #22 and #25).
 permissions:
   contents: read
 on:
@@ -17,7 +20,7 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ github.event.pull_request.draft }}
   cancel-in-progress: true
 name: check
 jobs:
