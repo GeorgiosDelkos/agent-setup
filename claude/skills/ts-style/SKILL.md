@@ -77,7 +77,8 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
   A function the change adds scores 8 or less, and one it edits scores no higher than
   before; one already above 8 is debt: lower it when the change makes that cheap, otherwise
   name it in the PR. When unsure whether an edit raised a score, run the same commands in a
-  temporary worktree of the merge base, as TST-21 in `rust-style` does. Coverage here is the
+  temporary worktree of the merge base
+  (`git worktree add --detach <dir> "$(git merge-base origin/main HEAD)"`). Coverage here is the
   lower of statement and branch coverage, so at full coverage the limit is CC 8, the house
   complexity limit. Lower a score with tests over the untested branches, or by splitting the
   function. CRAP says where tests are missing; Stryker says whether they check anything.

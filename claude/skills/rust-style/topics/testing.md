@@ -72,44 +72,10 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   gives it longer to grow, and each job adds a test process that can grow. `bash-guard.sh`
   blocks the flags. [house: a `-j 4 --timeout 300` run reached 73 GB on a 16 GB laptop and
   reset it, 2026-11-04]
-- **TST-21** Before calling a change tested, score it with cargo-crap: CRAP = CC² × (1 −
-  coverage)³ + CC per function, from cyclomatic complexity and line coverage. A function
-  the change adds scores at most the threshold in the repo's `.cargo-crap.toml` (a copy of
-  `templates/.cargo-crap.toml`: 30), and no function scores higher than on the branch's
-  base. A function already above the threshold is debt: lower it when the change makes
-  that cheap. A renamed function counts as new. To lower a score, test the uncovered lines
-  (the Uncovered column) or split the function; CRAP is never below CC, so a CC above the
-  threshold has to be split. CRAP reads only line coverage, so it says where tests are
-  missing; TST-19 says whether they check anything. `templates/ci/crap.yml` runs the same
-  comparison on each PR. Author and reviewer run it the same way, scoring the base in a
-  temporary worktree (a second build):
 
-  ```bash
-  base="$(git merge-base origin/main HEAD)"
-  git worktree add --detach "$TMPDIR/crap-base" "$base"
-  cp .cargo-crap.toml "$TMPDIR/crap-base/"   # one config scores both sides
-  (cd "$TMPDIR/crap-base" &&
-    cargo llvm-cov --locked --all-features --ignore-run-fail --lcov \
-      --output-path lcov.info &&
-    cargo crap --workspace --lcov lcov.info --format json \
-      --output "$TMPDIR/crap-base.json")
-  git worktree remove --force "$TMPDIR/crap-base"
-  cargo llvm-cov --locked --all-features --lcov --output-path target/lcov.info
-  cargo crap --workspace --lcov target/lcov.info --baseline "$TMPDIR/crap-base.json" \
-    --format markdown
-  ```
-
-  Check the rows counted as new and regressed; `--fail-regression` alone ignores new
-  functions. Markdown lists only what changed: the rows, and the duplicate candidates the
-  change adds or grows (functions of the same structure, from `[duplicates]` in the config;
-  the default human format lists every candidate and does not say which are new). Merge
-  each one, or say in the PR why they stay apart. CI warns on them and does not fail. Use
-  the coverage job's flags (`--all-features` in the templates): with fewer features, a
-  feature-gated function in a covered file reads 100% covered locally and fails CI. Rerun
-  coverage after the last edit: a function added since the last run reads 100% covered in
-  a file the report has, and 0% in a new file. Python and TypeScript have their own CRAP
-  rules in `python-style` and `ts-style`. [house: Savoia and Evans' CRAP metric (2007), as
-  in Uncle Bob's crap4clj and crapper; measured on two house repos, 2026-11-05]
+Rust has no CRAP-score gate (TST-21, retired 2026-11-11). It needed a second coverage build
+of the merge base for every change, and TST-19 already shows whether the tests check
+anything, which a line-coverage metric cannot.
 
 ## Golden files and fixtures
 
@@ -153,5 +119,4 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
 
 - **TST-17** Benchmarks use criterion (`harness = false`, `[lib] bench = false`), live in
   `benches/` or a separate workspace member, and are compiled in CI (`cargo check
-  --benches`) so they do not rot. A regression gate compares old and new runs interleaved
-  on instruction counts, not wall time. [ref: T J B]
+  --benches`) so they do not rot. [ref: T J B]

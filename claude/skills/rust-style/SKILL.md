@@ -311,8 +311,10 @@ auto traits as API) are in `topics/library-api.md`.
   interface (returned from a `Read`/`Write` impl, or to a caller that only takes
   `io::Error`) implements `From<E> for io::Error` with the closest `ErrorKind`; otherwise
   skip it (API-15). [ref: T]
-- **ERR-10** A validation pass collects every error with its location (fatal stops,
-  non-fatal continues) instead of failing on the first. [ref: C]
+- **ERR-10** Fail on the first error by default. A checker whose report a user fixes in
+  one round (a verifier, a linter, a config validator) collects every error with its
+  location instead: fatal stops, non-fatal continues. [ref: C for checkers; house: the
+  default, so one compiler's verifier is not copied into every function]
 
 ## Panics and assertions (PAN)
 
@@ -369,8 +371,9 @@ auto traits as API) are in `topics/library-api.md`.
   there (a missing `From` impl, an unhandled corner case). Never restate the code. [ref: B
   (Jon, *Towards Impeccable Rust*) J; Jon, *Don't make me read between the lines*]
 - **DOC-6** Structures with non-trivial invariants state them once (module docs or an `#
-  Invariants` section on the type); each mutating method that relies on them argues they
-  still hold in a `// Post-invariant:` comment. [ref: C T]
+  Invariants` section on the type). A method that breaks one partway through argues in a
+  `// Post-invariant:` comment that it holds again before the method returns; a method that
+  never breaks one needs no comment. [ref: C T]
 - **DOC-7** Every claim in a comment or doc is true and checkable. "Cannot overflow" comes
   with the bound that proves it. A claim about a dependency cites its docs. Reliance on
   undocumented behaviour says so and is pinned by a test. Every workaround links the
@@ -390,10 +393,13 @@ auto traits as API) are in `topics/library-api.md`.
 - **DOC-11** Rule IDs (`ERR-3`) go in reviews and commit messages, never in code comments:
   a comment states the reason itself `[check]`. [house: the reader of the code has no
   skill loaded]
-- **DOC-12** `Debug` and `Display` of a type that holds user data (map contents, payloads,
-  credentials, paths, headers) print sizes, kinds, counters and cursors, never the data; the
-  module or type docs say so. Error messages follow the same rule: `"key too large: 70000
-  bytes (limit 65536)"`, not the key. [house: logs leak what `Debug` prints]
+- **DOC-12** In libraries and services, `Debug` and `Display` of a type that holds stored
+  or secret data (map contents, payloads, credentials, headers) print sizes, kinds,
+  counters and cursors, never the data; the module or type docs say so. Their error
+  messages follow the same rule: `"key too large: 70000 bytes (limit 65536)"`, not the key.
+  A name the user gave the program to act on (a path, a URL, a key on the command line)
+  belongs in the error, as in ERR-5's `"cannot open {path}"`. [house: logs leak what
+  `Debug` prints]
 - **DOC-13** Docs say what a call does not do and what it costs, wherever a reader would
   otherwise guess: which lock it takes, whether it allocates, blocks, waits on the network or
   runs user code ("Does not publish. It does not wait on the network."). [house]
@@ -418,8 +424,9 @@ auto traits as API) are in `topics/library-api.md`.
   under a reasoned `#[expect(clippy::print_stdout, clippy::print_stderr, ...)]` on that
   function; never `drop(writeln!(io::stderr(), ..))` to dodge the lint. `-v`/`-q` set the
   default filter; `RUST_LOG` still overrides it. [ref: J]
-- **LOG-4** Before panicking on an internal failure, log the input that triggered it at
-  `error` level when it is not huge. [ref: C]
+
+LOG-4 (log the input before panicking) is retired: a panic marks a broken invariant, and
+the `expect` or `unreachable!` message (PAN-3, PAN-6) states which.
 
 ## Lint suppression (LNT)
 
