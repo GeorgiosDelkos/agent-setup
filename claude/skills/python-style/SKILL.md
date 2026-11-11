@@ -57,45 +57,12 @@ The global rules (AGENTS.md, Testing) apply; this is how in Python.
 - `hypothesis` for parsers, serialization and algorithms: round trips, and comparison
   against a simple model.
 - Coverage (`pytest-cov` with `--cov-branch`) shows untested code; it is a floor, not the
-  goal. Before calling a change tested, run `mutmut`, restricted to the changed modules, and kill or
-  explain each surviving mutant.
-- CRAP scores (CC² × (1 − coverage)³ + CC per function) with Uncle Bob's crapper, after the
-  last edit, so the coverage is current:
-
-  ```bash
-  uv run pytest --cov=<import_name> --cov-branch \
-    --cov-report=lcov:target/coverage/python/lcov.info
-  uvx --exclude-newer 2026-10-25 \
-    --from git+https://github.com/unclebob/crapper@6fd92c4c9bcc56efb64a2f8743d5a2993bcfd42d \
-    crapper --use-existing-coverage <source_dir>...
-  ```
-
-  `<import_name>` is what the code imports (`my_app`, not the distribution name `my-app`).
-  `<source_dir>` is each directory that holds it, as a path (`src/my_app` in a src layout):
-  a name that is not an existing path is a substring filter over every source file in the
-  repo, any language, and one that matches nothing prints `No source files to analyze.`
-  and exits 0. That message is a failed run, not a pass.
-
-  A function the change adds scores 30 or less, and one it edits scores no higher than
-  before; one already above 30 is debt: lower it when the change makes that cheap, otherwise
-  name it in the PR. When unsure whether an edit raised a score, run the same commands in a
-  temporary worktree of the merge base (`git worktree add --detach <dir> "$(git merge-base
-  origin/main HEAD)"`), then remove it (`git worktree remove <dir>`). Lower a score with
-  tests over the untested branches, or by splitting the function. CRAP says where tests are
-  missing; mutmut says whether they check anything.
-  - Always `--use-existing-coverage`: without it crapper deletes the report, reruns the
-    tests, and installs pytest and coverage into the project's interpreter when missing.
-    It reads `target/coverage/**/lcov.info`, hence the report path.
-  - No `--changed`, which reads only `git status` and misses work already committed on the
-    branch, and no `--threshold`, which exits 2 on the worst score in every file read,
-    existing debt included.
-  - Every run writes `.metrics/crap.edn` (for Uncle Bob's uml-viewer), and the coverage
-    command writes `target/coverage/`: add both to `.gitignore`.
-  - crapper has no releases, so the pin is a commit, and `--exclude-newer` holds its
-    tree-sitter dependencies to that date; move the two together.
-
-  The owner chose crapper over crap4py (no dependencies, but unmaintained since June 2026),
-  2026-11-05. On hippius-hub it put 10 of 270 functions above 30, all untested CLI code.
+  goal. Once per PR, before `gh pr ready`, run `mutmut` restricted to the modules the branch
+  changed, and kill or explain each surviving mutant; a mutation job the repo's CI runs on
+  the PR counts instead.
+- No CRAP-score gate (retired 2026-11-11, as for Rust, rust-style TST-21): it needed a
+  second coverage run of the merge base for every change, and mutmut already shows whether
+  the tests check anything, which a line-coverage metric cannot.
 
 ## Supply chain
 

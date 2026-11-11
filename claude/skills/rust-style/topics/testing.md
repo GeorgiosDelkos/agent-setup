@@ -58,13 +58,15 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
 ## Test strength
 
 - **TST-19** A test suite is judged by the bugs it catches, not by coverage: coverage says a
-  line ran, not that a wrong result would fail a test. Before calling a change tested, run
-  `cargo mutants --in-diff <diff>` over it, the diff of the working tree against the
-  branch's base (`git diff "$(git merge-base origin/main HEAD)" >"$TMPDIR/pr.diff"`, which
-  includes uncommitted work), and kill or explain every missed mutant: add the assertion that fails, or say why the mutant is
-  equivalent. `templates/ci/mutants.yml` runs the same check on each PR; keep it unless the
-  suite takes more than a few minutes. [house: line coverage passes tests that assert
-  nothing; mutation testing does not]
+  line ran, not that a wrong result would fail a test. Once per PR, before `gh pr ready`, run
+  `cargo mutants --in-diff <diff>` over the branch's logic changes, the diff of the working
+  tree against its base (`git diff "$(git merge-base origin/main HEAD)" >"$TMPDIR/pr.diff"`,
+  which includes uncommitted work), and kill or explain every missed mutant: add the
+  assertion that fails, or say why the mutant is equivalent. Report the result in the PR.
+  Where the repo runs `templates/ci/mutants.yml` on the PR, that run is the evidence and no
+  local run is needed; keep the job unless the suite takes more than a few minutes. Not per
+  edit: a run takes minutes, and only the PR's final diff decides. [house: line coverage
+  passes tests that assert nothing; mutation testing does not]
 - **TST-20** Run `cargo mutants` locally with `-j 2` or fewer, and without `--timeout`
   (`-t`) or `--baseline=skip`. A mutant can make a loop unbounded and allocate until the
   machine stalls. The auto test timeout (baseline test time times `timeout_multiplier`,
