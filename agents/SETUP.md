@@ -227,8 +227,7 @@ subscriptions have changed several times. If it stops being allowed, either:
   `Bash`), `bash-guard` under PreToolUse `Bash`, and the three memory hooks (recall-gate,
   recall-seen, remember-checkpoint).
 - Grok, from any directory: `grok inspect --json`. It does not list the hooks it reads
-  from `~/.claude/settings.json`; check those end to end (below): an edit in a git repo
-  before any recall is denied by recall-gate.
+  from `~/.claude/settings.json`; check those end to end (below).
   - `projectInstructions` lists `~/.grok/rules/AGENTS.md`, and `AGENTS.local.md` when the
     local layer has one.
   - `skills` has `rust-style`.

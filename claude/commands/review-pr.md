@@ -67,8 +67,11 @@ The script:
   The profile denies the main `~/.grok`, other repositories and the system temp trees.
 - treats a non-zero exit, any stderr or an empty review as a failed run, and checks the
   review for the review login's own credential.
-- removes the worktree and the session transcripts on every exit. That worktree is the
-  script's own and outside the prune rule under Worktrees below.
+- runs one review at a time: a second run waits for the first (up to an hour), then fails.
+  Each review is stopped after an hour.
+- removes the worktree and the session transcripts on every exit, and what a killed run
+  left before the next review. That worktree is the script's own and outside the prune rule
+  under Worktrees below.
 
 Steps:
 
