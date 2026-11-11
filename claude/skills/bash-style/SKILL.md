@@ -17,8 +17,11 @@ Global rules live in `~/.config/agents/AGENTS.md`. This skill adds only shell ru
 - Temporary files in `mktemp -d`, removed by a `trap '...' EXIT` set right after it, so an
   early exit still cleans up.
 - Delete with `trash`, never `rm -rf`.
-- A script with logic beyond a straight line of commands gets tests: `bats-core` cases that
-  run it against fixtures in a temporary directory and assert on exit code, stdout, and the
-  files it leaves. Lint and format checks are not tests.
-- If a script grows past roughly 100 lines or needs real data structures, propose
-  rewriting it in Python (uv script) or Rust.
+- A script with logic beyond a straight line of commands gets tests that run it against
+  fixtures in a temporary directory and assert on exit code, stdout, and the files it
+  leaves: `bats-core` cases, or the repo's own harness where it has one (a `tests/run.sh`
+  of fixture cases). Lint and format checks are not tests.
+- When writing a new script that will pass roughly 100 lines or needs real data
+  structures, propose Python (uv script) or Rust instead. Not a review finding on an
+  existing script that must stay bash: hooks and installers that run before any toolchain
+  exists, such as `agent-setup`'s, which depend only on bash, jq and perl.

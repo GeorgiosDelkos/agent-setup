@@ -331,7 +331,10 @@ while IFS= read -r file; do
 done < <(cut -f 2 <<<"$lang" | sort -u)
 
 if [[ ${#files[@]} -eq 0 && ${#lang_files[@]} -eq 0 ]]; then
-  : >"$edited"
+  # Emptied, never created: every subagent stop would otherwise leave an empty file.
+  if [[ -f "$edited" ]]; then
+    : >"$edited"
+  fi
   exit 0
 fi
 # Separate fingerprints: a language edit must not re-run clippy on unchanged Rust.
@@ -353,15 +356,22 @@ fi
 internal=0
 findings=""
 # Missing cargo must not skip the language ask, and must not store a Rust
-# fingerprint for a check that did not run.
+# fingerprint for a check that did not run. It blocks once per Rust state (cargo_told
+# holds the state it was told about): 1 blocks with the message, 2 was told already.
 cargo_missing=0
+cargo_told="$(agent_file cargo-missing)"
 if [[ "$run_rust" -eq 1 ]]; then
   if [[ ${#files[@]} -gt 0 ]]; then
     if ! command -v cargo >/dev/null 2>&1; then
-      echo "Rust hooks ($(basename "$0")): missing tool(s): cargo. Install them" \
-        "(~/.config/agents/SETUP.md, 'Install on a new machine'); the Rust checks are off" \
-        "until then." >&2
-      cargo_missing=1
+      if [[ -f "$cargo_told" && "$(cat "$cargo_told")" == "$rust_state" ]]; then
+        cargo_missing=2
+      else
+        echo "Rust hooks ($(basename "$0")): missing tool(s): cargo. Install them" \
+          "(~/.config/agents/SETUP.md, 'Install on a new machine'); the Rust checks are" \
+          "off until then." >&2
+        printf '%s' "$rust_state" >"$cargo_told"
+        cargo_missing=1
+      fi
     else
       ranges="$(ranges_for "$pairs")"
       clippy="$(clippy_output "${files[@]}")"
@@ -464,7 +474,8 @@ ask_unchecked() {
 }
 
 untested=0
-if [[ "$run_rust" -eq 1 ]]; then
+# Without cargo the tests cannot run either; the missing-tool message is the only ask.
+if [[ "$run_rust" -eq 1 && "$cargo_missing" -eq 0 ]]; then
   ask_unchecked "$pairs" rust tests-ran || untested=1
 fi
 if [[ "$run_lang" -eq 1 ]]; then
@@ -479,7 +490,7 @@ fi
 # A language-only stop must not drop a Rust file whose check did not run. A subagent's
 # next stop sees only `edited`, and its compiler errors are filtered to those files.
 if [[ -z "$findings" && "$untested" -eq 0 ]]; then
-  if [[ "$run_rust" -eq 1 ]]; then
+  if [[ "$run_rust" -eq 1 && "$cargo_missing" -eq 0 && -f "$edited" ]]; then
     : >"$edited"
   fi
   exit "$internal"

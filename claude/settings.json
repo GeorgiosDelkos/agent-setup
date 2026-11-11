@@ -251,7 +251,6 @@
     "variant-analysis@trailofbits": false,
     "warp@claude-code-warp": true,
     "typesafe@typesafe-ai": true,
-    "superpowers@claude-plugins-official": false,
     "cloudflare@cloudflare": false
   },
   "extraKnownMarketplaces": {

@@ -8,8 +8,9 @@
 
 stdin_data=$(cat)
 
-IFS=$'\t' read -r current_dir model_name lines_added lines_removed duration_ms ctx_used cache_pct < <(
-  echo "$stdin_data" | jq -r '[
+IFS=$'\t' read -r current_dir model_name lines_added lines_removed duration_ms ctx_used \
+  cache_pct < <(
+    echo "$stdin_data" | jq -r '[
         .workspace.current_dir // "unknown",
         .model.display_name // "Unknown",
         (.cost.total_lines_added // 0),
@@ -33,10 +34,11 @@ IFS=$'\t' read -r current_dir model_name lines_added lines_removed duration_ms c
             else 0 end
         ) catch 0)
     ] | @tsv'
-)
+  )
 
 if [ -z "$current_dir" ] && [ -z "$model_name" ]; then
-  current_dir=$(echo "$stdin_data" | jq -r '.workspace.current_dir // .cwd // "unknown"' 2>/dev/null)
+  current_dir=$(echo "$stdin_data" |
+    jq -r '.workspace.current_dir // .cwd // "unknown"' 2>/dev/null)
   model_name=$(echo "$stdin_data" | jq -r '.model.display_name // "Unknown"' 2>/dev/null)
   lines_added=$(echo "$stdin_data" | jq -r '(.cost.total_lines_added // 0)' 2>/dev/null)
   lines_removed=$(echo "$stdin_data" | jq -r '(.cost.total_lines_removed // 0)' 2>/dev/null)
@@ -157,7 +159,8 @@ else
 fi
 
 # Model name — strip prefix, lowercase
-short_model=$(echo "$model_name" | sed -E 's/Claude [0-9.]+ //; s/^Claude //' | tr '[:upper:]' '[:lower:]')
+short_model=$(echo "$model_name" | sed -E 's/Claude [0-9.]+ //; s/^Claude //' |
+  tr '[:upper:]' '[:lower:]')
 
 # Separator
 SEP="${D} · ${R}"

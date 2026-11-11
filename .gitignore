@@ -10,6 +10,3 @@
 /claude/skills/daily-work-report/
 /claude/skills/s3-share/
 /claude/skills/rex/
-
-# Scratch for local reviews (agents/AGENTS.local.md: the Grok review reads target/pr.diff).
-/target/

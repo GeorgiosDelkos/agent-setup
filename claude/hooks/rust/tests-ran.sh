@@ -19,9 +19,15 @@
 set -euo pipefail
 
 input="$(cat)"
-# Every other command leaves here, before jq starts. *npm* already matches pnpm, so a
-# pnpm arm here could never match.
-case "$input" in
+# Every other command leaves here, before jq starts. Matched on the input up to the tool's
+# output when the output comes after the command, so output that mentions `make` or `npm`
+# does not start jq; otherwise on the whole input. The key cannot match inside the command:
+# there its quotes are escaped. *npm* already matches pnpm, so a pnpm arm could never match.
+scan="$input"
+if [[ "$input" == *'"tool_input"'*'"tool_response"'* ]]; then
+  scan="${input%%\"tool_response\"*}"
+fi
+case "$scan" in
 *cargo* | *pytest* | *ruff* | *pyright* | *mypy* | *vitest* | *oxlint* | *eslint* | \
   *jest* | *shellcheck* | *shfmt* | *bats* | *actionlint* | *zizmor* | *tsc* | \
   *"ty check"* | *tox* | *nox* | *unittest* | *check.sh* | *npm* | *yarn* | *bun* | \

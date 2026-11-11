@@ -45,10 +45,16 @@ grok_bin="${GROK_BIN:-$(command -v grok || true)}"
 [[ -f "$home/auth.json" && ! -L "$home/auth.json" && -s "$home/auth.json" ]] ||
   unavailable "the review home is not signed in: GROK_HOME=$home grok login"
 
-# How long the sign-in refresh may take before it is stopped (seconds). A refresh is one
-# token request and one short model turn; past this it is waiting on something else, such
-# as an interactive sign-in. Overridable for tests.
+# How long each step may take before it is stopped (seconds), overridable for tests:
+# - signin_limit: a refresh is one token request and one short model turn; past this it is
+#   waiting on something else, such as an interactive sign-in.
+# - review_limit: arbitrary, far above a normal review, so only a hung run reaches it. A
+#   review that hangs would otherwise hold the lock below, and every later review behind it.
+# - lock_limit: how long to wait for another review to finish: its sign-in and review
+#   limits, plus a minute for its checkout and cleanup (arbitrary).
 signin_limit="${GROK_SIGNIN_LIMIT_SECS:-120}"
+review_limit="${GROK_REVIEW_LIMIT_SECS:-3600}"
+lock_limit="${GROK_LOCK_LIMIT_SECS:-$((signin_limit + review_limit + 60))}"
 
 # Whether `file` holds any string of 20 or more characters from the review home's
 # credential, matched without printing it.
@@ -72,19 +78,124 @@ echo_stderr() {
   fi
 }
 
-mkdir -p "$home/runs" "$home/tmp"
-run="$(mktemp -d "$home/runs/pr-XXXXXX")"
-wt="$run/wt"
-cleanup() {
-  cd /
-  git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
-  trash "$run" >/dev/null 2>&1 || true
-  # Past reviews' transcripts would be readable to the next review; keep none.
+# Run a command in the background and stop it after `limit` seconds: its exit status, or
+# 124 when it was stopped. In the background so a signal to this script is handled at once
+# (bash defers traps while a foreground child runs) and stops it too (on_signal).
+child=""
+run_limited() {
+  local limit="$1" waited=0 status=0
+  shift
+  "$@" &
+  child=$!
+  while kill -0 "$child" 2>/dev/null && [[ "$waited" -lt "$limit" ]]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$child" 2>/dev/null; then
+    stop_child
+    return 124
+  fi
+  wait "$child" || status=$?
+  child=""
+  return "$status"
+}
+
+# Stop the running child: TERM, then KILL when it is still alive after 10 seconds (an
+# arbitrary grace), so a child that ignores TERM cannot keep the run, and the lock, forever.
+stop_child() {
+  local waited=0
+  kill "$child" 2>/dev/null || true
+  while kill -0 "$child" 2>/dev/null && [[ "$waited" -lt 10 ]]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -9 "$child" 2>/dev/null || true
+  wait "$child" 2>/dev/null || true
+  child=""
+}
+
+# One review at a time. Every run and session in this home is readable to the review that
+# runs in it (the sandbox allows the home: Grok writes its session there), and cleanup
+# empties sessions/. With two at once, one review could read another PR's prompt and code,
+# and its cleanup would delete the other's live session (seen 2026-11-11).
+#
+# The lock is flock(2) on review.lock, through fd 9, which this script and every process it
+# starts hold open. The kernel drops it when the last of them exits, so a review killed
+# with SIGKILL leaves no stale lock to take over, and a Grok it left running keeps the lock
+# until it ends. A mkdir lock with a pid file was tried first: taking over a dead holder's
+# lock is a check and then a delete, and two waiters could both get in. The file is never
+# deleted: a waiter holds the old file open and would lock it while a new run locks a new one.
+lock="$home/review.lock"
+take_lock() {
+  local waited=0 status
+  exec 9>>"$lock"
+  while true; do
+    status=0
+    perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or die "cannot reopen fd 9: $!\n";
+      flock($fh, LOCK_EX | LOCK_NB) or exit 1' || status=$?
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$status" -ne 1 ]]; then
+      echo "grok review failed: cannot lock $lock" >&2
+      exit 1
+    fi
+    if [[ "$waited" -ge "$lock_limit" ]]; then
+      echo "grok review failed: another review still runs after ${lock_limit}s;" \
+        "retry when it ends" >&2
+      exit 1
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
+# Remove what a killed review left: its run directory (prompt, code, worktree) and its
+# worktree's registration in the repository it came from, named in the run's `repo` file.
+# Runs from before that file existed leave a registration that `git worktree prune` clears.
+purge_runs() {
+  local dir
+  for dir in "$home/runs"/*; do
+    [[ -d "$dir" ]] || continue
+    if [[ -f "$dir/repo" ]]; then
+      git -C "$(cat "$dir/repo")" worktree remove --force "$dir/wt" >/dev/null 2>&1 || true
+    fi
+    trash "$dir" >/dev/null 2>&1 || true
+  done
   if [[ -d "$home/sessions" ]]; then
     find "$home/sessions" -mindepth 1 -maxdepth 1 -exec trash {} + >/dev/null 2>&1 || true
   fi
 }
+
+mkdir -p "$home/runs" "$home/tmp"
+run=""
+locked=""
+cleanup() {
+  cd /
+  if [[ -n "$run" ]]; then
+    git -C "$repo" worktree remove --force "$run/wt" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "$locked" ]]; then
+    # Past reviews' transcripts would be readable to the next review; keep none. The lock
+    # goes with fd 9 when this script exits.
+    purge_runs
+  fi
+}
+on_signal() {
+  if [[ -n "$child" ]]; then
+    stop_child
+  fi
+  exit 143
+}
 trap cleanup EXIT
+trap on_signal TERM INT HUP
+
+take_lock
+locked=1
+purge_runs
+run="$(mktemp -d "$home/runs/pr-XXXXXX")"
+printf '%s\n' "$repo" >"$run/repo"
+wt="$run/wt"
 
 # Refresh the review home's sign-in before the review. Under the pr-review sandbox Grok
 # cannot refresh it: a review started after the access token expired (about four hours
@@ -100,26 +211,17 @@ trap cleanup EXIT
 # It is stopped after `signin_limit` seconds: with no usable refresh token Grok falls back
 # to an interactive sign-in, which must not wait or open a browser here.
 mkdir "$run/signin" "$run/signin-home"
-env -i HOME="$run/signin-home" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
+signin_status=0
+run_limited "$signin_limit" env -i HOME="$run/signin-home" PATH="/usr/bin:/bin" \
+  TMPDIR="$home/tmp/" \
   GROK_HOME="$home" GROK_MEMORY=0 GROK_AUTH_EARLY_INVALIDATION_SECS=86400 \
   "$grok_bin" --cwd "$run/signin" \
   --tools list_dir --disallowed-tools search_tool,use_tool \
   --disable-web-search --no-subagents --max-turns 1 \
-  -p "Reply with the single word OK." </dev/null >/dev/null 2>"$run/signin.err" &
-signin_pid=$!
-waited=0
-while kill -0 "$signin_pid" 2>/dev/null && [[ "$waited" -lt "$signin_limit" ]]; do
-  sleep 1
-  waited=$((waited + 1))
-done
-signin_status=0
-if kill -0 "$signin_pid" 2>/dev/null; then
-  kill "$signin_pid" 2>/dev/null || true
-  wait "$signin_pid" 2>/dev/null || true
+  -p "Reply with the single word OK." </dev/null >/dev/null 2>"$run/signin.err" ||
+  signin_status=$?
+if [[ "$signin_status" -eq 124 ]]; then
   echo "the sign-in refresh did not finish in ${signin_limit}s and was stopped" >&2
-  signin_status=124
-else
-  wait "$signin_pid" || signin_status=$?
 fi
 if [[ "$signin_status" -ne 0 ]]; then
   echo_stderr "$run/signin.err"
@@ -141,14 +243,22 @@ done < <(find "$wt" -path "$wt/.git" -prune -o \( -name .claude -o -name .grok -
   -o -name CLAUDE.local.md \) -prune -print0)
 cp "$prompt" "$run/prompt.md"
 
+# The user's HOME, unlike the sign-in: the profile's `~` denies and strict's own runtime
+# socket denies resolve against it. With an empty HOME the sandbox refuses to start,
+# because /var/run/docker.sock links into ~/.docker (grok 1.0.77). Asked from inside, a
+# review run this way saw none of ~/.claude's skills, rules, plugin hooks or MCP servers,
+# only Grok's bundled skills (checked 2026-11-11), though `grok inspect` lists them.
 status=0
-env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
+run_limited "$review_limit" env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
   GROK_HOME="$home" GROK_MEMORY=0 \
   "$grok_bin" --cwd "$wt" --sandbox pr-review \
   --tools read_file,grep,list_dir --disallowed-tools search_tool,use_tool \
   --disable-web-search --no-subagents \
   --prompt-file "$run/prompt.md" </dev/null >"$run/review.txt" 2>"$run/review.err" ||
   status=$?
+if [[ "$status" -eq 124 ]]; then
+  echo "the review did not finish in ${review_limit}s and was stopped" >&2
+fi
 
 # Grok prints these two lines to stderr when a long review compacts its own context and
 # carries on; the review still completes (seen 2026-11-05, grok 1.0.70). Any other line,

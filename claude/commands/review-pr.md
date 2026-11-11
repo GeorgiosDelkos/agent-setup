@@ -67,8 +67,11 @@ The script:
   The profile denies the main `~/.grok`, other repositories and the system temp trees.
 - treats a non-zero exit, any stderr or an empty review as a failed run, and checks the
   review for the review login's own credential.
-- removes the worktree and the session transcripts on every exit. That worktree is the
-  script's own and outside the prune rule in `AGENTS.md`.
+- runs one review at a time: a second run waits for the first (up to an hour), then fails.
+  Each review is stopped after an hour.
+- removes the worktree and the session transcripts on every exit, and what a killed run
+  left before the next review. That worktree is the script's own and outside the prune rule
+  under Worktrees below.
 
 Steps:
 
@@ -171,10 +174,27 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
   Subject in the imperative, at most 72 characters; the body maps each finding to its fix.
 - Push the branch with a regular push, never a force push.
 - If the PR is a draft you opened, no finding is open, and every review its tier requires
-  completed and is posted (a failed or skipped run does not count), mark it ready (`gh pr ready $ARGUMENTS`), which starts CI on the reviewed head.
+  completed and is posted, mark it ready (`gh pr ready $ARGUMENTS`), which starts CI on the
+  reviewed head. A failed or skipped run counts only once it is rerun or replaced by the
+  stated fallback (step 1).
 
 ## 6. Post the fixes
 
 When there were findings, comment on PR #$ARGUMENTS with a "Fixes" list mapping each to its
 commit, or to the reason it was dismissed, and confirm that the quality pipeline passes. A
 tier 0 PR, or a review with no findings, needs no Fixes comment.
+
+## Worktrees
+
+When starting work in a repo, and after a PR you opened merges or closes, check every
+worktree in the repo (`git worktree list`), whoever made it. Claude Code keeps any worktree
+with commits and never rechecks it, and each holds a `target/` of 5-60 GB; leftovers filled
+the disk once. Remove one (`git worktree remove`, then `git branch -D`) only when all hold:
+
+- its branch's PR is merged or closed;
+- `git status` in it is clean;
+- its `HEAD` equals the PR's `headRefOid` (`gh pr view <branch> --json
+  state,headRefOid`), so no commit is unpushed;
+- no process works in it (`lsof -d cwd -Fn | grep -F <path>` prints nothing).
+
+Leave every other worktree, and list the ones you left with the reason.

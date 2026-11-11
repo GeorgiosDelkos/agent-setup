@@ -40,7 +40,7 @@ machine reaches every machine.
 | `~/.claude/agents/` | `$SETUP/claude/agents/` | `rust-style-reviewer.md`. |
 | `~/.claude/hooks/` | `$SETUP/claude/hooks/` | `rust/*.sh` enforcement hooks (see below). |
 | `~/.claude/commands/` | `$SETUP/claude/commands/` | Slash commands. |
-| `~/.claude/scripts/` | `$SETUP/claude/scripts/` | Scripts the commands call: `grok-review.sh`, the locked-down Grok review run by `review-pr` when Claude wrote the PR, and `claude-review.sh`, the Claude review when Grok wrote it. Tests in `tests/`, run by `check.sh`. |
+| `~/.claude/scripts/` | `$SETUP/claude/scripts/` | Scripts the commands call: `grok-review.sh`, the locked-down Grok review run by `review-pr` when Claude wrote the PR (one at a time, under a lock in `~/.grok-review`, stopped after an hour), and `claude-review.sh`, the Claude review when Grok wrote it. Tests in `tests/`, run by `check.sh`. |
 | `~/.claude/statusline.sh` | `$SETUP/claude/statusline.sh` | Status line. |
 | `~/.grok/rules/AGENTS.md` | `$SETUP/agents/AGENTS.md` | Grok's global rules. |
 | `~/.grok/rules/AGENTS.local.md` | `$SETUP/agents/AGENTS.local.md` | The local layer's rules, when it has them. |
@@ -56,7 +56,12 @@ machine reaches every machine.
 
 `settings.json` is the one file that is not linked: Claude Code rewrites it in place, which
 would replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
-merges it in (shared keys win, local-only keys stay). To share a setting with every
+merges it in: shared keys win, local-only keys stay, and an array (a hook list) keeps the
+local entries another tool added, a command added inside a shared hook group included. It
+records the shared copy under `~/.local/state/agent-setup/`, so a key, hook event or hook
+the shared copy drops later is removed from the machine at the next install. The first
+install on a machine has no record yet: it keeps every local key, and a key the shared copy
+dropped before then stays until removed by hand. To share a setting with every
 machine, add only its key to `claude/settings.json` in a clone, through a PR. Copying the
 whole local file would also share machine-local keys (an effort level, a model override).
 
@@ -84,15 +89,15 @@ sandbox settings would close that.
 
 | Script | Event and matcher | Effect |
 |---|---|---|
-| `style-gate.sh` | PreToolUse `Edit\|Write\|MultiEdit\|search_replace\|write\|hashline_edit` | Blocks an agent's first `.rs` edit until it has loaded `rust-style`, and any edit whose new text touches a topic (unsafe, concurrency, async, library API, testing, repo setup) until it has read `rust-style/topics/<topic>.md`. A `.py`, `.pyi`, `.ts`/`.js`, `.sh`, workflow, or Dependabot edit is blocked until `python-style`, `ts-style`, `bash-style`, or `gh-actions-style` is loaded; one deny lists the Rust files and the language skill together. A skill or topic file that is not installed is not required, and `node_modules`, `target`, `vendor`, `dist`, `__pycache__`, `.venv`, and `venv` are not gated. The deny reason (JSON `permissionDecisionReason`, read by both tools) lists exactly what to load. Without jq it fails open with a message rather than block every edit. |
+| `style-gate.sh` | PreToolUse `Edit\|Write\|MultiEdit\|search_replace\|write\|hashline_edit` | Blocks an agent's first `.rs` edit until it has loaded `rust-style`, and any edit whose new text touches a topic (unsafe, concurrency, async, library API, testing, repo setup; and low-level, for any `.rs` edit in a crate that sets `low-level = true`) until it has read `rust-style/topics/<topic>.md`. A `.py`, `.pyi`, `.ts`/`.js`, `.sh`, workflow, or Dependabot edit is blocked until `python-style`, `ts-style`, `bash-style`, or `gh-actions-style` is loaded; one deny lists the Rust files and the language skill together. A skill or topic file that is not installed is not required, and `node_modules`, `target`, `vendor`, `dist`, `__pycache__`, `.venv`, and `venv` are not gated. The deny reason (JSON `permissionDecisionReason`, read by both tools) lists exactly what to load. Without jq it fails open with a message rather than block every edit. |
 | `style-loaded.sh` | PostToolUse `Skill\|Read\|read_file\|Bash` | Marks `rust-style` as loaded (Claude's Skill tool, reading its `SKILL.md` as Grok does, or a whole-file `cat` of it in Bash), and marks each topic file read the same ways. Those same reads mark `python-style`, `ts-style`, `bash-style`, and `gh-actions-style` loaded. Partial reads do not count: `head`, `sed -n`, `cat | head`, or a Read/read_file with `limit` or an `offset` past line 1. Grok's `read_file` of `SKILL.md` still counts, because that tool returns the file whole and ignores `offset` and `limit`. |
 | `fmt-on-edit.sh` | PostToolUse, edit tools | Formats the edited `.rs` file right away through stdin (so declared child modules are never touched; the repo's rustfmt.toml is honoured), and records it; also records edited `Cargo.toml`. Python, TypeScript, shell, and workflow files are recorded and not formatted, so a repo that uses its own formatter is left alone. A syntax error is fed back to the agent. |
-| `check-on-stop.sh` | Stop and SubagentStop, timeout 600 | Main agent: every repo this session changed (recorded edits plus the branch's git changes since its merge-base with the default branch, so Bash edits and commits count). Subagent: only the paths it recorded; skipped if none. Runs clippy over the changed packages and their workspace dependents with the repo's own lint tables and `clippy.toml` plus `minimal-lints.toml` (default features unless `[workspace.metadata.house-check]` says otherwise, `--cap-lints warn --keep-going`). It never injects the house template, so it checks what `cargo clippy` and CI check. In a repo that opted in (`baseline = true` in that table) it then runs `house-check.pl` and the `max_width` column check, and reports an opted-in repo that has not committed a lint table. Compiler errors block; lint and house-check findings only on changed lines. Last, `.rs` files modified this session after its last test run ask for one, and Python, TypeScript, shell, and workflow files ask once for that language's own check. tests-ran.sh records the check, including the project's runner (`npm test`, `make test`, `check.sh`); a cargo run does not, and a Python edit does not re-run clippy on Rust that was already checked. Blocks once per changed state; internal failures exit 1 and never block. |
+| `check-on-stop.sh` | Stop and SubagentStop, timeout 600 | Main agent: every repo this session changed (recorded edits plus the branch's git changes since its merge-base with the default branch, so Bash edits and commits count). Subagent: only the paths it recorded; skipped if none. Runs clippy over the changed packages and their workspace dependents with the repo's own lint tables and `clippy.toml` plus `minimal-lints.toml` (default features unless `[workspace.metadata.house-check]` says otherwise, `--cap-lints warn --keep-going`). It never injects the house template, so it checks what `cargo clippy` and CI check. In a repo that opted in (`baseline = true` in that table) it then runs `house-check.pl` and the `max_width` column check, and reports an opted-in repo that has not committed a lint table. Compiler errors block; lint and house-check findings only on changed lines. Last, `.rs` files modified this session after its last test run ask for one, and Python, TypeScript, shell, and workflow files ask once for that language's own check. tests-ran.sh records the check, including the project's runner (`npm test`, `make test`, `check.sh`); a cargo run does not, and a Python edit does not re-run clippy on Rust that was already checked. Blocks once per changed state, and without cargo once per Rust state with the missing tool; internal failures exit 1 and never block. Gap: a repo the session touched only through Bash, never its cwd at a prompt nor an edit-tool target, gets its baseline at the first stop and reads as unchanged, so those Bash edits are not checked. |
 | `tests-ran.sh` | PostToolUse and PostToolUseFailure `Bash` (a failing run counts) | Records that the session ran Rust tests (`cargo test`/`t`/`nextest`/`mutants`, with toolchain and global flags and through `miri`, `hack`, `llvm-cov`, `insta`; not `--no-run` or `nextest list`), as the modification time of one session file, for check-on-stop. A pytest, ruff (not `ruff format`), pyright, mypy, `ty check`, tox, nox, unittest, vitest, oxlint, tsc, jest, eslint, shellcheck, `shfmt -d` (not `shfmt -w`), bats, `check.sh`, actionlint, or zizmor run is recorded on that language's own stamp, as are `npm`/`pnpm`/`yarn`/`bun` `test`/`lint`/`check`, `node --test`, and `make`/`just` `test`/`lint`/`check` (`make` and `just` stamp every language skill, not the Rust test run). A formatter run does not. Commands that match none of these exit before jq starts. |
 | `run-clippy.sh` | called by check-on-stop | Clippy scoped to the changed packages plus their workspace dependents (whole workspace for a root-manifest change), per-package runs for members with their own `[lints]`, read as JSON. |
 | `house-metadata.pl` | called by the hooks | Reads `[workspace.metadata.house-check]`: the `baseline` opt-in and the feature set. Also decides whether a crate is published (opt-in: `publish = ["crates-io"]`/`true`, or inherited through `publish.workspace = true`). |
 | `minimal-lints.toml` | read by run-clippy | The only lints the hook adds to a repo's own config, in every repo: leftover `dbg!`/`todo!`/`unimplemented!`, undocumented `unsafe`. |
-| `session-baseline.sh` | UserPromptSubmit, timeout 30 | Records each repo's HEAD and state at the session's first prompt (else at the first edit or stop): the state tells a repo this session changed from one that was already dirty, and HEAD is the base in a repo without a remote. |
+| `session-baseline.sh` | UserPromptSubmit, timeout 30 | Records each repo's HEAD and state at the session's first prompt (else at the first edit or stop): the state tells a repo this session changed from one that was already dirty, and HEAD is the base in a repo without a remote. Once a day it also prunes the hook state: the files of sessions none of whose files changed for 7 days (a prompt touches `<session>.seen`), and review snapshots untouched for 30. |
 | `changes.sh` | sourced by the hooks | The changed set and changed line ranges of the branch: since the merge-base with the default branch (origin's HEAD, else a local `main`/`master`), which is what the PR and CI judge, so a pull or a checkout of merged work counts for nothing. On a local default branch without a remote, since the session baseline. Also the per-repository review snapshots. |
 | `house-check.pl` | called by check-on-stop | Line-level rules clippy cannot express (`// SAFETY:` spelling, TODO owners and trackers, branch links and dismissive words in comments, `# Cancel safety` in published libraries, anyhow in library code and library dependencies, `Box<dyn Error>` in public library signatures, ...). Runs only in opted-in repos. Each finding names its rust-style rule ID. `// house-check: allow(ID): reason` silences one line. |
 | `baseline-lints.pl` | called by run-clippy | Merges `minimal-lints.toml` with the workspace's own lint tables into clippy flags (the workspace wins). |
@@ -100,7 +105,7 @@ sandbox settings would close that.
 | `review-done.sh` | SubagentStop, timeout 120 | When the `rust-style-reviewer` finishes (Claude's `agent_type`, or a Grok `subagentType` ending in `:rust-style-reviewer`), snapshots every changed `.rs` file of the repos the session works in, once per repository (shared by its worktrees and later sessions). |
 | `memory/recall-gate.sh` | PreToolUse, edit tools, timeout 10 | Team memory is mandatory (AGENTS.md, Team memory). Denies an edit to a file inside a git work tree until this session called the hippius-mem `recall` tool within 30 minutes (`HIPPIUS_MEM_RECALL_WINDOW_SECS`). Fails open, with a message, when this agent (Grok is told apart by its camelCase `toolName`) has no registration, its HTTP daemon does not accept a connection within a second, its last recall failed, or three edits were denied since the last recall (the tool may be missing from the session), so an unusable server never stops all work. Paths outside git and the scratchpad are not gated; `HIPPIUS_MEM_HOOKS_BYPASS=1` turns it off, as it does upstream's per-repo gate. Counts allowed edits for the checkpoint. |
 | `memory/recall-seen.sh` | PostToolUse `mcp__hippius-mem__recall\|hippius-mem__recall\|mcp__hippius-mem__remember\|hippius-mem__remember`, PostToolUseFailure on the recall names | Records the time of the last recall and of the last failed one, and the edit count at the last `remember`, in `<session>.memory-*`. Recall is per session: a Claude subagent rides its parent's, a Grok subagent (its own session) recalls itself. |
-| `memory/remember-checkpoint.sh` | Stop | When the main agent of a session that recalled made edits since it was last asked and since its last `remember`, blocks the stop with one question: is there a durable decision, gotcha, convention or reference to record? Counts, not a once-per-session flag, so a stop another hook blocked does not use up the question. Not for subagents or a hook-driven continuation. |
+| `memory/remember-checkpoint.sh` | Stop | When the main agent of a session that recalled made edits since it was last asked and since its last `remember`, blocks the stop with one question: is there a durable decision, gotcha, convention or reference to record? At most once every 30 minutes, since each ask costs a turn: edits after an ask (the fix for a stop another hook blocked, the last half hour of a session) can go unasked. Counts, not a once-per-session flag. Not for subagents or a hook-driven continuation. |
 | `common.sh` | sourced | Shared helpers: input parsing, path resolution against the hook's `cwd`, per-agent state, edition and `max_width` lookup. |
 | `tests/run.sh` | `check.sh`, and CI | Fixture and hook-input tests for all of the above. Run after any hook change. |
 | `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`); `git clean -f`, `git reset --hard`, and a checkout or restore of the whole tree (stash first); any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`; `gh pr merge --admin`; and `cargo mutants` with more than 2 jobs (`-j`, `--jobs`, `CARGO_MUTANTS_JOBS`), `--timeout`/`-t`, or `--baseline=skip` (TST-20). Quoted text (a commit message, a grep pattern) and heredoc bodies are data and never match, unless the command hands them to a shell (`bash -c`, `eval`, a pipe or heredoc into a shell). Tested in `rust/tests/run.sh`. |
@@ -111,7 +116,8 @@ pull request (`scratch_exempt` in `common.sh`): the style gate skips an exempt p
 are formatted but not recorded, and the stop check does not count them. Review snapshots cover
 every worktree, exempt or not.
 
-State is per agent, kept in `$TMPDIR/claude-rust-hooks/<session>.<agent>.*`:
+State is per agent, kept in `$TMPDIR/claude-rust-hooks/<session>.<agent>.*` (pruned daily by
+`session-baseline.sh`; macOS does not clear `$TMPDIR` on its own):
 
 - A Claude subagent has its own `agent_id`.
 - A Grok subagent runs in its own session.
@@ -122,7 +128,7 @@ Differences between the two tools that the scripts handle:
 
 | | Claude Code | Grok |
 |---|---|---|
-| Edit tools | `Edit`, `Write`, `MultiEdit` | `search_replace`, `write` |
+| Edit tools | `Edit`, `Write`, `MultiEdit` | `search_replace`, `write`, `hashline_edit` |
 | Skill load | `Skill` tool, `tool_input.skill` | `read_file` of `SKILL.md`, `tool_input.target_file` |
 | Subagent identity | `agent_id` | separate `session_id` |
 | Stop loop guard | `stop_hook_active` | `stopHookActive` |
@@ -198,9 +204,9 @@ Air runs Grok (`grok agent --always-approve stdio`) and Claude Code as ACP agent
 
 `$SETUP/air/acp.json` is the shared template:
 
-- `@NODE@` and `@CLAUDE_ACP@` are placeholders for this machine's absolute `node` and
-  adapter script paths. `install.sh` fills them in, because Air started from the Dock may
-  not see nvm's PATH.
+- `@GROK@`, `@NODE@` and `@CLAUDE_ACP@` are placeholders for this machine's absolute
+  `grok`, `node` and adapter script paths. `install.sh` fills them in, because Air started
+  from the Dock may not see nvm's PATH (bare `grok` when grok is not installed yet).
 - After switching Node versions, re-run `install.sh`.
 - Agents added locally in Air are kept.
 - To share a new agent with every machine, add it to the template.
@@ -218,10 +224,12 @@ subscriptions have changed several times. If it stops being allowed, either:
   Settings > Themes shows `Dark-Blue` with comments in orange.
 
 - Claude: run `/memory` and confirm the `AGENTS.md` import. Run `/hooks` and confirm the
-  seven Rust hooks (style-gate, style-loaded, fmt-on-edit, tests-ran, review-done,
-  check-on-stop, and review-gate under PreToolUse `Bash`) and the three memory hooks
-  (recall-gate, recall-seen, remember-checkpoint).
-- Grok, from any directory: `grok inspect --json`.
+  eight Rust hooks (style-gate, style-loaded, fmt-on-edit, tests-ran, review-done,
+  check-on-stop, session-baseline under UserPromptSubmit, and review-gate under PreToolUse
+  `Bash`), `bash-guard` under PreToolUse `Bash`, and the three memory hooks (recall-gate,
+  recall-seen, remember-checkpoint).
+- Grok, from any directory: `grok inspect --json`. It does not list the hooks it reads
+  from `~/.claude/settings.json`; check those end to end (below).
   - `projectInstructions` lists `~/.grok/rules/AGENTS.md`, and `AGENTS.local.md` when the
     local layer has one.
   - `skills` has `rust-style`.
@@ -242,6 +250,7 @@ subscriptions have changed several times. If it stops being allowed, either:
   skips both suites).
   Every step must say `ok`.
 - End to end: in a scratch crate, ask either tool to add an `unsafe` function.
+  - Before the session's first recall, the edit is denied by recall-gate.
   - The first `.rs` edit is blocked until the agent loads `rust-style` and reads
     `topics/unsafe.md`.
   - The first `.py`, `.ts`, `.sh`, or workflow edit is blocked until that language's
@@ -316,7 +325,11 @@ stopped after the clone is finished by the next one.
   control), never in place.
 - After changing a hook or script, run `check.sh` and one end-to-end check in each tool.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
-  20 skill descriptions to every session. Turn one on for a project in that project's
+  20 skill descriptions to every session. Grok follows `enabledPlugins` for skills but loads
+  the hooks of every installed Claude plugin, enabled or not (grok 1.0.77; `grok inspect`
+  marks them all enabled, and `[plugins] disabled` in `~/.grok/config.toml` does not reach
+  them). So uninstall a plugin with hooks that should stay off (`claude plugin uninstall`),
+  rather than only disabling it. Turn one on for a project in that project's
   `.claude/settings.json` (`"enabledPlugins": {"cloudflare@cloudflare": true}`).
 - `claude/skills/security-audit/` holds Cloudflare's security-audit skill from
   https://github.com/cloudflare/security-audit-skill/tree/c1c8a8c1471069fb0e188eeaff69b8e8db6564a8/skills/security-audit
