@@ -332,26 +332,41 @@ setup_grok_review() {
 # moved onto the same daemon instead of starting its own stdio server, because a team note
 # records that concurrent writer processes under one identity are not serialized on S3 and
 # can permanently lose ops.
+#
+# Grok reads the token through `bearer_token_file`, so it never appears in argv, in Grok's
+# config, or in a backup of it. `grok mcp add` has no flag for that key, so the server is added
+# without auth and the key is written into its table here. Only the user-scope table is
+# managed; a repo's own `.grok/config.toml` entry for hippius-mem overrides it there.
 setup_memory() {
   local claude_json="$HOME/.claude.json" grok_config="$HOME/.grok/config.toml"
-  local token_file="$HOME/.config/hippius-mem/mcp-token" url relative
+  local token_file="$HOME/.config/hippius-mem/mcp-token" url table relative
   if ! command -v hippius-mem >/dev/null; then
     echo "missing hippius-mem: team memory is mandatory; install it with" \
       "https://github.com/thenervelab/hippius-mem/blob/db9261b1/FOR-AGENTS.md"
     return 0
   fi
-  url="$(jq -r '.mcpServers["hippius-mem"].url // empty' "$claude_json" 2>/dev/null || true)"
-  if [[ -z "$url" ]]; then
+  url="$(jq -r '.mcpServers["hippius-mem"] | if .url then .url elif .command then "stdio"
+    else empty end' "$claude_json" 2>/dev/null || true)"
+  case "$url" in
+  "")
     echo "missing hippius-mem in Claude: run \`hippius-mem install --agent claude\`, then" \
       "re-run install.sh"
     return 0
-  fi
+    ;;
+  stdio)
+    echo "ok      hippius-mem for Claude (stdio; no shared daemon to move Grok onto)"
+    return 0
+    ;;
+  esac
   echo "ok      hippius-mem for Claude ($url)"
 
   if ! command -v grok >/dev/null; then
     return 0
   fi
-  if grep -qxF "url = \"$url\"" "$grok_config" 2>/dev/null; then
+  table="$(awk '/^\[/ { in_table = ($0 == "[mcp_servers.hippius-mem]") } in_table' \
+    "$grok_config" 2>/dev/null || true)"
+  if grep -qxF "url = \"$url\"" <<<"$table" &&
+    grep -qxF "bearer_token_file = \"$token_file\"" <<<"$table"; then
     echo "ok      hippius-mem for Grok ($url)"
     return 0
   fi
@@ -359,13 +374,24 @@ setup_memory() {
     echo "skip    hippius-mem for Grok: no daemon token in $token_file"
     return 0
   fi
+
   if [[ -f "$grok_config" ]]; then
     relative="${grok_config#"$HOME"/}"
     mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
     cp "$grok_config" "$BACKUP_DIR/$relative"
   fi
-  grok mcp add --scope user --transport http hippius-mem "$url" \
-    --header "Authorization: Bearer $(cat "$token_file")" >/dev/null
+  if [[ -n "$table" ]]; then
+    grok mcp remove --scope user hippius-mem >/dev/null || true
+  fi
+  if ! grok mcp add --scope user --transport http hippius-mem "$url" >/dev/null; then
+    echo "warning: \`grok mcp add\` failed; Grok is not on the hippius-mem daemon" \
+      "(previous config in $BACKUP_DIR)"
+    return 0
+  fi
+  awk -v key="bearer_token_file = \"$token_file\"" \
+    '{ print } $0 == "[mcp_servers.hippius-mem]" { print key }' \
+    "$grok_config" >"$grok_config.new"
+  mv -f "$grok_config.new" "$grok_config"
   echo "updated hippius-mem for Grok: shared daemon $url (previous config in $BACKUP_DIR)"
 }
 

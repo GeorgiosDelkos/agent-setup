@@ -205,6 +205,15 @@
             "command": "bash ~/.claude/hooks/rust/tests-ran.sh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__hippius-mem__recall|hippius-mem__recall",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/memory/recall-seen.sh"
+          }
+        ]
       }
     ]
   },
