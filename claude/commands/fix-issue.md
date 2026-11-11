@@ -20,6 +20,7 @@ the fix needs an interface, data model, or architecture decision the issue does 
 Branch prefix from the issue type: `fix/` for bugs, `feat/` for features, `refactor/` for
 refactors, `docs/` for documentation (`fix/` when unclear). Create the branch
 `{prefix}issue-$ARGUMENTS` from the up-to-date default branch before changing anything.
+First prune the repo's finished worktrees (`review-pr.md`, Worktrees).
 
 Write the plan to `plan-issue-$ARGUMENTS.md` in the repo root:
 
@@ -63,7 +64,8 @@ ready instead), with:
 ## 7. Review, fix, and mark ready
 
 Run the `review-pr` command on the new PR number: read `~/.claude/commands/review-pr.md`
-and follow it (Claude may load it with the Skill tool). It reviews with the
+and follow it (Claude may load it with the Skill tool). Read that way, nothing fills in
+its `$ARGUMENTS`: substitute the new PR's number wherever it appears. It reviews with the
 fresh-context reviewers its tier calls for, posts the review on the PR, fixes the findings,
 pushes, and marks the PR ready.
 
