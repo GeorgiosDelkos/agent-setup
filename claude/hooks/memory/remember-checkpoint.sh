@@ -6,8 +6,9 @@
 #
 # State is counts, not a once-per-session flag: recall-gate.sh counts allowed edits, and
 # this hook and recall-seen.sh store the count they saw. So a session is asked again after
-# later work, and a Stop that another hook blocked in the same round (the clippy check) does
-# not use up the question: the agent fixes that, which edits, and is asked at the next stop.
+# later work (at most every ASK_INTERVAL_SECS), and a Stop that another hook blocked in the
+# same round (the clippy check) does not use up the question: the agent fixes that, which
+# edits, and is asked at the next stop.
 # Not asked: sessions that never recalled (hippius-mem was unavailable, so remember would
 # fail too), sessions that only answered questions, subagents, a hook-driven continuation
 # (common.sh stop_is_exempt, the loop guard), and HIPPIUS_MEM_HOOKS_BYPASS=1.
@@ -29,12 +30,20 @@ count() {
   echo "${value:-0}"
 }
 
+# Asked at most once per ASK_INTERVAL_SECS: each ask costs the agent a turn, and in a session
+# that edits on every prompt an ask per stop came to one extra turn per prompt. Edits made
+# since are asked about at the next stop past the interval. The recall window's length
+# (recall-gate.sh), so one ask covers about one recall's worth of work.
+ASK_INTERVAL_SECS=1800
 edits="$(count memory-edited)"
+now="$(date +%s)"
 if [[ ! -s "$(session_file memory-recall)" ]] || ((edits <= $(count memory-asked))) ||
-  ((edits <= $(count memory-remembered))); then
+  ((edits <= $(count memory-remembered))) ||
+  ((now - $(count memory-asked-at) < ASK_INTERVAL_SECS)); then
   exit 0
 fi
 echo "$edits" >"$(session_file memory-asked)"
+echo "$now" >"$(session_file memory-asked-at)"
 
 cat >&2 <<'EOF'
 hippius-mem remember checkpoint: did this work produce a durable, team-relevant learning

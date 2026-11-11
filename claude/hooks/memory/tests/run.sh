@@ -219,8 +219,11 @@ expect "checkpoint: session that edited is asked" 2 remember-checkpoint.sh "$(st
 expect "checkpoint: not asked again without new edits" 0 remember-checkpoint.sh \
   "$(stop d3)" ""
 run_hook recall-gate.sh "$(edit d3 "$FILE")"
-expect "checkpoint: asked again after later edits" 2 remember-checkpoint.sh "$(stop d3)" \
-  "remember checkpoint"
+expect "checkpoint: not asked again within the interval" 0 remember-checkpoint.sh \
+  "$(stop d3)" ""
+echo $(($(date +%s) - 1801)) >"$STATE/d3.memory-asked-at"
+expect "checkpoint: asked again after later edits, past the interval" 2 \
+  remember-checkpoint.sh "$(stop d3)" "remember checkpoint"
 run_hook recall-gate.sh "$(edit d3 "$FILE")"
 run_hook recall-seen.sh "$(tool_call d3 hippius-mem__remember)"
 expect "checkpoint: not asked after a remember" 0 remember-checkpoint.sh "$(stop d3)" ""
