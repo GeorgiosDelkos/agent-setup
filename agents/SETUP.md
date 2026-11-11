@@ -57,9 +57,11 @@ machine reaches every machine.
 `settings.json` is the one file that is not linked: Claude Code rewrites it in place, which
 would replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
 merges it in: shared keys win, local-only keys stay, and an array (a hook list) keeps the
-local entries another tool added. It records the shared copy under
-`~/.local/state/agent-setup/`, so a key, hook event or hook the shared copy drops is removed
-from the machine at the next install. To share a setting with every
+local entries another tool added, a command added inside a shared hook group included. It
+records the shared copy under `~/.local/state/agent-setup/`, so a key, hook event or hook
+the shared copy drops later is removed from the machine at the next install. The first
+install on a machine has no record yet: it keeps every local key, and a key the shared copy
+dropped before then stays until removed by hand. To share a setting with every
 machine, add only its key to `claude/settings.json` in a clone, through a PR. Copying the
 whole local file would also share machine-local keys (an effort level, a model override).
 

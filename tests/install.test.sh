@@ -52,6 +52,34 @@ out="$(merge_json '{"b": 2, "hooks": {}}' "$file")"
 check "idempotent: file" "$before" "$(cat "$file")"
 check "idempotent: says ok" "ok      $file" "$out"
 
+# A command added inside a shared hook group (Claude's /hooks does that) joins that group,
+# not a second copy of it; when the shared group changes, the added command stays with it.
+group() { jq -nc --arg c "$1" '{matcher: "", hooks: [{type: "command", command: $c}]}'; }
+shared="{\"hooks\": {\"Stop\": [$(group a)]}}"
+merge_json "$shared" "$file" >/dev/null
+jq -c '.hooks.Stop[0].hooks += [{type: "command", command: "mine"}]' "$file" >"$file.tmp"
+mv "$file.tmp" "$file"
+merge_json "$shared" "$file" >/dev/null
+check "hook group: added command merged, shared hook once" '["a","mine"]' \
+  "$(jq -c '[.hooks.Stop[].hooks[].command]' "$file")"
+merge_json "{\"hooks\": {\"Stop\": [$(group b)]}}" "$file" >/dev/null
+check "hook group: shared hook replaced, added command kept" '["b","mine"]' \
+  "$(jq -c '[.hooks.Stop[].hooks[].command]' "$file")"
+
+# Keys keep the local file's order, so a file Claude Code wrote in its own order is unchanged.
+printf '{"zeta": 1, "model": "x"}\n' >"$file"
+check "key order: unchanged file says ok" "ok      $file" "$(merge_json '{"model": "x"}' "$file")"
+
+# A damaged record (a crash mid-write) counts as no record instead of stopping the install.
+record="$HOME/.local/state/agent-setup/.claude/settings.json"
+for damage in '{"trunc' ''; do
+  printf '%s' "$damage" >"$record"
+  code=0
+  merge_json '{"model": "x"}' "$file" >/dev/null 2>&1 || code=$?
+  check "damaged record '$damage': merge still runs" 0 "$code"
+  check "damaged record '$damage': record rewritten" '{"model":"x"}' "$(jq -c . "$record")"
+done
+
 # Before any record of the shared copy (a machine set up earlier), arrays come from the
 # shared copy whole and no key is removed, as before the record existed.
 trash "$HOME/.local/state/agent-setup"

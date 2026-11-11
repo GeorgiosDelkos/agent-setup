@@ -43,45 +43,68 @@ link() {
 # so a setting or hook event removed from the shared file leaves every machine. An array is
 # the shared one plus the local entries that neither the shared copy has nor it had last
 # time: those are another tool's (a hook another tool registered under PreToolUse), while an
-# entry the shared copy dropped goes. Without $p, arrays are taken from the shared copy
-# whole, as before this record existed, because no local entry can be told apart yet.
+# entry the shared copy dropped goes. A hook group (an object with `hooks`) whose matcher a
+# shared group has is merged into that group instead, hook by hook the same way: Claude's
+# /hooks adds a command inside the existing group, and keeping the whole local group beside
+# the shared one would run the shared hooks twice. Without $p, arrays are taken from the
+# shared copy whole, as before this record existed, because no local entry can be told apart
+# yet. Keys keep the local file's order, then the shared copy's new keys: sorting them would
+# differ from the order Claude Code writes, and every install would report a change.
 # shellcheck disable=SC2016 # jq variables, not shell ones
 MERGE_JQ='
+def new_in($a; $s; $p): [$a[] | select(. as $x | ($s | index([$x])) == null
+  and ($p | index([$x])) == null)];
+def group($x): ($x | type) == "object" and ($x | has("hooks"));
 def merge($l; $s; $p):
   if ($s | type) == "object" and ($l | type) == "object" then
-    reduce ((($l | keys) + ($s | keys)) | unique)[] as $k ({};
+    reduce (($l | keys_unsorted)
+      + [($s | keys_unsorted)[] | select(. as $k | $l | has($k) | not)])[] as $k ({};
       if $s | has($k) then
         .[$k] = merge($l[$k]; $s[$k]; (if ($p | type) == "object" then $p[$k] else null end))
       elif ($p | type) == "object" and ($p | has($k)) then .
       else .[$k] = $l[$k]
       end)
   elif ($s | type) == "array" and ($l | type) == "array" and ($p | type) == "array" then
-    $s + [$l[] | select(. as $x | ($s | index([$x])) == null and ($p | index([$x])) == null)]
+    new_in($l; $s; $p) as $extra
+    | [$s[] | . as $g
+        | if group($g) then
+            [$extra[] | select(group(.) and .matcher == $g.matcher) | .hooks[]] as $more
+            | [$p[] | select(group(.) and .matcher == $g.matcher) | .hooks[]] as $old
+            | .hooks += new_in($more; $g.hooks; $old)
+          else . end]
+      + [$extra[] | select(. as $x | group($x)
+          and any($s[]; group(.) and .matcher == $x.matcher) | not)]
   else $s
   end;
 merge($l; $s; $p)'
 
 # Merge the shared JSON text $1 into the file $2 (MERGE_JQ says how; local-only keys, and
 # the whole file on a fresh machine, are kept). The shared copy is recorded under
-# ~/.local/state/agent-setup/ for the next merge. The previous file goes to the backup dir,
-# at its path relative to $HOME.
+# ~/.local/state/agent-setup/ for the next merge, only after the file is written: recorded
+# first, a crash in between would make the next merge treat a dropped key as local. It is
+# written through a rename, and a record that is not valid JSON counts as none. The previous
+# file goes to the backup dir, at its path relative to $HOME.
 merge_json() {
-  local shared="$1" local_file="$2" merged relative last
+  local shared="$1" local_file="$2" merged relative last previous
   relative="${local_file#"$HOME"/}"
   last="$HOME/.local/state/agent-setup/$relative"
   mkdir -p "$(dirname "$last")"
   if [[ ! -f "$local_file" ]]; then
     mkdir -p "$(dirname "$local_file")"
     printf '%s\n' "$shared" >"$local_file"
-    printf '%s\n' "$shared" >"$last"
+    record_shared "$shared" "$last"
     echo "copied  $local_file"
     return 0
   fi
 
-  merged="$(jq -n --slurpfile l "$local_file" --argjson s "$shared" \
-    --argjson p "$(cat "$last" 2>/dev/null || echo null)" '$l[0] as $l | '"$MERGE_JQ")"
-  printf '%s\n' "$shared" >"$last"
+  previous="$(jq -c . "$last" 2>/dev/null || true)"
+  if [[ -z "$previous" || "$previous" == *$'\n'* ]]; then
+    previous=null
+  fi
+  merged="$(jq -n --slurpfile l "$local_file" --argjson s "$shared" --argjson p "$previous" \
+    '$l[0] as $l | '"$MERGE_JQ")"
   if [[ "$merged" == "$(jq . "$local_file")" ]]; then
+    record_shared "$shared" "$last"
     echo "ok      $local_file"
     return 0
   fi
@@ -89,7 +112,14 @@ merge_json() {
   mkdir -p "$BACKUP_DIR/$(dirname "$relative")"
   cp "$local_file" "$BACKUP_DIR/$relative"
   printf '%s\n' "$merged" >"$local_file"
+  record_shared "$shared" "$last"
   echo "merged  $local_file (previous copy in $BACKUP_DIR)"
+}
+
+# Write the shared JSON text $1 to the record $2, through a rename.
+record_shared() {
+  printf '%s\n' "$1" >"$2.new"
+  mv -f "$2.new" "$2"
 }
 
 # Register Grok and Claude Code as ACP agents in JetBrains Air. The Claude adapter is pinned
