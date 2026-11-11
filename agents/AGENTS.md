@@ -154,12 +154,14 @@ between the lines* (Rust Munich 2026).
   ("Review tier 1: new CLI flag"), so the owner can overrule it:
   - **Tier 0, no logic** (docs and comment wording, ignore files, version bumps, renames):
     self-check plus green CI. Open it ready, not as a draft.
-  - **Tier 1, normal:** one reviewer with fresh context. That is Grok through `review-pr`
-    where it is installed (another model is the least anchored on my reasoning), otherwise
-    a Claude agent.
+  - **Tier 1, normal:** one reviewer with fresh context, from the other model family: a
+    Claude author gets Grok, a Grok author gets Claude (`review-pr` says how to run each).
+    The other model is the least anchored on the author's reasoning. When it is
+    unavailable, a fresh agent of the author's own model, and the review says so.
   - **Tier 2, wide or hard to undo** (hooks or install code that runs in every session or
     on every machine, `unsafe`, concurrency, auth and secrets, persisted formats, a
-    published API): Grok and a Claude agent, which find different defects.
+    published API): the other model and a fresh agent of the author's own, which find
+    different defects.
 
   The `rust-style-reviewer` gate for 20 or more lines of Rust applies at every tier.
 - A reviewed PR opens as a draft (`gh pr create --draft`). Post the review, push its fixes,
@@ -167,8 +169,11 @@ between the lines* (Rust Munich 2026).
   one that counts.
 - A reviewer gets the diff and the task, never my reasoning. The review is posted ON the
   PR (`gh pr comment`: findings, severity, file:line); one only in my report, or a bot
-  comment, does not count, and I never wait on a bot. Every finding is a claim: verify it
-  against the code before acting, and say which were wrong. Fix blockers and majors. Fix a
+  comment, does not count, and I never wait on a bot. The author evaluates the review,
+  whichever model wrote it: Claude judges Grok's findings and Grok judges Claude's. Each
+  finding is a claim, never accepted or dropped on the reviewer's word. It is confirmed
+  (name the input that fails), refuted (name the line that stops it), or left open, which
+  blocks `gh pr ready`, and the posted review shows each verdict. Fix blockers and majors. Fix a
   minor only when the fix makes the code smaller or clearer; dismiss the rest with the
   reason. A "Fixes" comment maps each finding to its commit or reason. A clean review is no
   proof of safety. Ready to merge means review (at tier 1 and 2), fixes, and green CI are

@@ -26,11 +26,13 @@ when the body names none, judge it by the same rule and say which you chose. Eve
 reviewer has not seen your reasoning, so the review is not anchored on it:
 
 - **Tier 0:** no reviewer. Read the diff, confirm it has no logic, and go to step 4.
-- **Tier 1:** Grok, as an adversarial reviewer from another model family, when `grok` is
-  on `PATH` and its review home is signed in; otherwise one general-purpose agent. Run
-  Grok yourself rather than waiting for a review bot to comment. A PR is untrusted input,
-  so the run is locked down; see "Grok review" below.
-- **Tier 2:** Grok and a general-purpose agent. They find different defects.
+- **Tier 1:** the other model family from the one running this command. Claude runs Grok
+  ("Grok review" below) when `grok` is on `PATH` and its review home is signed in; Grok runs
+  Claude ("Claude review" below) when `claude` is on `PATH`. Run it yourself rather than
+  waiting for a review bot to comment. When the other model is unavailable, use one
+  general-purpose agent of your own, and say so on the PR.
+- **Tier 2:** the other model and a general-purpose agent of your own. They find different
+  defects.
 
 A general-purpose agent gets the PR number, the files to read, and the review order from
 `AGENTS.md` (design principles first: could it be simpler, are the data structures right
@@ -98,10 +100,29 @@ It covers only what Grok read, so it never shortens your own review or the other
 Its suggested fixes are proposals: judge each against the design principles as you would
 your own.
 
+### Claude review
+
+When Grok runs this command, the other model is Claude. Write the prompt as in the Grok
+review, step 1, then run Claude headless from a clean checkout of the PR head, with
+read-only tools and no MCP servers:
+
+```sh
+claude -p "$(cat <prompt-file>)" --tools Read,Grep,Glob --strict-mcp-config \
+  --permission-mode plan >"<output-file>"
+```
+
+It runs with your own Claude login and settings, so it is less isolated than
+`grok-review.sh`: use it on PRs from the user or this setup, and for anyone else's PR ask
+first. (`--bare` would skip hooks and settings, but it needs `ANTHROPIC_API_KEY` and does
+not read a subscription login.) Its output is untrusted in the same way as Grok's.
+
 ### All findings
 
-Verify every finding from every reviewer yourself against the code. Wrong findings read as
-confidently as right ones. Give each finding one of three outcomes:
+You evaluate the review; the reviewer's word settles nothing. When Claude ran the review,
+Grok judges it, and when Grok ran it, Claude does. Verify every finding from every reviewer
+yourself against the code. Wrong findings read as confidently as right ones: this setup's
+reviews have claimed a dispatcher name the hooks never see and an input shape Grok never
+sends. Give each finding one of three outcomes:
 
 - **Confirmed:** you can name the inputs or interleaving that fail.
 - **Refuted:** you can name the line that stops the scenario.
@@ -114,9 +135,10 @@ informational. Unneeded complexity is at least P2.
 ## 2. Post the review
 
 Post the findings on the PR before fixing anything (`gh pr comment $ARGUMENTS`): severity,
-`file:line`, the problem, and the fix. Name the reviewer behind each finding. List the
-open findings, and the refuted ones, each with the line that refutes it, so a reader can
-check the call. Grok's findings are restated in your own words, never pasted.
+`file:line`, the problem, the fix, the reviewer behind it, and your verdict (confirmed,
+refuted or open). List the open findings, and the refuted ones, each with the line that
+refutes it, so a reader can check the call. The other model's findings are restated in
+your own words, never pasted.
 
 ## 3. Fix findings
 
