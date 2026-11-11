@@ -1630,6 +1630,20 @@ run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
 check "lang-stop: Rust without cargo still names the missing tool" "$(
   [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *cargo* ]] && echo yes
 )" "exit $code: $out"
+# The next turn's stop, with the same Rust, was told already: it passes and keeps the file.
+run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
+check "lang-stop: missing cargo blocks once per Rust state" "$([[ $code -eq 0 ]] && echo yes)" \
+  "exit $code: $out"
+printf 'fn main() { let _ = 2; }\n' >"$RN/src/main.rs"
+run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
+check "lang-stop: missing cargo blocks again once the Rust changes" "$(
+  [[ $code -eq 2 && "$out" == *"missing tool"* ]] && echo yes
+)" "exit $code: $out"
+check "subagent stop: no empty state file for an agent with no edits" "$(
+  run_hook check-on-stop.sh "$(jq -nc '{session_id: "noedit", hook_event_name: "SubagentStop",
+    agent_id: "a1", cwd: "/"}')"
+  compgen -G "$STATE_TMP/claude-rust-hooks/noedit.a1.edited" >/dev/null || echo yes
+)"
 MXN="$WORK/mixed-nocargo"
 new_crate_repo "$MXN" "" plain
 prompt mxn "$MXN"
@@ -1640,6 +1654,66 @@ check "lang-stop: missing cargo still asks about Python" "$(
   [[ $code -eq 2 && "$out" == *"missing tool"* && "$out" == *"this Python changed"* ]] &&
     echo yes
 )" "exit $code: $out"
+
+# Grok's stop fields: camelCase stopHookActive, and the observe-only stop at session end.
+GS="$WORK/grok-stop"
+mkdir -p "$GS"
+printf 'x = 1\n' >"$GS/app.py"
+git -C "$GS" init -q -b main
+old_commit "$GS" init
+prompt gs "$GS"
+printf 'x = 2\n' >"$GS/app.py"
+run_hook check-on-stop.sh "$(cstop gs "$GS" '{"reason": "shutdown"}')" "$NOCARGO"
+check "grok stop: the shutdown stop never blocks" "$([[ $code -eq 0 ]] && echo yes)" \
+  "exit $code: $out"
+run_hook check-on-stop.sh "$(cstop gs "$GS" '{"reason": "channel_closed"}')" "$NOCARGO"
+check "grok stop: channel_closed never blocks" "$([[ $code -eq 0 ]] && echo yes)" \
+  "exit $code: $out"
+run_hook check-on-stop.sh "$(cstop gs "$GS" '{"stopHookActive": true}')" "$NOCARGO"
+check "grok stop: stopHookActive passes" "$([[ $code -eq 0 ]] && echo yes)" "exit $code: $out"
+printf 'x = 3\n' >"$GS/app.py"
+run_hook check-on-stop.sh "$(cstop gs "$GS" '{"stopHookActive": false}')" "$NOCARGO"
+check "grok stop: a real stop still asks after those" "$(
+  [[ $code -eq 2 && "$out" == *"this Python changed"* ]] && echo yes
+)" "exit $code: $out"
+
+# Cursor names the edited file tool_input.path.
+expect "cursor: tool_input.path is gated" 2 style-gate.sh "$(jq -nc --arg p "$LIB/src/c.rs" \
+  '{session_id: "cur1", tool_name: "Edit", tool_input: {path: $p, new_string: "fn a() {}"}}')" \
+  "$SKILL/SKILL.md"
+
+# The early exits: a Skill call still records (its input names no path), and a test run
+# whose output comes before its command still counts.
+run_hook style-loaded.sh "$(skill early1)"
+check "style-loaded: a Skill call passes the early exit" "$(
+  [[ -f "$STATE_TMP/claude-rust-hooks/early1.main.style-loaded" ]] && echo yes
+)"
+run_hook tests-ran.sh '{"session_id": "early2", "tool_response": {"stdout": "ok"},
+  "tool_name": "Bash", "tool_input": {"command": "cargo test"}}'
+check "tests-ran: output before the command still counts" "$(
+  [[ -f "$STATE_TMP/claude-rust-hooks/early2.tests-ran" ]] && echo yes
+)"
+run_hook tests-ran.sh '{"session_id": "early3", "tool_name": "Bash",
+  "tool_input": {"command": "ls"}, "tool_response": {"stdout": "cargo test"}}'
+check "tests-ran: output that names a test run is no test run" "$(
+  [[ ! -e "$STATE_TMP/claude-rust-hooks/early3.tests-ran" ]] && echo yes
+)"
+
+# Daily prune of the hook state: old session files and old review snapshots go, recent
+# ones stay, and a second prompt the same day does not scan again.
+PS="$STATE_TMP/claude-rust-hooks"
+mkdir -p "$PS/review-prunetest"
+touch -t 202001010000 "$PS/prune-old.main.edited" "$PS/review-prunetest/old.abc"
+touch "$PS/prune-new.main.edited" "$PS/review-prunetest/new.abc"
+rm -f "$PS/pruned"
+prompt prune1 "$WORK"
+check "prune: old session file deleted" "$([[ ! -e "$PS/prune-old.main.edited" ]] && echo yes)"
+check "prune: old snapshot deleted" "$([[ ! -e "$PS/review-prunetest/old.abc" ]] && echo yes)"
+check "prune: recent files kept" "$([[ -e "$PS/prune-new.main.edited" &&
+  -e "$PS/review-prunetest/new.abc" ]] && echo yes)"
+touch -t 202001010000 "$PS/prune-old2.main.edited"
+prompt prune2 "$WORK"
+check "prune: at most once a day" "$([[ -e "$PS/prune-old2.main.edited" ]] && echo yes)"
 
 # ---- 4. bash guard ---------------------------------------------------------------------------
 

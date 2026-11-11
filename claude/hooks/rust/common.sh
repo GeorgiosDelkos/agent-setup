@@ -6,7 +6,8 @@
 # State is per agent: subagents share their parent's session id but report their own
 # `agent_id`, and each has its own context, so a skill loaded by the parent is not loaded
 # for a subagent, and a subagent's edits are checked when that subagent stops. State lives
-# under $TMPDIR, so it is cleared on reboot and never leaks between sessions.
+# under $TMPDIR, in files named by session, so it never leaks between sessions; macOS does
+# not clear it reliably, so session-baseline.sh prunes it once a day.
 
 set -euo pipefail
 

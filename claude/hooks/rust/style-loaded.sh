@@ -10,9 +10,17 @@
 # ever read, never loaded as skills.
 set -euo pipefail
 
+input="$(cat)"
+# This hook runs after every Read and Bash call. Only a Skill call or input that names a
+# skills directory can load anything, so every other call leaves here, before common.sh
+# and jq start (about 25 ms each). `skills` without the slash: JSON may escape it as `\/`.
+case "$input" in
+*'"Skill"'* | *skills*) ;;
+*) exit 0 ;;
+esac
 # shellcheck source-path=SCRIPTDIR source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-read_hook_input
+HOOK_INPUT="$input"
 need_tools fail-open jq
 
 # Skill files read whole by the shell command $1, one path per line: every house skill
