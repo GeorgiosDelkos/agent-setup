@@ -4,8 +4,10 @@ load the rust-style skill first and apply the checklist in
 ~/.claude/agents/rust-style-reviewer.md. For other languages, load the matching *-style skill.
 
 Read every changed file in full, not only the hunks. For Rust changes I explicitly ask you to
-run `cargo clippy --all-targets --all-features -- -D warnings` once and report only whether it
-is clean. Do not comment on anything rustfmt or the repo's lint config already enforces.
+run `cargo clippy --all-targets -- -D warnings` once (with `--all-features` only when
+`[workspace.metadata.house-check]` sets `all-features = true`, as the reviewer does) and report
+only whether it is clean. Do not comment on anything rustfmt or the repo's lint config already
+enforces.
 
 Check in this order:
 1. Design: could it be simpler? Abstractions without a second real use (one-impl trait,

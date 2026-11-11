@@ -84,10 +84,10 @@ sandbox settings would close that.
 
 | Script | Event and matcher | Effect |
 |---|---|---|
-| `style-gate.sh` | PreToolUse `Edit\|Write\|MultiEdit\|search_replace\|write\|hashline_edit` | Blocks an agent's first `.rs` edit until it has loaded `rust-style`, and any edit whose new text touches a topic (unsafe, concurrency, async, library API, testing, repo setup) until it has read `rust-style/topics/<topic>.md`. A `.py`, `.pyi`, `.ts`/`.js`, `.sh`, workflow, or Dependabot edit is blocked until `python-style`, `ts-style`, `bash-style`, or `gh-actions-style` is loaded; one deny lists the Rust files and the language skill together. A skill or topic file that is not installed is not required, and `node_modules`, `target`, `vendor`, `dist`, `__pycache__`, `.venv`, and `venv` are not gated. The deny reason (JSON `permissionDecisionReason`, read by both tools) lists exactly what to load. Without jq it fails open with a message rather than block every edit. |
+| `style-gate.sh` | PreToolUse `Edit\|Write\|MultiEdit\|search_replace\|write\|hashline_edit` | Blocks an agent's first `.rs` edit until it has loaded `rust-style`, and any edit whose new text touches a topic (unsafe, concurrency, async, library API, testing, repo setup; and low-level, for any `.rs` edit in a crate that sets `low-level = true`) until it has read `rust-style/topics/<topic>.md`. A `.py`, `.pyi`, `.ts`/`.js`, `.sh`, workflow, or Dependabot edit is blocked until `python-style`, `ts-style`, `bash-style`, or `gh-actions-style` is loaded; one deny lists the Rust files and the language skill together. A skill or topic file that is not installed is not required, and `node_modules`, `target`, `vendor`, `dist`, `__pycache__`, `.venv`, and `venv` are not gated. The deny reason (JSON `permissionDecisionReason`, read by both tools) lists exactly what to load. Without jq it fails open with a message rather than block every edit. |
 | `style-loaded.sh` | PostToolUse `Skill\|Read\|read_file\|Bash` | Marks `rust-style` as loaded (Claude's Skill tool, reading its `SKILL.md` as Grok does, or a whole-file `cat` of it in Bash), and marks each topic file read the same ways. Those same reads mark `python-style`, `ts-style`, `bash-style`, and `gh-actions-style` loaded. Partial reads do not count: `head`, `sed -n`, `cat | head`, or a Read/read_file with `limit` or an `offset` past line 1. Grok's `read_file` of `SKILL.md` still counts, because that tool returns the file whole and ignores `offset` and `limit`. |
 | `fmt-on-edit.sh` | PostToolUse, edit tools | Formats the edited `.rs` file right away through stdin (so declared child modules are never touched; the repo's rustfmt.toml is honoured), and records it; also records edited `Cargo.toml`. Python, TypeScript, shell, and workflow files are recorded and not formatted, so a repo that uses its own formatter is left alone. A syntax error is fed back to the agent. |
-| `check-on-stop.sh` | Stop and SubagentStop, timeout 600 | Main agent: every repo this session changed (recorded edits plus the branch's git changes since its merge-base with the default branch, so Bash edits and commits count). Subagent: only the paths it recorded; skipped if none. Runs clippy over the changed packages and their workspace dependents with the repo's own lint tables and `clippy.toml` plus `minimal-lints.toml` (default features unless `[workspace.metadata.house-check]` says otherwise, `--cap-lints warn --keep-going`). It never injects the house template, so it checks what `cargo clippy` and CI check. In a repo that opted in (`baseline = true` in that table) it then runs `house-check.pl` and the `max_width` column check, and reports an opted-in repo that has not committed a lint table. Compiler errors block; lint and house-check findings only on changed lines. Last, `.rs` files modified this session after its last test run ask for one, and Python, TypeScript, shell, and workflow files ask once for that language's own check. tests-ran.sh records the check, including the project's runner (`npm test`, `make test`, `check.sh`); a cargo run does not, and a Python edit does not re-run clippy on Rust that was already checked. Blocks once per changed state; internal failures exit 1 and never block. |
+| `check-on-stop.sh` | Stop and SubagentStop, timeout 600 | Main agent: every repo this session changed (recorded edits plus the branch's git changes since its merge-base with the default branch, so Bash edits and commits count). Subagent: only the paths it recorded; skipped if none. Runs clippy over the changed packages and their workspace dependents with the repo's own lint tables and `clippy.toml` plus `minimal-lints.toml` (default features unless `[workspace.metadata.house-check]` says otherwise, `--cap-lints warn --keep-going`). It never injects the house template, so it checks what `cargo clippy` and CI check. In a repo that opted in (`baseline = true` in that table) it then runs `house-check.pl` and the `max_width` column check, and reports an opted-in repo that has not committed a lint table. Compiler errors block; lint and house-check findings only on changed lines. Last, `.rs` files modified this session after its last test run ask for one, and Python, TypeScript, shell, and workflow files ask once for that language's own check. tests-ran.sh records the check, including the project's runner (`npm test`, `make test`, `check.sh`); a cargo run does not, and a Python edit does not re-run clippy on Rust that was already checked. Blocks once per changed state; internal failures exit 1 and never block. Gap: a repo the session touched only through Bash, never its cwd at a prompt nor an edit-tool target, gets its baseline at the first stop and reads as unchanged, so those Bash edits are not checked. |
 | `tests-ran.sh` | PostToolUse and PostToolUseFailure `Bash` (a failing run counts) | Records that the session ran Rust tests (`cargo test`/`t`/`nextest`/`mutants`, with toolchain and global flags and through `miri`, `hack`, `llvm-cov`, `insta`; not `--no-run` or `nextest list`), as the modification time of one session file, for check-on-stop. A pytest, ruff (not `ruff format`), pyright, mypy, `ty check`, tox, nox, unittest, vitest, oxlint, tsc, jest, eslint, shellcheck, `shfmt -d` (not `shfmt -w`), bats, `check.sh`, actionlint, or zizmor run is recorded on that language's own stamp, as are `npm`/`pnpm`/`yarn`/`bun` `test`/`lint`/`check`, `node --test`, and `make`/`just` `test`/`lint`/`check` (`make` and `just` stamp every language skill, not the Rust test run). A formatter run does not. Commands that match none of these exit before jq starts. |
 | `run-clippy.sh` | called by check-on-stop | Clippy scoped to the changed packages plus their workspace dependents (whole workspace for a root-manifest change), per-package runs for members with their own `[lints]`, read as JSON. |
 | `house-metadata.pl` | called by the hooks | Reads `[workspace.metadata.house-check]`: the `baseline` opt-in and the feature set. Also decides whether a crate is published (opt-in: `publish = ["crates-io"]`/`true`, or inherited through `publish.workspace = true`). |
@@ -122,7 +122,7 @@ Differences between the two tools that the scripts handle:
 
 | | Claude Code | Grok |
 |---|---|---|
-| Edit tools | `Edit`, `Write`, `MultiEdit` | `search_replace`, `write` |
+| Edit tools | `Edit`, `Write`, `MultiEdit` | `search_replace`, `write`, `hashline_edit` |
 | Skill load | `Skill` tool, `tool_input.skill` | `read_file` of `SKILL.md`, `tool_input.target_file` |
 | Subagent identity | `agent_id` | separate `session_id` |
 | Stop loop guard | `stop_hook_active` | `stopHookActive` |
@@ -198,9 +198,9 @@ Air runs Grok (`grok agent --always-approve stdio`) and Claude Code as ACP agent
 
 `$SETUP/air/acp.json` is the shared template:
 
-- `@NODE@` and `@CLAUDE_ACP@` are placeholders for this machine's absolute `node` and
-  adapter script paths. `install.sh` fills them in, because Air started from the Dock may
-  not see nvm's PATH.
+- `@GROK@`, `@NODE@` and `@CLAUDE_ACP@` are placeholders for this machine's absolute
+  `grok`, `node` and adapter script paths. `install.sh` fills them in, because Air started
+  from the Dock may not see nvm's PATH (bare `grok` when grok is not installed yet).
 - After switching Node versions, re-run `install.sh`.
 - Agents added locally in Air are kept.
 - To share a new agent with every machine, add it to the template.
@@ -218,10 +218,13 @@ subscriptions have changed several times. If it stops being allowed, either:
   Settings > Themes shows `Dark-Blue` with comments in orange.
 
 - Claude: run `/memory` and confirm the `AGENTS.md` import. Run `/hooks` and confirm the
-  seven Rust hooks (style-gate, style-loaded, fmt-on-edit, tests-ran, review-done,
-  check-on-stop, and review-gate under PreToolUse `Bash`) and the three memory hooks
-  (recall-gate, recall-seen, remember-checkpoint).
-- Grok, from any directory: `grok inspect --json`.
+  eight Rust hooks (style-gate, style-loaded, fmt-on-edit, tests-ran, review-done,
+  check-on-stop, session-baseline under UserPromptSubmit, and review-gate under PreToolUse
+  `Bash`), `bash-guard` under PreToolUse `Bash`, and the three memory hooks (recall-gate,
+  recall-seen, remember-checkpoint).
+- Grok, from any directory: `grok inspect --json`. It does not list the hooks it reads
+  from `~/.claude/settings.json`; check those end to end (below): an edit in a git repo
+  before any recall is denied by recall-gate.
   - `projectInstructions` lists `~/.grok/rules/AGENTS.md`, and `AGENTS.local.md` when the
     local layer has one.
   - `skills` has `rust-style`.
@@ -242,6 +245,7 @@ subscriptions have changed several times. If it stops being allowed, either:
   skips both suites).
   Every step must say `ok`.
 - End to end: in a scratch crate, ask either tool to add an `unsafe` function.
+  - Before the session's first recall, the edit is denied by recall-gate.
   - The first `.rs` edit is blocked until the agent loads `rust-style` and reads
     `topics/unsafe.md`.
   - The first `.py`, `.ts`, `.sh`, or workflow edit is blocked until that language's
