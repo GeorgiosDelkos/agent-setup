@@ -10,7 +10,7 @@ stdin_data=$(cat)
 
 IFS=$'\t' read -r current_dir model_name lines_added lines_removed duration_ms ctx_used \
   cache_pct < <(
-  echo "$stdin_data" | jq -r '[
+    echo "$stdin_data" | jq -r '[
         .workspace.current_dir // "unknown",
         .model.display_name // "Unknown",
         (.cost.total_lines_added // 0),
@@ -34,7 +34,7 @@ IFS=$'\t' read -r current_dir model_name lines_added lines_removed duration_ms c
             else 0 end
         ) catch 0)
     ] | @tsv'
-)
+  )
 
 if [ -z "$current_dir" ] && [ -z "$model_name" ]; then
   current_dir=$(echo "$stdin_data" |
