@@ -82,8 +82,10 @@ fi
 echo review >>"$log.order"
 printf '%s\n' "$@" >"$log.args"
 env >"$log.env"
-lock_state=free
-[[ -f "$GROK_HOME/review.lock/pid" ]] && lock_state=held
+lock_state=held
+perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 2;
+  flock($f, LOCK_EX | LOCK_NB) or exit 1' \
+  "$GROK_HOME/review.lock" && lock_state=free
 echo "$lock_state" >"$log.lock"
 cwd=""
 while [[ $# -gt 0 ]]; do
@@ -121,12 +123,30 @@ case "$STUB_MODE" in
   empty) ;;
   leak) echo "the key is $STUB_SECRET" ;;
   hang) exec sleep "$(cat "$dir/stub.sleep")" ;;
+  # Ignores TERM, as a hung review might: only KILL stops it.
+  deaf)
+    trap "" TERM
+    exec sleep "$(cat "$dir/stub.sleep")"
+    ;;
 esac
 EOF
 chmod +x "$stub"
 
 printf '%s\n' "$secret" >"$WORK/stub.secret"
 printf 'ok\n' >"$WORK/stub.signin"
+
+# Whether the review lock is free: no process holds review.lock.
+lock_free() {
+  perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 2;
+    flock($f, LOCK_EX | LOCK_NB) or exit 1' "$home/review.lock"
+}
+# Another review holds the lock, as process $holder, until it is killed.
+hold_lock() {
+  perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or die; flock($f, LOCK_EX) or die;
+    sleep 60' "$home/review.lock" &
+  holder=$!
+  until ! lock_free; do sleep 0.1; done
+}
 
 run() {
   local mode="$1" out="$2"
@@ -194,7 +214,7 @@ check "review: the user's HOME, which the profile's ~ denies are written against
   "$(grep -qxF "HOME=$HOME" "$WORK/log.env" && echo yes || echo no)"
 check "review: runs under the lock" "$([[ "$(cat "$WORK/log.lock")" == held ]] &&
   echo yes || echo no)"
-check "ok: lock released" "$([[ ! -e "$home/review.lock" ]] && echo yes || echo no)"
+check "ok: lock released" "$(lock_free && echo yes || echo no)"
 check "signin: GROK_HOME is the review home" "$(grep -qxF "GROK_HOME=$home" \
   "$WORK/log.signin.env" && echo yes || echo no)"
 check "signin: tokens stay out of the env" "$(grep -q GH_TOKEN "$WORK/log.signin.env" &&
@@ -252,14 +272,27 @@ check "review hangs: says so" "$(grep -q 'did not finish in 2s' "$WORK/stderr" &
 stub_sleep="^sleep $(sed 's/\./\\./' "$WORK/stub.sleep")\$"
 check "review hangs: no stub left running" "$(pgrep -f "$stub_sleep" >/dev/null &&
   echo no || echo yes)"
-check "review hangs: lock released" "$([[ ! -e "$home/review.lock" ]] && echo yes || echo no)"
+check "review hangs: lock released" "$(lock_free && echo yes || echo no)"
+
+# One that ignores TERM is killed after the grace period.
+printf '62.%s\n' "$$" >"$WORK/stub.sleep"
+printf 'deaf\n' >"$WORK/stub.mode"
+start=$SECONDS
+code=0
+GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 GROK_REVIEW_LIMIT_SECS=1 \
+  bash "$SCRIPT" "$repo" "$sha" "$prompt" "$WORK/review-deaf.txt" >/dev/null \
+  2>"$WORK/stderr" || code=$?
+elapsed=$((SECONDS - start))
+check "review ignores TERM: exit 1" "$([[ "$code" == 1 ]] && echo yes || echo no)"
+check "review ignores TERM: killed after the grace" "$([[ "$elapsed" -lt 30 ]] && echo yes ||
+  echo no)"
+stub_sleep="^sleep $(sed 's/\./\\./' "$WORK/stub.sleep")\$"
+check "review ignores TERM: no stub left running" "$(pgrep -f "$stub_sleep" >/dev/null &&
+  echo no || echo yes)"
 
 # ---- one review at a time -----------------------------------------------------------------
 # A live holder: the review waits, then gives up at the limit without touching its runs.
-sleep 30 &
-holder=$!
-mkdir "$home/review.lock"
-echo "$holder" >"$home/review.lock/pid"
+hold_lock
 mkdir -p "$home/runs/pr-live"
 code=0
 GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 GROK_LOCK_LIMIT_SECS=0 \
@@ -270,24 +303,24 @@ check "locked: says another review runs" "$(grep -q 'another review' "$WORK/stde
   echo yes || echo no)"
 check "locked: the other run is left alone" "$([[ -d "$home/runs/pr-live" ]] &&
   echo yes || echo no)"
-holder_now="$(cat "$home/review.lock/pid")"
-check "locked: the other lock is left alone" "$([[ "$holder_now" == "$holder" ]] &&
-  echo yes || echo no)"
-kill "$holder"
+check "locked: the other holder keeps the lock" "$(lock_free && echo no || echo yes)"
+# SIGKILL: the holder cannot clean up, which is what leaves a stale lock elsewhere.
+kill -9 "$holder"
 wait "$holder" 2>/dev/null || true
 
-# A dead holder's lock is taken over, and what its killed run left is removed: the run
-# directory, its worktree registration, and its session.
+# A holder killed with SIGKILL leaves no lock behind, and what its killed run left is
+# removed: the run directory, its worktree registration, and its session.
 git -C "$repo" worktree add -q --detach "$home/runs/pr-live/wt" "$sha"
 printf '%s\n' "$repo" >"$home/runs/pr-live/repo"
 mkdir -p "$home/sessions/killed-session"
 out="$WORK/review-stale.txt"
 code="$(run ok "$out")"
-check "stale lock: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
-check "stale lock: killed run removed" "$([[ ! -e "$home/runs/pr-live" ]] && echo yes || echo no)"
-check "stale lock: its worktree unregistered" "$(git -C "$repo" worktree list | grep -q runs &&
+check "killed holder: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
+check "killed holder: its run removed" "$([[ ! -e "$home/runs/pr-live" ]] &&
+  echo yes || echo no)"
+check "killed holder: its worktree unregistered" "$(git -C "$repo" worktree list | grep -q runs &&
   echo no || echo yes)"
-check "stale lock: lock released" "$([[ ! -e "$home/review.lock" ]] && echo yes || echo no)"
+check "killed holder: lock released" "$(lock_free && echo yes || echo no)"
 
 # ---- compaction notices on stderr are not a failure ----------------------------------------
 out="$WORK/review-compacted.txt"

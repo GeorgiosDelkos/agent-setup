@@ -50,10 +50,11 @@ grok_bin="${GROK_BIN:-$(command -v grok || true)}"
 #   waiting on something else, such as an interactive sign-in.
 # - review_limit: arbitrary, far above a normal review, so only a hung run reaches it. A
 #   review that hangs would otherwise hold the lock below, and every later review behind it.
-# - lock_limit: how long to wait for another review to finish: one full review.
+# - lock_limit: how long to wait for another review to finish: its sign-in and review
+#   limits, plus a minute for its checkout and cleanup (arbitrary).
 signin_limit="${GROK_SIGNIN_LIMIT_SECS:-120}"
 review_limit="${GROK_REVIEW_LIMIT_SECS:-3600}"
-lock_limit="${GROK_LOCK_LIMIT_SECS:-$review_limit}"
+lock_limit="${GROK_LOCK_LIMIT_SECS:-$((signin_limit + review_limit + 60))}"
 
 # Whether `file` holds any string of 20 or more characters from the review home's
 # credential, matched without printing it.
@@ -91,9 +92,7 @@ run_limited() {
     waited=$((waited + 1))
   done
   if kill -0 "$child" 2>/dev/null; then
-    kill "$child" 2>/dev/null || true
-    wait "$child" 2>/dev/null || true
-    child=""
+    stop_child
     return 124
   fi
   wait "$child" || status=$?
@@ -101,34 +100,54 @@ run_limited() {
   return "$status"
 }
 
+# Stop the running child: TERM, then KILL when it is still alive after 10 seconds (an
+# arbitrary grace), so a child that ignores TERM cannot keep the run, and the lock, forever.
+stop_child() {
+  local waited=0
+  kill "$child" 2>/dev/null || true
+  while kill -0 "$child" 2>/dev/null && [[ "$waited" -lt 10 ]]; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  kill -9 "$child" 2>/dev/null || true
+  wait "$child" 2>/dev/null || true
+  child=""
+}
+
 # One review at a time. Every run and session in this home is readable to the review that
 # runs in it (the sandbox allows the home: Grok writes its session there), and cleanup
 # empties sessions/. With two at once, one review could read another PR's prompt and code,
-# and its cleanup would delete the other's live session (seen 2026-11-11). A lock whose
-# holder is gone is taken over; `pid` is written right after `mkdir`, so a lock without
-# one is only stale once it is a minute old.
+# and its cleanup would delete the other's live session (seen 2026-11-11).
+#
+# The lock is flock(2) on review.lock, through fd 9, which this script and every process it
+# starts hold open. The kernel drops it when the last of them exits, so a review killed
+# with SIGKILL leaves no stale lock to take over, and a Grok it left running keeps the lock
+# until it ends. A mkdir lock with a pid file was tried first: taking over a dead holder's
+# lock is a check and then a delete, and two waiters could both get in. The file is never
+# deleted: a waiter holds the old file open and would lock it while a new run locks a new one.
 lock="$home/review.lock"
 take_lock() {
-  local waited=0 holder
-  until mkdir "$lock" 2>/dev/null; do
-    holder="$(cat "$lock/pid" 2>/dev/null || true)"
-    if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
-      trash "$lock"
-      continue
+  local waited=0 status
+  exec 9>>"$lock"
+  while true; do
+    status=0
+    perl -MFcntl=:flock -e 'open(my $fh, ">&=", 9) or die "cannot reopen fd 9: $!\n";
+      flock($fh, LOCK_EX | LOCK_NB) or exit 1' || status=$?
+    if [[ "$status" -eq 0 ]]; then
+      return 0
     fi
-    if [[ -z "$holder" && -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
-      trash "$lock"
-      continue
+    if [[ "$status" -ne 1 ]]; then
+      echo "grok review failed: cannot lock $lock" >&2
+      exit 1
     fi
     if [[ "$waited" -ge "$lock_limit" ]]; then
-      echo "grok review failed: another review (pid ${holder:-unknown}) still runs after" \
-        "${lock_limit}s; retry when it ends" >&2
+      echo "grok review failed: another review still runs after ${lock_limit}s;" \
+        "retry when it ends" >&2
       exit 1
     fi
     sleep 5
     waited=$((waited + 5))
   done
-  echo "$$" >"$lock/pid"
 }
 
 # Remove what a killed review left: its run directory (prompt, code, worktree) and its
@@ -157,14 +176,14 @@ cleanup() {
     git -C "$repo" worktree remove --force "$run/wt" >/dev/null 2>&1 || true
   fi
   if [[ -n "$locked" ]]; then
-    # Past reviews' transcripts would be readable to the next review; keep none.
+    # Past reviews' transcripts would be readable to the next review; keep none. The lock
+    # goes with fd 9 when this script exits.
     purge_runs
-    trash "$lock" >/dev/null 2>&1 || true
   fi
 }
 on_signal() {
   if [[ -n "$child" ]]; then
-    kill "$child" 2>/dev/null || true
+    stop_child
   fi
   exit 143
 }
