@@ -84,6 +84,11 @@
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/rust/style-gate.sh"
+          },
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/memory/recall-gate.sh",
+            "timeout": 10
           }
         ]
       }
@@ -107,9 +112,27 @@
             "timeout": 600
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/memory/remember-checkpoint.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
+      {
+        "matcher": "mcp__hippius-mem__recall|hippius-mem__recall|mcp__hippius-mem__remember|hippius-mem__remember",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/memory/recall-seen.sh"
+          }
+        ]
+      },
       {
         "matcher": "Skill|Read|read_file|Bash",
         "hooks": [
@@ -180,6 +203,15 @@
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/rust/tests-ran.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__hippius-mem__recall|hippius-mem__recall",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/memory/recall-seen.sh"
           }
         ]
       }
