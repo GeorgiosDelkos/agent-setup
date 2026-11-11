@@ -249,17 +249,10 @@
     "swift-lsp@claude-plugins-official": false,
     "testing-handbook-skills@trailofbits": false,
     "variant-analysis@trailofbits": false,
-    "warp@claude-code-warp": true,
     "typesafe@typesafe-ai": true,
     "cloudflare@cloudflare": false
   },
   "extraKnownMarketplaces": {
-    "claude-code-warp": {
-      "source": {
-        "source": "github",
-        "repo": "warpdotdev/claude-code-warp"
-      }
-    },
     "trailofbits": {
       "source": {
         "source": "github",
