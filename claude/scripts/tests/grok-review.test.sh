@@ -82,6 +82,9 @@ fi
 echo review >>"$log.order"
 printf '%s\n' "$@" >"$log.args"
 env >"$log.env"
+lock_state=free
+[[ -f "$GROK_HOME/review.lock/pid" ]] && lock_state=held
+echo "$lock_state" >"$log.lock"
 cwd=""
 while [[ $# -gt 0 ]]; do
   if [[ "$1" == --cwd ]]; then cwd="$2"; fi
@@ -117,6 +120,7 @@ case "$STUB_MODE" in
     ;;
   empty) ;;
   leak) echo "the key is $STUB_SECRET" ;;
+  hang) exec sleep "$(cat "$dir/stub.sleep")" ;;
 esac
 EOF
 chmod +x "$stub"
@@ -129,7 +133,7 @@ run() {
   local code=0
   printf '%s\n' "$mode" >"$WORK/stub.mode"
   rm -f "$WORK/log.args" "$WORK/log.env" "$WORK/log.order" "$WORK/log.signin.args" \
-    "$WORK/log.signin.env" "$WORK/log.signin.wt"
+    "$WORK/log.signin.env" "$WORK/log.signin.wt" "$WORK/log.lock"
   GH_TOKEN=leak-me GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 \
     bash "$SCRIPT" "$repo" "$sha" "$prompt" "$out" >"$WORK/stdout" 2>"$WORK/stderr" || code=$?
   echo "$code"
@@ -188,6 +192,9 @@ check "review: no forced refresh" "$(grep -q GROK_AUTH_EARLY_INVALIDATION_SECS \
   "$WORK/log.env" && echo no || echo yes)"
 check "review: the user's HOME, which the profile's ~ denies are written against" \
   "$(grep -qxF "HOME=$HOME" "$WORK/log.env" && echo yes || echo no)"
+check "review: runs under the lock" "$([[ "$(cat "$WORK/log.lock")" == held ]] &&
+  echo yes || echo no)"
+check "ok: lock released" "$([[ ! -e "$home/review.lock" ]] && echo yes || echo no)"
 check "signin: GROK_HOME is the review home" "$(grep -qxF "GROK_HOME=$home" \
   "$WORK/log.signin.env" && echo yes || echo no)"
 check "signin: tokens stay out of the env" "$(grep -q GH_TOKEN "$WORK/log.signin.env" &&
@@ -228,6 +235,59 @@ printf 'ok\n' >"$WORK/stub.signin"
 check "signin leak: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
 check "signin leak: secret not printed" "$(grep -qF "$secret" "$WORK/stdout" "$WORK/stderr" &&
   echo no || echo yes)"
+
+# ---- a review that hangs is stopped at its limit ------------------------------------------
+printf '61.%s\n' "$$" >"$WORK/stub.sleep"
+start=$SECONDS
+code=0
+printf 'hang\n' >"$WORK/stub.mode"
+GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 GROK_REVIEW_LIMIT_SECS=2 \
+  bash "$SCRIPT" "$repo" "$sha" "$prompt" "$WORK/review-hang2.txt" >/dev/null \
+  2>"$WORK/stderr" || code=$?
+elapsed=$((SECONDS - start))
+check "review hangs: exit 1" "$([[ "$code" == 1 ]] && echo yes || echo no)"
+check "review hangs: stopped at the limit" "$([[ "$elapsed" -lt 20 ]] && echo yes || echo no)"
+check "review hangs: says so" "$(grep -q 'did not finish in 2s' "$WORK/stderr" &&
+  echo yes || echo no)"
+stub_sleep="^sleep $(sed 's/\./\\./' "$WORK/stub.sleep")\$"
+check "review hangs: no stub left running" "$(pgrep -f "$stub_sleep" >/dev/null &&
+  echo no || echo yes)"
+check "review hangs: lock released" "$([[ ! -e "$home/review.lock" ]] && echo yes || echo no)"
+
+# ---- one review at a time -----------------------------------------------------------------
+# A live holder: the review waits, then gives up at the limit without touching its runs.
+sleep 30 &
+holder=$!
+mkdir "$home/review.lock"
+echo "$holder" >"$home/review.lock/pid"
+mkdir -p "$home/runs/pr-live"
+code=0
+GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 GROK_LOCK_LIMIT_SECS=0 \
+  bash "$SCRIPT" "$repo" "$sha" "$prompt" "$WORK/review-locked.txt" >/dev/null \
+  2>"$WORK/stderr" || code=$?
+check "locked: exit 1" "$([[ "$code" == 1 ]] && echo yes || echo no)"
+check "locked: says another review runs" "$(grep -q 'another review' "$WORK/stderr" &&
+  echo yes || echo no)"
+check "locked: the other run is left alone" "$([[ -d "$home/runs/pr-live" ]] &&
+  echo yes || echo no)"
+holder_now="$(cat "$home/review.lock/pid")"
+check "locked: the other lock is left alone" "$([[ "$holder_now" == "$holder" ]] &&
+  echo yes || echo no)"
+kill "$holder"
+wait "$holder" 2>/dev/null || true
+
+# A dead holder's lock is taken over, and what its killed run left is removed: the run
+# directory, its worktree registration, and its session.
+git -C "$repo" worktree add -q --detach "$home/runs/pr-live/wt" "$sha"
+printf '%s\n' "$repo" >"$home/runs/pr-live/repo"
+mkdir -p "$home/sessions/killed-session"
+out="$WORK/review-stale.txt"
+code="$(run ok "$out")"
+check "stale lock: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
+check "stale lock: killed run removed" "$([[ ! -e "$home/runs/pr-live" ]] && echo yes || echo no)"
+check "stale lock: its worktree unregistered" "$(git -C "$repo" worktree list | grep -q runs &&
+  echo no || echo yes)"
+check "stale lock: lock released" "$([[ ! -e "$home/review.lock" ]] && echo yes || echo no)"
 
 # ---- compaction notices on stderr are not a failure ----------------------------------------
 out="$WORK/review-compacted.txt"
