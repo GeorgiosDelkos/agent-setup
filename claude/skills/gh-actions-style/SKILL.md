@@ -28,5 +28,8 @@ Global rules live in `~/.config/agents/AGENTS.md`. This skill adds only CI rules
   workflow fail the first job on a draft instead of skipping. A matrix job is skipped before
   its matrix expands, so its per-entry checks (`stable / clippy`) report nothing on a draft
   and show as expected until the ready run. Templates: `rust-style/templates/ci/`.
+- With `cancel-in-progress`, the concurrency group ends in
+  `-${{ github.event.pull_request.draft }}`. Otherwise a push to a draft just before
+  `gh pr ready` can register its skipped run after the ready run and cancel it.
 - Dependabot: a 7-day cooldown and grouped updates for every ecosystem, including
   `github-actions`.
