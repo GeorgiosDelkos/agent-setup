@@ -149,6 +149,10 @@ nice-to-have is churn the reader pays for. P4 findings are noted.
 
 An open finding is neither fixed nor dismissed: settle it as confirmed or refuted first.
 
+A finding is never dismissed as a follow-up when it belongs to this PR: its purpose, a defect
+it causes or exposes, or code it already changes (`AGENTS.md`, Git). Fix those here. Only
+work outside the PR goes to an issue, and related leftovers share one.
+
 ## 4. Verify
 
 Run the project's quality pipeline: build, the full test suite (iterate until green), then

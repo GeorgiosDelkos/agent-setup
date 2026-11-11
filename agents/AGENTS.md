@@ -178,6 +178,10 @@ between the lines* (Rust Munich 2026).
   reason. A "Fixes" comment maps each finding to its commit or reason. A clean review is no
   proof of safety. Ready to merge means review (at tier 1 and 2), fixes, and green CI are
   all on GitHub. Subagents follow this too.
+- Before opening a follow-up issue from a PR, ask whether the work belongs to this PR: its
+  stated purpose, a defect it causes or exposes, or code it already changes. If it does,
+  fix it in this PR. An issue is only for work outside that, and related leftovers share
+  one issue rather than one each. A PR that spawns five issues was scoped wrong.
 - No Co-Authored-By or AI attribution. Use the user's git identity.
 - Delete with `trash`, never `rm -rf`.
 - Prune finished worktrees. Claude Code keeps any worktree with commits and never rechecks
