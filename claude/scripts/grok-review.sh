@@ -32,6 +32,8 @@ head_sha="$2"
 prompt="$3"
 output="$4"
 [[ -d "$repo" && -f "$prompt" && -n "$head_sha" ]] || usage
+# Absolute: cleanup runs `git -C "$repo"` after `cd /`, where a relative path would miss.
+repo="$(cd "$repo" && pwd -P)"
 
 home="${GROK_REVIEW_HOME:-$HOME/.grok-review}"
 grok_bin="${GROK_BIN:-$(command -v grok || true)}"
@@ -125,15 +127,18 @@ if [[ "$signin_status" -ne 0 ]]; then
 GROK_HOME=$home grok login)"
 fi
 
-git -C "$repo" worktree add --quiet --detach "$wt" "$head_sha"
-# Grok loads hooks, rules, skills and servers from these at the root it starts in. Their
-# changes, if any, are in the diff the prompt carries; the copies here must not run.
-for entry in .claude .grok .cursor .agents .mcp.json AGENTS.md AGENT.md CLAUDE.md \
-  CLAUDE.local.md; do
-  if [[ -e "$wt/$entry" || -L "$wt/$entry" ]]; then
-    trash "$wt/$entry"
-  fi
-done
+if ! git -C "$repo" worktree add --quiet --detach "$wt" "$head_sha"; then
+  echo "grok review failed: cannot check out $head_sha in $repo" >&2
+  exit 1
+fi
+# Claude and Grok load hooks, rules and servers from these: at the root they start in, and
+# rule files from any directory they read (a nested CLAUDE.md or AGENTS.md). Their changes,
+# if any, are in the diff the prompt carries; no copy here may run.
+while IFS= read -r -d '' entry; do
+  trash "$entry"
+done < <(find "$wt" -path "$wt/.git" -prune -o \( -name .claude -o -name .grok -o -name .cursor \
+  -o -name .agents -o -name .mcp.json -o -name AGENTS.md -o -name AGENT.md -o -name CLAUDE.md \
+  -o -name CLAUDE.local.md \) -prune -print0)
 cp "$prompt" "$run/prompt.md"
 
 status=0

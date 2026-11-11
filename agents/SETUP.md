@@ -40,7 +40,7 @@ machine reaches every machine.
 | `~/.claude/agents/` | `$SETUP/claude/agents/` | `rust-style-reviewer.md`. |
 | `~/.claude/hooks/` | `$SETUP/claude/hooks/` | `rust/*.sh` enforcement hooks (see below). |
 | `~/.claude/commands/` | `$SETUP/claude/commands/` | Slash commands. |
-| `~/.claude/scripts/` | `$SETUP/claude/scripts/` | Scripts the commands call: `grok-review.sh`, the locked-down Grok review run by `review-pr`. Tests in `tests/`, run by `check.sh`. |
+| `~/.claude/scripts/` | `$SETUP/claude/scripts/` | Scripts the commands call: `grok-review.sh`, the locked-down Grok review run by `review-pr` when Claude wrote the PR, and `claude-review.sh`, the Claude review when Grok wrote it. Tests in `tests/`, run by `check.sh`. |
 | `~/.claude/statusline.sh` | `$SETUP/claude/statusline.sh` | Status line. |
 | `~/.grok/rules/AGENTS.md` | `$SETUP/agents/AGENTS.md` | Grok's global rules. |
 | `~/.grok/rules/AGENTS.local.md` | `$SETUP/agents/AGENTS.local.md` | The local layer's rules, when it has them. |
@@ -143,11 +143,11 @@ read those first.
    ```
 
    For JetBrains Air, also install Node (nvm), Claude Code, and Grok, and log in to both.
-   Grok is also the second-model adversarial reviewer in `review-pr`. That command runs it
+   Grok is also the other-model reviewer `review-pr` runs for a PR Claude wrote. It runs
    headless, from the separate home `~/.grok-review`, with read-only tools under the
    `pr-review` sandbox profile. After `install.sh`, sign that home in once with
    `GROK_HOME=~/.grok-review grok login`. A dedicated, revocable key is best. Without
-   that login, `review-pr` reviews with the Claude agents alone.
+   that login, `review-pr` falls back to a Claude agent and says so on the PR.
 
 2. Let the file sync bring `$SETUP` to the machine, then run:
 

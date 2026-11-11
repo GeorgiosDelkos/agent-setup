@@ -50,9 +50,10 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
   ending with `Refs #$ARGUMENTS`.
 - Push the branch.
 
-## 6. Open a draft PR
+## 6. Open the PR
 
-`gh pr create --draft`, so CI waits for the review's fixes, with:
+`gh pr create --draft`, so CI waits for the review's fixes (a tier 0 fix, prose only, opens
+ready instead), with:
 
 - a title under 70 characters;
 - a description that maps the changes to the issue's requirements;

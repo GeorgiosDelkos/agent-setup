@@ -25,6 +25,10 @@ git init -q "$repo"
 mkdir -p "$repo/.claude"
 printf '{}\n' >"$repo/.claude/settings.json"
 printf 'rules\n' >"$repo/AGENTS.md"
+# Rule files below the root load when a reviewer reads that directory.
+mkdir -p "$repo/src"
+printf 'rules\n' >"$repo/src/CLAUDE.md"
+printf '{}\n' >"$repo/src/.mcp.json"
 printf 'code\n' >"$repo/main.txt"
 git -C "$repo" add -A
 git -C "$repo" -c user.name=t -c user.email=t@t commit -qm init
@@ -84,7 +88,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 seen="clean"
-[[ -e "$cwd/AGENTS.md" || -e "$cwd/.claude" ]] && seen="config-present"
+[[ -n "$(find "$cwd" \( -name AGENTS.md -o -name CLAUDE.md -o -name .claude -o -name .mcp.json \) \
+  -print -quit)" ]] && seen="config-present"
 [[ -f "$cwd/main.txt" ]] || seen="no-code"
 case "$STUB_MODE" in
   ok) echo "finding: $seen" ;;
@@ -267,6 +272,21 @@ code="$(run ok "$WORK/x.txt")"
 check "symlinked home: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
 rm "$home"
 mv "$WORK/home-real" "$home"
+# ---- a relative repo path and a head that is not in the clone ------------------------------
+printf 'ok\n' >"$WORK/stub.mode"
+code=0
+(cd "$WORK" && GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 \
+  bash "$SCRIPT" repo "$sha" "$prompt" "$WORK/rel.txt" >/dev/null 2>&1) || code=$?
+check "relative repo: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
+check "relative repo: worktree removed" "$(git -C "$repo" worktree list | grep -q runs &&
+  echo no || echo yes)"
+code=0
+GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 \
+  bash "$SCRIPT" "$repo" 0000000000000000000000000000000000000000 "$prompt" "$WORK/bad.txt" \
+  >/dev/null 2>"$WORK/bad.err" || code=$?
+check "bad head: exit 1" "$([[ "$code" == 1 ]] && echo yes || echo no)"
+check "bad head: says why" "$(grep -q 'cannot check out' "$WORK/bad.err" && echo yes || echo no)"
+
 code=0
 bash "$SCRIPT" "$repo" >/dev/null 2>&1 || code=$?
 check "usage: exit 64" "$([[ "$code" == 64 ]] && echo yes || echo no)"

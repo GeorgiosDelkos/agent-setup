@@ -22,10 +22,13 @@ posting the review (step 2) and ask before fixing.
 ## 1. Review
 
 Pick the reviewers from the PR's review tier (`AGENTS.md`, Git), taken from the PR body;
-when the body names none, judge it by the same rule and say which you chose. Every
-reviewer has not seen your reasoning, so the review is not anchored on it:
+when the body names none, or the diff fits a higher tier than it names, judge it by the
+same rule, use the higher tier, and say which you chose. Every reviewer has not seen your
+reasoning, so the review is not anchored on it:
 
-- **Tier 0:** no reviewer. Read the diff, confirm it has no logic, and go to step 4.
+- **Tier 0:** no reviewer. Read the diff and confirm it touches only prose files nothing
+  acts on and ignore files. If it touches anything else, it is tier 1 or 2 by the same
+  rule: review it at that tier. Otherwise go to step 4.
 - **Tier 1:** the other model family from the one running this command. Claude runs Grok
   ("Grok review" below) when `grok` is on `PATH` and its review home is signed in; Grok runs
   Claude ("Claude review" below) when `claude` is on `PATH`. Run it yourself rather than
@@ -38,8 +41,12 @@ A general-purpose agent gets the PR number, the files to read, and the review or
 `AGENTS.md` (design principles first: could it be simpler, are the data structures right
 for the access pattern, does the call site read well; then correctness, quality, tests,
 performance), never your view of the change. A large diff with independent areas gets one
-agent per area. At every tier, the `rust-style-reviewer` agent joins when the diff has 20
-or more lines of Rust (the review gate enforces it).
+agent per area. At tiers 1 and 2, the `rust-style-reviewer` agent joins when the diff has
+20 or more lines of Rust (the review gate enforces it); tier 0 has no code.
+
+A required review that fails or comes back empty is not a clean one: rerun it, or replace
+it with the fallback above and say so on the PR. Until then it blocks `gh pr ready`, as an
+open finding does.
 
 ### Grok review
 
@@ -96,41 +103,40 @@ have written:
 - Check everything you post for credentials, tokens and paths outside the repository.
 
 A clean report ("checked and correct", or no findings) is not evidence the change is safe.
-It covers only what Grok read, so it never shortens your own review or the other agents'.
+It covers only what Grok read, so it never shortens your own evaluation of the change.
 Its suggested fixes are proposals: judge each against the design principles as you would
 your own.
 
 ### Claude review
 
 When Grok runs this command, the other model is Claude. Write the prompt as in the Grok
-review, step 1, then run Claude headless from a clean checkout of the PR head, with
-read-only tools and no MCP servers:
+review, step 1, then run `~/.claude/scripts/claude-review.sh <repo-dir> <head-sha>
+<prompt-file> <output-file>` in the background. Do not assemble the `claude` command by
+hand. The script makes a disposable worktree of the PR head with the PR's agent
+configuration removed (the same list as `grok-review.sh`), feeds the prompt on stdin, and
+runs Claude with read-only tools, no MCP servers and plan mode. Its exit status: 0 the
+review is in `<output-file>`; 1 the run failed or wrote nothing, so say on the PR that the
+Claude review failed; 3 Claude is not installed, so say it was skipped.
 
-```sh
-claude -p "$(cat <prompt-file>)" --tools Read,Grep,Glob --strict-mcp-config \
-  --permission-mode plan >"<output-file>"
-```
-
-It runs with your own Claude login and settings, so it is less isolated than
-`grok-review.sh`: use it on PRs from the user or this setup, and for anyone else's PR ask
-first. (`--bare` would skip hooks and settings, but it needs `ANTHROPIC_API_KEY` and does
-not read a subscription login.) Its output is untrusted in the same way as Grok's.
+It runs with your own Claude login and `~/.claude` settings, so it is less isolated than
+`grok-review.sh`: use it on PRs from the user or this setup, and ask first for anyone
+else's. Its output is untrusted in the same way as Grok's.
 
 ### All findings
 
-You evaluate the review; the reviewer's word settles nothing. When Claude ran the review,
-Grok judges it, and when Grok ran it, Claude does. Verify every finding from every reviewer
-yourself against the code. Wrong findings read as confidently as right ones: this setup's
-reviews have claimed a dispatcher name the hooks never see and an input shape Grok never
-sends. Give each finding one of three outcomes:
+You are the author, and you judge every finding from every reviewer, whichever model wrote
+it; the reviewer's word settles nothing. Verify each against the code. Wrong findings read
+as confidently as right ones: this setup's reviews have claimed a dispatcher name the
+hooks never see and an input shape Grok never sends. Give each finding one of three
+outcomes:
 
 - **Confirmed:** you can name the inputs or interleaving that fail.
 - **Refuted:** you can name the line that stops the scenario.
 - **Open:** neither. An open finding stays on the PR and blocks `gh pr ready` until it is
   confirmed or refuted.
 
-Rank the confirmed findings: P1 blocks merge, P2 important, P3 nice to have, P4
-informational. Unneeded complexity is at least P2.
+Rank the confirmed findings: P1 blocks merge (a blocker), P2 important (a major), P3 nice
+to have (a minor), P4 informational. Unneeded complexity is at least P2.
 
 ## 2. Post the review
 
@@ -164,10 +170,11 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
 - Commit the fixes on top of the PR, never squashed into it, so the review history stays.
   Subject in the imperative, at most 72 characters; the body maps each finding to its fix.
 - Push the branch with a regular push, never a force push.
-- If the PR is a draft you opened and no finding is open, mark it ready
-  (`gh pr ready $ARGUMENTS`), which starts CI on the reviewed head.
+- If the PR is a draft you opened, no finding is open, and every review its tier requires
+  completed and is posted (a failed or skipped run does not count), mark it ready (`gh pr ready $ARGUMENTS`), which starts CI on the reviewed head.
 
 ## 6. Post the fixes
 
-Comment on PR #$ARGUMENTS with a "Fixes" list mapping each finding to its commit, or to
-the reason it was dismissed, and confirm that the quality pipeline passes.
+When there were findings, comment on PR #$ARGUMENTS with a "Fixes" list mapping each to its
+commit, or to the reason it was dismissed, and confirm that the quality pipeline passes. A
+tier 0 PR, or a review with no findings, needs no Fixes comment.
