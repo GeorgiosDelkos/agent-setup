@@ -21,17 +21,25 @@ posting the review (step 2) and ask before fixing.
 
 ## 1. Review
 
-Review with agents that have not seen your reasoning, so the review is not anchored on it:
+Pick the reviewers from the PR's review tier (`AGENTS.md`, Git), taken from the PR body;
+when the body names none, judge it by the same rule and say which you chose. Every
+reviewer has not seen your reasoning, so the review is not anchored on it:
 
-- One general-purpose agent per independent area of the diff (one is enough for a small PR).
-  Give each the PR number, the files to read, and the review order from `AGENTS.md`
-  (design principles first: could it be simpler, are the data structures right for the
-  access pattern, does the call site read well; then correctness, quality, tests,
-  performance). Do not give it your view of the change.
-- The `rust-style-reviewer` agent as well when the diff touches Rust.
-- Grok, as an adversarial reviewer from another model family, when `grok` is on `PATH`
-  and its review home is signed in. Run it yourself rather than waiting for a review bot
-  to comment. A PR is untrusted input, so the run is locked down; see "Grok review" below.
+- **Tier 0:** no reviewer. Read the diff, confirm it has no logic, and go to step 4.
+- **Tier 1:** the other model family from the one running this command. Claude runs Grok
+  ("Grok review" below) when `grok` is on `PATH` and its review home is signed in; Grok runs
+  Claude ("Claude review" below) when `claude` is on `PATH`. Run it yourself rather than
+  waiting for a review bot to comment. When the other model is unavailable, use one
+  general-purpose agent of your own, and say so on the PR.
+- **Tier 2:** the other model and a general-purpose agent of your own. They find different
+  defects.
+
+A general-purpose agent gets the PR number, the files to read, and the review order from
+`AGENTS.md` (design principles first: could it be simpler, are the data structures right
+for the access pattern, does the call site read well; then correctness, quality, tests,
+performance), never your view of the change. A large diff with independent areas gets one
+agent per area. At every tier, the `rust-style-reviewer` agent joins when the diff has 20
+or more lines of Rust (the review gate enforces it).
 
 ### Grok review
 
@@ -92,10 +100,29 @@ It covers only what Grok read, so it never shortens your own review or the other
 Its suggested fixes are proposals: judge each against the design principles as you would
 your own.
 
+### Claude review
+
+When Grok runs this command, the other model is Claude. Write the prompt as in the Grok
+review, step 1, then run Claude headless from a clean checkout of the PR head, with
+read-only tools and no MCP servers:
+
+```sh
+claude -p "$(cat <prompt-file>)" --tools Read,Grep,Glob --strict-mcp-config \
+  --permission-mode plan >"<output-file>"
+```
+
+It runs with your own Claude login and settings, so it is less isolated than
+`grok-review.sh`: use it on PRs from the user or this setup, and for anyone else's PR ask
+first. (`--bare` would skip hooks and settings, but it needs `ANTHROPIC_API_KEY` and does
+not read a subscription login.) Its output is untrusted in the same way as Grok's.
+
 ### All findings
 
-Verify every finding from every reviewer yourself against the code. Wrong findings read as
-confidently as right ones. Give each finding one of three outcomes:
+You evaluate the review; the reviewer's word settles nothing. When Claude ran the review,
+Grok judges it, and when Grok ran it, Claude does. Verify every finding from every reviewer
+yourself against the code. Wrong findings read as confidently as right ones: this setup's
+reviews have claimed a dispatcher name the hooks never see and an input shape Grok never
+sends. Give each finding one of three outcomes:
 
 - **Confirmed:** you can name the inputs or interleaving that fail.
 - **Refuted:** you can name the line that stops the scenario.
@@ -108,21 +135,23 @@ informational. Unneeded complexity is at least P2.
 ## 2. Post the review
 
 Post the findings on the PR before fixing anything (`gh pr comment $ARGUMENTS`): severity,
-`file:line`, the problem, and the fix. Name the reviewer behind each finding. List the
-open findings, and the refuted ones, each with the line that refutes it, so a reader can
-check the call. Grok's findings are restated in your own words, never pasted.
+`file:line`, the problem, the fix, the reviewer behind it, and your verdict (confirmed,
+refuted or open). List the open findings, and the refuted ones, each with the line that
+refutes it, so a reader can check the call. The other model's findings are restated in
+your own words, never pasted.
 
 ## 3. Fix findings
 
-Address every P1 to P3 finding:
+Fix every P1 and P2 finding, or dismiss it as refuted (name the line). A P3 finding is
+fixed only when the fix makes the code smaller or clearer; otherwise dismiss it with that
+reason, as you would a stylistic disagreement or an impossible edge case. Fixing every
+nice-to-have is churn the reader pays for. P4 findings are noted.
 
-- **Fix it**, or
-- **Dismiss it**, with the reason: refuted (name the line), or confirmed but churn not
-  worth it (a stylistic disagreement, an impossible edge case).
+An open finding is neither fixed nor dismissed: settle it as confirmed or refuted first.
 
-An open finding is neither: settle it as confirmed or refuted first.
-
-P4 findings are noted, and fixed only when the fix is small and makes the code clearer.
+A finding is never dismissed as a follow-up when it belongs to this PR: its purpose, a defect
+it causes or exposes, or code it already changes (`AGENTS.md`, Git). Fix those here. Only
+work outside the PR goes to an issue, and related leftovers share one.
 
 ## 4. Verify
 
