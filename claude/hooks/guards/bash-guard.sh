@@ -2,9 +2,8 @@
 # PreToolUse (Bash / run_terminal_command): block recursive deletes (use `trash`, which can be
 # undone), git commands that throw away uncommitted or stashed work, pushes that update main
 # or master (use a feature branch and a PR), force pushes, admin merges that skip a PR's
-# checks, and `cargo mutants`
-# runs that let a runaway mutant exhaust memory. Reads Claude's `tool_input.command`, which
-# Grok also sends as a snake_case alias.
+# checks, and `cargo mutants` runs that let a runaway mutant exhaust memory. Reads Claude's
+# `tool_input.command`, which Grok also sends as a snake_case alias.
 #
 # A guardrail against an agent's mistakes, not a sandbox: a script file, an interpreter or
 # `xargs` gets past any pattern match.
@@ -38,16 +37,22 @@ code_text() {
     s/\\.|\x27([^\x27]*)\x27|"((?:[^"\\]|\\.)*)"/
       defined $1 ? data($1) : defined $2 ? double($2) : $&/gse;
     # Checked on the stripped text, so a message that mentions eval or bash -c is still data.
-    my $shell = qr/(?:ba|z|da)?sh(?:\s+--?[\w-]+)*/;
+    # A shell, by name or path, with its options. -o and -O (alone or ending a cluster, as in
+    # `-euo pipefail`) and --rcfile / --init-file take the next word as their value; read as
+    # a script operand, that word made `bash -euo pipefail -c ...` look like no hand-off.
+    my $value = qr/-[A-Za-z]*[oO]\s+\S+|--(?:rcfile|init-file)\s+\S+/;
+    my $options = qr/(?:\s+(?:$value|-[\w-]*))*/;
+    my $shell = qr/(?:[\w.~-]*\/)*(?:ba|z|da)?sh$options/;
     my $start = qr/(?:^|[;&|(]\s*|\s)/;
     my $runs = qr/(?:^|[;&|(]\s*)(?:eval|ssh)\s/;
     # A pipe into a shell hands the piped text over only when the shell reads its script from
-    # stdin: nothing but options follow the shell, or -s is among them. `... | bash hook.sh`
-    # runs the file and gets the pipe as data, so its quoted arguments stay data.
-    my $options = qr/(?:\s+-[\w-]*)*/;
-    my $reads_stdin = qr/(?=$options\s+-[A-Za-z]*s[A-Za-z]*(?:\s|\z))/;
-    my $no_script = qr/$options\s*(?:\z|[;&|)\n]|\d*[<>])/;
-    my $piped = qr/\|\s*(?:ba|z|da)?sh(?:$reads_stdin|$no_script)/;
+    # stdin: -s is among its options, or no script operand follows them (the command ends, an
+    # operator, a redirect or a comment comes next, or the operand is \/dev\/stdin).
+    # `... | bash hook.sh` runs the file and gets the pipe as data, so its quoted arguments
+    # stay data. `||` is not a pipe.
+    my $dash_s = qr/\s+-[A-Za-z]*s[A-Za-z]*(?:\s|\z)/;
+    my $no_script = qr/\s*(?:\z|[;&|)}\n\x60]|\d*[<>]|#)|\s+\/dev\/stdin\b/;
+    my $piped = qr/(?<!\|)\|\s*(?:$shell$dash_s|$shell(?:$no_script))/;
     if (/$start(?:$shell\s+-\w*c\b|$shell\s*<<)|$runs|$piped/) {
       print $original;
       exit;
@@ -187,15 +192,27 @@ git_push_at() {
   done
 }
 
-# Branches the `git push` invocations in $1 update, one per line: each refspec's
-# destination, the current branch for `HEAD` or a push without a refspec (it pushes the
-# current branch under push.default simple or upstream), `*` for --all, --branches, --mirror.
-# A forced push adds the line `~force`, which no branch name can be (git forbids `~` in a
-# ref name): -f alone or in a cluster of short options (-uf), --force, --force-with-lease
-# with or without a value, or a refspec that starts with `+`.
+# $1 with each command substitution replaced by the word SUBST and its redirections removed,
+# so the words of one `git push` stay in one simple command. simple_commands splits at the
+# parentheses of `$(...)`, at backticks and at the `&` of `2>&1`: that hid a force option
+# written after `"$(git branch --show-current)"`, and turned `git push origin 2>&1` on main
+# into a push of a branch named `2>`. push_effects walks this text as well as the plain one,
+# which still shows a push inside a substitution.
+flattened() {
+  perl -0777 -pe 's/\$\([^()]*\)|`[^`]*`/SUBST/g;
+    s/\s\d*(?:>>?|<+)&?\d*-?(?:\s*[^\s;&|()<>]+)?//g' <<<"$1"
+}
+
+# What the `git push` invocations in $1 do, one line each. A branch they update: each
+# refspec's destination, or the current branch for `HEAD`, for a substitution (SUBST, most
+# often the current branch's name) and for a push without a refspec (it pushes the current
+# branch under push.default simple or upstream). `*` for --all, --branches, --mirror. And
+# `~force` for a forced push, which no branch name can be (git forbids `~` in a ref name):
+# -f alone or in a cluster of short options (-uf), --force, --force-with-lease in any
+# spelling git accepts (a value, an abbreviation), or a refspec that starts with `+`.
 # The command is walked one simple command at a time so that `cd repo && git push` looks up
 # the branch of `repo`, not of the session's directory.
-pushed_branches() {
+push_effects() {
   local segment tokens dir="$cwd" i token positional refspec push_dir
   simple_commands "$1" | while IFS= read -r segment; do
     read -ra tokens <<<"$segment"
@@ -216,7 +233,7 @@ pushed_branches() {
       case "$token" in
       --all | --branches | --mirror) echo '*' ;;
       -o | --push-option | --repo | --receive-pack | --exec) i=$((i + 1)) ;;
-      --force | --force-with-lease | --force-with-lease=*) echo '~force' ;;
+      --force | --force-w*) echo '~force' ;;
       --*) ;;
       -*f*) echo '~force' ;;
       -*) ;;
@@ -234,7 +251,7 @@ pushed_branches() {
       refspec="${refspec#+}"
       refspec="${refspec##*:}"
       refspec="${refspec#refs/heads/}"
-      if [[ "$refspec" == HEAD ]]; then
+      if [[ "$refspec" == HEAD || "$refspec" == SUBST ]]; then
         current_branch "$push_dir"
       else
         printf '%s\n' "$refspec"
@@ -254,13 +271,17 @@ if [[ -n "$reason" ]]; then
 fi
 
 # Captured first: `grep -q` on a pipe would close it early and pipefail would hide a match.
-branches="$(pushed_branches "$code")"
-if grep -qxE 'main|master|\*' <<<"$branches"; then
+effects="$(
+  push_effects "$code"
+  push_effects "$(flattened "$code")"
+)"
+if grep -qxE 'main|master|\*' <<<"$effects"; then
   block "push to a feature branch and open a PR, never directly to main/master"
 fi
-# The permission deny list has `git push --force*`, but it matches only a command that starts
-# that way: `git push -f`, a `+refspec`, and `git -C dir push --force` got past it.
-if grep -qx '~force' <<<"$branches"; then
+# The permission deny list has `git push --force*` and `git push *--force*`, but they match
+# only a command that starts with `git push` and spells the option out: `git push -f`, a
+# `+refspec`, and `git -C dir push --force` got past them.
+if grep -qx '~force' <<<"$effects"; then
   block "a force push replaces commits on the remote branch: add a commit on top and push" \
     "it, or leave the force push to the user"
 fi
