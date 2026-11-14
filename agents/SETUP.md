@@ -54,8 +54,8 @@ machine reaches every machine.
 | `~/Library/Application Support/JetBrains/Air/themes/` | `$SETUP/air/themes/` | `Dark-Blue.json`: Air's Dark theme with loud comments (code comments orange, doc comments green, TODOs yellow), per the Comments section of `AGENTS.md`. Edit it in Air with Edit Color Theme…; the save lands in the synced folder. `install.sh` moves an existing local `themes/` folder to the backup dir; to keep a theme from it, copy the file into `$SETUP/air/themes/`, which shares it with every machine. |
 | `~/Library/Application Support/JetBrains/Air/settings.json` | (file, merged from `$SETUP/air/settings.json`) | Selects the `Dark-Blue` theme. Other Air settings stay local. |
 
-`settings.json` is the one file that is not linked: Claude Code rewrites it in place, which
-would replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
+`settings.json` is merged, not linked: Claude Code rewrites it in place, which would
+replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
 merges it in: shared keys win, local-only keys stay, and an array (a hook list) keeps the
 local entries another tool added, a command added inside a shared hook group included. It
 records the shared copy under `~/.local/state/agent-setup/`, so a key, hook event or hook
@@ -297,7 +297,9 @@ stopped after the clone is finished by the next one.
 
 A machine without the file sync can use a plain clone as `$SETUP` instead: `setup_git`
 sees its `.git` directory and leaves it alone. That clone is then the deployed copy on that
-machine, and the rules below hold for it the same way.
+machine. The first rule below holds for it (edit in a separate clone, land through a PR), and
+it updates with `git pull --ff-only`. The fetch and mixed reset further down are for synced
+folders only: in a plain clone a mixed reset moves `HEAD` and leaves the old files live.
 
 - The synced folder is the deployed copy: it should match `origin/main`. An edit made in it
   is live on every machine at the next sync, before any review or test, which is how

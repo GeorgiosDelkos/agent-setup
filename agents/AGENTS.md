@@ -96,9 +96,9 @@ Upstream's mandates: https://github.com/thenervelab/hippius-mem/blob/db9261b1/AG
   reached through a bounded mailbox, so a full mailbox pushes back on senders instead of
   growing memory. The language skill has details.
 - A subagent that designs or writes code works to the design principles and these style
-  rules. One that loads this file has them (Team memory, Subagents, says which do); for any
-  other, a Claude Plan agent included, put them in its prompt. Parallel ones that write
-  each work in their own worktree.
+  rules. One known to load this file has them (Team memory, Subagents, says which do); for
+  any other, a Claude Plan agent and an unprobed one included, put them in its prompt.
+  Parallel ones that write each work in their own worktree.
 
 ## Comments
 
@@ -156,10 +156,10 @@ between the lines* (Rust Munich 2026).
 
 - Small commits, one logical change. Imperative subject <=72 chars; body explains why.
 - Format, lint, and run relevant tests before committing.
-- Commit, push, and open a PR only when the user asks, or inside a command that says to
-  (`fix-issue`, `review-pr`). Asked to fix or build something, leave the change in the
-  working tree and say so. When you do commit: on a feature branch, through a PR, never on
-  the default branch. Read the whole diff yourself before opening it.
+- Commit, push, and open a PR only when the user asks, or where a command's own steps say
+  to (`fix-issue`, `review-pr`; their conditions hold). Asked to fix or build something,
+  leave the change in the working tree and say so. When you do commit: on a feature branch,
+  through a PR, never on the default branch. Read the whole diff yourself before opening it.
 - A review exists to catch what the author cannot see, so its effort follows the risk: how
   far a defect would reach and how hard it is to undo. The PR body states the tier and why
   ("Review tier 1: new CLI flag"), so the owner can overrule it. When the diff fits a
@@ -222,8 +222,8 @@ Comments above, and its word list holds here too.
 
 Two paragraphs to match, from this setup's own docs:
 
-> `settings.json` is the one file that is not linked: Claude Code rewrites it in place,
-> which would replace a symlink.
+> `settings.json` is merged, not linked: Claude Code rewrites it in place, which would
+> replace a symlink.
 
 > A clean report ("checked and correct", or no findings) is not evidence the change is
 > safe. It covers only what Grok read, so it never shortens your own evaluation of the
