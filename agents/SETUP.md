@@ -61,9 +61,10 @@ local entries another tool added, a command added inside a shared hook group inc
 records the shared copy under `~/.local/state/agent-setup/`, so a key, hook event or hook
 the shared copy drops later is removed from the machine at the next install. One exception:
 a plain value the machine changed since the last install stays when the shared copy drops
-its key, so dropping a key hands the choice to each machine without undoing the choices
-already made. To force a value on every machine, set it in the shared copy: dropping its key
-removes it only where no one changed it. The first install on a machine has no record yet:
+its key, so dropping a key hands the choice to each machine without undoing a choice a
+machine made. A value no one changed goes with the key: a machine still on the shared
+`model` falls back to Claude Code's default. To force a value on every machine, set it in
+the shared copy. The first install on a machine has no record yet:
 it keeps every local key, and a key the shared copy dropped before then stays until removed
 by hand. To share a setting with every machine, add only its key to
 `claude/settings.json` in a clone, through a PR. Copying the whole local file would also
@@ -83,9 +84,13 @@ Claude Code runs in `auto` permission mode on every machine (changed from
   it directly, and the Air adapter reads it through the SDK.
   `skipDangerousModePermissionPrompt` stays set, for a session started in bypass mode by
   hand.
-- Grok reads `defaultMode` from `~/.claude/settings.json` too and has an `auto` mode of its
-  own. Whether it takes `auto` from that file was not checked: confirm with the mode Grok
-  shows at startup.
+- Grok has two sources for its mode. Its docs (Permissions and safety) say it supports the
+  Claude-compatible `defaultMode`, `auto` included, and that `[ui] permission_mode` in
+  `~/.grok/config.toml` sets it too, with always-approve winning when both it and auto are
+  requested. So a machine whose `~/.grok/config.toml` says `permission_mode =
+  "always-approve"` keeps Grok on always-approve; `install.sh` does not manage that file.
+  Remove that line for Grok to follow `auto`. This is from Grok's docs (grok 1.0.70), not
+  from a live session: check the mode Grok shows at startup.
 - `$SETUP/air/acp.json` still starts Grok with `--always-approve`, so Grok in Air approves
   every call and does not match the mode above.
 
