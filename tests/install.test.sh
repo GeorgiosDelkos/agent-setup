@@ -80,6 +80,28 @@ for damage in '{"trunc' ''; do
   check "damaged record '$damage': record rewritten" '{"model":"x"}' "$(jq -c . "$record")"
 done
 
+# When the shared copy drops a key, a plain value the machine changed since the last merge
+# stays (the machine's own model), an unchanged one goes, and a dropped object goes whole
+# even with a local change inside.
+merge_json '{"model": "shared", "theme": "dark", "env": {"A": "1"}}' "$file" >/dev/null
+jq -c '.model = "mine" | .env.A = "local"' "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+merge_json '{}' "$file" >/dev/null
+check "dropped key: changed value kept, unchanged and object removed" \
+  '{"model":"mine","zeta":1}' "$(jq -c -S . "$file")"
+merge_json '{}' "$file" >/dev/null
+check "dropped key: kept value survives the next install" \
+  '{"model":"mine","zeta":1}' "$(jq -c -S . "$file")"
+
+# The same inside an object the shared copy keeps, where most settings live (permissions,
+# env): the changed value stays and the unchanged one goes. The machine's value decides: a
+# key it set to an array or to null goes.
+merge_json '{"env": {"A": "1", "B": "1"}, "list": "x", "gone": "x"}' "$file" >/dev/null
+jq -c '.env.A = "local" | .list = ["mine"] | .gone = null' "$file" >"$file.tmp"
+mv "$file.tmp" "$file"
+merge_json '{"env": {}}' "$file" >/dev/null
+check "dropped nested key: changed kept, unchanged removed; array and null removed" \
+  '{"env":{"A":"local"},"model":"mine","zeta":1}' "$(jq -c -S . "$file")"
+
 # Before any record of the shared copy (a machine set up earlier), arrays come from the
 # shared copy whole and no key is removed, as before the record existed.
 trash "$HOME/.local/state/agent-setup"

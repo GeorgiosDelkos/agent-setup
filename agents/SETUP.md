@@ -59,11 +59,17 @@ replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh
 merges it in: shared keys win, local-only keys stay, and an array (a hook list) keeps the
 local entries another tool added, a command added inside a shared hook group included. It
 records the shared copy under `~/.local/state/agent-setup/`, so a key, hook event or hook
-the shared copy drops later is removed from the machine at the next install. The first
-install on a machine has no record yet: it keeps every local key, and a key the shared copy
-dropped before then stays until removed by hand. To share a setting with every
-machine, add only its key to `claude/settings.json` in a clone, through a PR. Copying the
-whole local file would also share machine-local keys (an effort level, a model override).
+the shared copy drops later is removed from the machine at the next install. One exception:
+a plain value the machine changed since the last install stays when the shared copy drops
+its key, so dropping a key hands the choice to each machine without undoing a choice a
+machine made. A value no one changed goes with the key: a machine still on the shared
+`model` falls back to Claude Code's default. To force a value on every machine, set it in
+the shared copy. The first install on a machine has no record yet:
+it keeps every local key, and a key the shared copy dropped before then stays until removed
+by hand. To share a setting with every machine, add only its key to
+`claude/settings.json` in a clone, through a PR. Copying the whole local file would also
+share machine-local keys (an effort level, a model override).
+`model` is such a key and is not in the shared copy: each machine sets its own with `/model`.
 
 Grok scans `~/.claude/skills/` and `~/.claude/settings.json` by default
 (`[compat.claude] skills/hooks = true`), so skills and hooks exist once and serve both
@@ -71,14 +77,24 @@ tools.
 
 ## Permissions
 
-Every agent runs with full bypass permissions, on every machine:
+Claude Code runs in `auto` permission mode on every machine (changed from
+`bypassPermissions` on 2026-11-14):
 
-- `$SETUP/claude/settings.json` sets `permissions.defaultMode = "bypassPermissions"` and
-  `skipDangerousModePermissionPrompt`. Claude Code reads it directly, the Air adapter reads it
-  through the SDK, and Grok reads `defaultMode` from `~/.claude/settings.json` too.
-- `$SETUP/air/acp.json` starts Grok with `--always-approve`, so Air sessions match.
+- `$SETUP/claude/settings.json` sets `permissions.defaultMode = "auto"`. Claude Code reads
+  it directly, and the Air adapter reads it through the SDK.
+  `skipDangerousModePermissionPrompt` stays set, for a session started in bypass mode by
+  hand.
+- Grok has two sources for its mode. Its docs (Permissions and safety) say it supports the
+  Claude-compatible `defaultMode`, `auto` included, and that `[ui] permission_mode` in
+  `~/.grok/config.toml` sets it too, with always-approve winning when both it and auto are
+  requested. So a machine whose `~/.grok/config.toml` says `permission_mode =
+  "always-approve"` keeps Grok on always-approve; `install.sh` does not manage that file.
+  Remove that line for Grok to follow `auto`. This is from Grok's docs (grok 1.0.70), not
+  from a live session: check the mode Grok shows at startup.
+- `$SETUP/air/acp.json` still starts Grok with `--always-approve`, so Grok in Air approves
+  every call and does not match the mode above.
 
-Hooks still run under bypass: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
+Hooks run in every mode: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
 git commands that discard uncommitted work, pushes that update `main`/`master`,
 `gh pr merge --admin`, and `cargo mutants` runs that can exhaust memory. These are
 guardrails, not a sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the
@@ -335,12 +351,14 @@ folders only: in a plain clone a mixed reset moves `HEAD` and leaves the old fil
   clone, run `check.sh`.
 - After changing a hook or script, run `check.sh` and one end-to-end check in each tool.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
-  20 skill descriptions to every session. Grok follows `enabledPlugins` for skills but loads
-  the hooks of every installed Claude plugin, enabled or not (grok 1.0.77; `grok inspect`
-  marks them all enabled, and `[plugins] disabled` in `~/.grok/config.toml` does not reach
-  them). So uninstall a plugin with hooks that should stay off (`claude plugin uninstall`),
-  rather than only disabling it. Turn one on for a project in that project's
-  `.claude/settings.json` (`"enabledPlugins": {"cloudflare@cloudflare": true}`).
+  20 skill descriptions to every session. Since 2026-11-14 the shared copy enables only
+  `modern-python`, `rust-review`, `rust-analyzer-lsp` and `security-guidance`; the review
+  and analysis plugins it enabled before are off on every machine. Grok follows
+  `enabledPlugins` for skills but loads the hooks of every installed Claude plugin, enabled
+  or not (grok 1.0.77; `grok inspect` marks them all enabled, and `[plugins] disabled` in
+  `~/.grok/config.toml` does not reach them). So uninstall a plugin with hooks that should
+  stay off (`claude plugin uninstall`), rather than only disabling it. Turn one on for a
+  project in that project's `.claude/settings.json` (`"enabledPlugins": {"cloudflare@cloudflare": true}`).
 - `claude/skills/security-audit/` holds Cloudflare's security-audit skill from
   https://github.com/cloudflare/security-audit-skill/tree/c1c8a8c1471069fb0e188eeaff69b8e8db6564a8/skills/security-audit
   (2026-09-14) and the repo's MIT `LICENSE`, unchanged except that upstream `SKILL.md` is
