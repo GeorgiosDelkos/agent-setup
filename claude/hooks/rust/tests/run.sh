@@ -1962,6 +1962,12 @@ guard "pipe into bash -x file passes" 0 "echo '$rm_r x' | bash -x hook.sh"
 guard "pipe into bash -o pipefail file passes" 0 "echo '$rm_r x' | bash -o pipefail hook.sh"
 guard "pipe into bash file -s passes" 0 "echo '$rm_r x' | bash hook.sh -s"
 guard "|| before a shell is not a pipe" 0 "make || sh; echo '$rm_r x'"
+guard "pipe into bash --rcfile file blocked" 2 "echo '$rm_r x' | bash --rcfile /dev/null"
+guard "pipe into bash --rcfile=file blocked" 2 "echo '$rm_r x' | bash --rcfile=/dev/null"
+guard "pipe into bash +o errexit blocked" 2 "echo '$rm_r x' | bash +o errexit"
+guard "pipe into bash --rcfile file -s blocked" 2 "echo '$rm_r x' | bash --rcfile /dev/null -s"
+guard "push -o with a glued value holding an f passes" 0 "git push -onotify=off origin feature"
+guard "push -fo value blocked" 2 "git push -fo ci.skip origin feature"
 guard "stash apply, then drop, blocked" 2 "git stash apply && git stash drop"
 
 # A command substitution or a redirection among a push's words: simple_commands splits at

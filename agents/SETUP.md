@@ -80,10 +80,11 @@ Every agent runs with full bypass permissions, on every machine:
 
 Hooks still run under bypass: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
 git commands that discard uncommitted work, pushes that update `main`/`master`,
-`gh pr merge --admin`, and `cargo mutants` runs that can exhaust memory. These are
-guardrails, not a sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the
-Read tool only, and any Bash command can still read those files. Only Claude Code's
-sandbox settings would close that.
+`gh pr merge --admin`, `cargo mutants` runs that can exhaust memory, force pushes, and
+`git stash drop` and `clear` (the Hooks table has each rule). These are guardrails, not a
+sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the Read tool only, and any
+Bash command can still read those files. Only Claude Code's sandbox settings would close
+that.
 
 ## Hooks
 

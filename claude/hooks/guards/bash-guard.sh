@@ -39,9 +39,10 @@ code_text() {
     # Checked on the stripped text, so a message that mentions eval or bash -c is still data.
     # A shell, by name or path, with its options. -o and -O (alone or ending a cluster, as in
     # `-euo pipefail`) and --rcfile / --init-file take the next word as their value; read as
-    # a script operand, that word made `bash -euo pipefail -c ...` look like no hand-off.
-    my $value = qr/-[A-Za-z]*[oO]\s+\S+|--(?:rcfile|init-file)\s+\S+/;
-    my $options = qr/(?:\s+(?:$value|-[\w-]*))*/;
+    # a script operand, that word made `bash -euo pipefail -c ...` look like no hand-off. An
+    # option may carry its value after `=` (--rcfile=x) and may start with `+` (+o errexit).
+    my $value = qr/[-+][A-Za-z]*[oO]\s+\S+|--(?:rcfile|init-file)\s+\S+/;
+    my $options = qr/(?:\s+(?:$value|[-+][\w-]*(?:=\S*)?))*/;
     my $shell = qr/(?:[\w.~-]*\/)*(?:ba|z|da)?sh$options/;
     my $start = qr/(?:^|[;&|(]\s*|\s)/;
     my $runs = qr/(?:^|[;&|(]\s*)(?:eval|ssh)\s/;
@@ -235,8 +236,13 @@ push_effects() {
       -o | --push-option | --repo | --receive-pack | --exec) i=$((i + 1)) ;;
       --force | --force-w*) echo '~force' ;;
       --*) ;;
-      -*f*) echo '~force' ;;
-      -*) ;;
+      -*)
+        # A cluster of short options. From an `o` on, the rest of the word is the value of -o
+        # (-onotify=off), so only an f before it is the force option.
+        if [[ "${token%%o*}" == *f* ]]; then
+          echo '~force'
+        fi
+        ;;
       *) positional+=("$token") ;;
       esac
     done
