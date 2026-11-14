@@ -62,11 +62,12 @@ records the shared copy under `~/.local/state/agent-setup/`, so a key, hook even
 the shared copy drops later is removed from the machine at the next install. One exception:
 a plain value the machine changed since the last install stays when the shared copy drops
 its key, so dropping a key hands the choice to each machine without undoing the choices
-already made. The first
-install on a machine has no record yet: it keeps every local key, and a key the shared copy
-dropped before then stays until removed by hand. To share a setting with every
-machine, add only its key to `claude/settings.json` in a clone, through a PR. Copying the
-whole local file would also share machine-local keys (an effort level, a model override).
+already made. To force a value on every machine, set it in the shared copy: dropping its key
+removes it only where no one changed it. The first install on a machine has no record yet:
+it keeps every local key, and a key the shared copy dropped before then stays until removed
+by hand. To share a setting with every machine, add only its key to
+`claude/settings.json` in a clone, through a PR. Copying the whole local file would also
+share machine-local keys (an effort level, a model override).
 `model` is such a key and is not in the shared copy: each machine sets its own with `/model`.
 
 Grok scans `~/.claude/skills/` and `~/.claude/settings.json` by default
@@ -337,12 +338,12 @@ stopped after the clone is finished by the next one.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
   20 skill descriptions to every session. Since 2026-11-14 the shared copy enables only
   `modern-python`, `rust-review`, `rust-analyzer-lsp` and `security-guidance`; the review
-  and analysis plugins it enabled before are off on every machine. Grok follows `enabledPlugins` for skills but loads
-  the hooks of every installed Claude plugin, enabled or not (grok 1.0.77; `grok inspect`
-  marks them all enabled, and `[plugins] disabled` in `~/.grok/config.toml` does not reach
-  them). So uninstall a plugin with hooks that should stay off (`claude plugin uninstall`),
-  rather than only disabling it. Turn one on for a project in that project's
-  `.claude/settings.json` (`"enabledPlugins": {"cloudflare@cloudflare": true}`).
+  and analysis plugins it enabled before are off on every machine. Grok follows
+  `enabledPlugins` for skills but loads the hooks of every installed Claude plugin, enabled
+  or not (grok 1.0.77; `grok inspect` marks them all enabled, and `[plugins] disabled` in
+  `~/.grok/config.toml` does not reach them). So uninstall a plugin with hooks that should
+  stay off (`claude plugin uninstall`), rather than only disabling it. Turn one on for a
+  project in that project's `.claude/settings.json` (`"enabledPlugins": {"cloudflare@cloudflare": true}`).
 - `claude/skills/security-audit/` holds Cloudflare's security-audit skill from
   https://github.com/cloudflare/security-audit-skill/tree/c1c8a8c1471069fb0e188eeaff69b8e8db6564a8/skills/security-audit
   (2026-09-14) and the repo's MIT `LICENSE`, unchanged except that upstream `SKILL.md` is
