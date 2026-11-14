@@ -47,9 +47,8 @@
       "Read(~/Library/Application Support/**/phantom*/**)",
       "Read(~/Library/Application Support/**/solflare*/**)"
     ],
-    "defaultMode": "bypassPermissions"
+    "defaultMode": "auto"
   },
-  "model": "opus",
   "enableAllProjectMcpServers": false,
   "hooks": {
     "Notification": [
@@ -223,33 +222,33 @@
   },
   "enabledPlugins": {
     "arscontexta@agenticnotetaking": false,
-    "ask-questions-if-underspecified@trailofbits": true,
+    "ask-questions-if-underspecified@trailofbits": false,
     "audit-context-building@trailofbits": false,
     "building-secure-contracts@trailofbits": false,
     "burpsuite-project-parser@trailofbits": false,
-    "code-review@claude-plugins-official": true,
+    "code-review@claude-plugins-official": false,
     "constant-time-analysis@trailofbits": false,
     "culture-index@trailofbits": false,
-    "differential-review@trailofbits": true,
+    "differential-review@trailofbits": false,
     "dwarf-expert@trailofbits": false,
     "entry-point-analyzer@trailofbits": false,
     "firebase-apk-scanner@trailofbits": false,
-    "fix-review@trailofbits": true,
+    "fix-review@trailofbits": false,
     "frontend-design@claude-plugins-official": false,
     "modern-python@trailofbits": true,
-    "property-based-testing@trailofbits": true,
+    "property-based-testing@trailofbits": false,
     "rust-analyzer-lsp@claude-plugins-official": true,
     "rust-review@trailofbits": true,
     "security-guidance@claude-plugins-official": true,
     "semgrep-rule-creator@trailofbits": false,
     "semgrep-rule-variant-creator@trailofbits": false,
-    "sharp-edges@trailofbits": true,
+    "sharp-edges@trailofbits": false,
     "spec-to-code-compliance@trailofbits": false,
-    "static-analysis@trailofbits": true,
+    "static-analysis@trailofbits": false,
     "swift-lsp@claude-plugins-official": false,
     "testing-handbook-skills@trailofbits": false,
     "variant-analysis@trailofbits": false,
-    "typesafe@typesafe-ai": true,
+    "typesafe@typesafe-ai": false,
     "cloudflare@cloudflare": false
   },
   "extraKnownMarketplaces": {
