@@ -295,6 +295,10 @@ carry it, `install.sh` (`setup_git`) writes it on each machine, clones the git d
 where there is none, and leaves the synced files as they are. A run that
 stopped after the clone is finished by the next one.
 
+A machine without the file sync can use a plain clone as `$SETUP` instead: `setup_git`
+sees its `.git` directory and leaves it alone. That clone is then the deployed copy on that
+machine, and the rules below hold for it the same way.
+
 - The synced folder is the deployed copy: it should match `origin/main`. An edit made in it
   is live on every machine at the next sync, before any review or test, which is how
   unreviewed changes piled up there before. So:
@@ -323,6 +327,10 @@ stopped after the clone is finished by the next one.
 - `~/.config/agents/AGENTS.md` is the one rules file both tools read, on every machine,
   through the links. Change it like any other file here: in a clone, through a PR (Version
   control), never in place.
+- The `AGENTS.md` at the repo root is this repo's own rules file, loaded by an agent that
+  works in the repo (Claude through the root `CLAUDE.md`, which imports it). It carries the
+  rules an agent must have before its first edit here: the deployed copy is live, work in a
+  clone, run `check.sh`.
 - After changing a hook or script, run `check.sh` and one end-to-end check in each tool.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
   20 skill descriptions to every session. Grok follows `enabledPlugins` for skills but loads
