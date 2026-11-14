@@ -274,14 +274,27 @@ EVALS_MODEL=opus bash evals/run.sh
 
 - A task is a prompt in `evals/tasks/`, written as a user would ask, with no hint at the
   rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
-- A row of `results.tsv` has: whether the crate's own tests pass, the number of clippy
-  findings under the house lint table, the number of `house-check.pl` findings, the
-  `rust-style-reviewer` counts by severity, and the session's turns and cost. `no-change`
-  means the session failed or wrote nothing; `?` means a score could not be read. Neither
-  is a zero.
-- The sessions use this machine's `~/.claude`, so a run measures the deployed commit (the
-  header line names it), not the checkout the script is in. To measure a rules change,
-  merge and deploy it, then run.
+- A row of `results.tsv` has:
+  - `tests`: `pass`, `fail`, or `none` when the crate has no test;
+  - `diagnostics`: the distinct rustc and clippy diagnostics with the house lint table on,
+    errors included, each counted once though clippy reports it per build target;
+  - `house`: the number of `house-check.pl` findings;
+  - `blocker`, `major`, `minor`: the `rust-style-reviewer` counts;
+  - `turns`, `cost_usd`: the task session's.
+
+  `no-change` means the session wrote no Rust, committed or not; `?` means a score could
+  not be read. Neither is a zero.
+- The sessions use this machine's `~/.claude`, so a run measures the deployed setup, not
+  the checkout the script is in. The lint table and `house-check.pl` do come from the
+  script's checkout. The header line names both commits (in a synced folder, a commit is
+  what git knows; the files can be ahead of it). To measure a rules change, merge and
+  deploy it, then run from the deployed commit.
+- A session has the user's permissions and the machine's whole setup, and the scoring runs
+  the code it wrote. Run the harness only where you would let an agent work on such a
+  task. The memory hooks are off in these sessions (`HIPPIUS_MEM_HOOKS_BYPASS=1`), so an
+  eval run is not asked to write to the team's memory; the rules still tell it to recall.
+- A session is stopped after an hour, and a scoring build or test run after fifteen
+  minutes: a hung test gives `fail`, not a run that never ends.
 - Output goes to `~/.cache/agent-setup-evals/<UTC time>/` (`EVALS_OUT` moves it): the
   crates, the transcripts and `results.tsv`. To keep a baseline, copy `results.tsv` into
   `evals/results/` in a clone, named by date, commit and model, and commit it.

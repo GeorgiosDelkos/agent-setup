@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tests for evals/run.sh with a stub claude (CLAUDE_BIN) and real cargo: a scored row, a
-# session that changed nothing, a review without the findings line, and an unknown task.
+# Tests for evals/run.sh with a stub claude (CLAUDE_BIN) and real cargo. One run over
+# several tasks; the stub picks what the "session" does from the crate's name, so each
+# task below stands for one case.
 set -euo pipefail
 
 RUN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/run.sh"
@@ -19,61 +20,120 @@ check() {
   fi
 }
 
-# The stub is the task session without --agent and the reviewer with it. STUB_AGENT=idle
-# makes the session change nothing; STUB_REVIEW=prose makes the review end without counts.
-# The crate it writes has one house-check finding (a TODO without an owner) and at least one
-# clippy finding under the house lints (an undocumented public function).
+# The stub is the task session without --agent and the reviewer with it. The crate it
+# writes is clean under the house lints and has one house-check finding (a TODO without an
+# owner); the cases change one thing each.
 cat >"$WORK/claude" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
+crate="$(basename "$PWD")"
+good_lib() {
+  cat >src/lib.rs <<'RS'
+//! Stub crate.
+
+// TODO: finish this
+/// Returns two.
+#[must_use]
+pub fn two() -> u32 {
+    2
+}
+RS
+}
+a_test() {
+  cat >>src/lib.rs <<'RS'
+
+#[cfg(test)]
+mod tests {
+    use super::two;
+
+    #[test]
+    fn two_is_two() {
+        assert_eq!(two(), 2);
+    }
+}
+RS
+}
 if [[ "$*" == *--version* ]]; then
   echo "stub 0.0.0"
 elif [[ "$*" == *--agent* ]]; then
-  if [[ "${STUB_REVIEW:-}" == prose ]]; then
-    echo "Two findings, both minor."
-  else
-    printf 'src/lib.rs:3 major DOC-10\n\nfindings: blocker=1 major=2 minor=0\n'
-  fi
-elif [[ "${STUB_AGENT:-}" != idle ]]; then
-  printf '//! Stub crate.\n\n// TODO: finish this\npub fn two() -> u32 {\n    2\n}\n' >src/lib.rs
+  case "$crate" in
+  array-vec) echo "Two findings, both minor. blocker=0 major=0 minor=2 or so." ;;
+  cli-wc)
+    echo "For example:"
+    echo "findings: blocker=0 major=0 minor=0"
+    echo "findings: blocker=2 major=1 minor=0"
+    ;;
+  *) printf 'src/lib.rs:3 major DOC-10\n\nfindings: blocker=1 major=2 minor=0\n' ;;
+  esac
+else
+  case "$crate" in
+  kv-parse) ;;
+  lru-cache) touch Cargo.lock ;;
+  wal)
+    good_lib
+    a_test
+    git add -A
+    git -c user.name=t -c user.email=t@t commit -qm work
+    ;;
+  varint) good_lib ;;
+  interner)
+    good_lib
+    # An undocumented function (a warn lint, reported for the library and for its test
+    # harness) and a dbg! (a deny lint, which makes cargo clippy exit non-zero).
+    printf '\n#[must_use]\npub fn three() -> u32 {\n    dbg!(3)\n}\n' >>src/lib.rs
+    a_test
+    ;;
+  *)
+    good_lib
+    a_test
+    ;;
+  esac
   echo '{"num_turns": 3, "total_cost_usd": 0.5}'
 fi
 EOF
 chmod +x "$WORK/claude"
-export CLAUDE_BIN="$WORK/claude" EVALS_OUT="$WORK/out"
+# A space in the path: the file list given to house-check.pl must survive it.
+export CLAUDE_BIN="$WORK/claude" EVALS_OUT="$WORK/out dir"
 
-# The data row of the newest results file, as fields joined by a space.
+bash "$RUN" ring-buffer kv-parse lru-cache wal varint interner array-vec cli-wc \
+  >/dev/null 2>"$WORK/run.err" || {
+  echo "FAIL: the run exited non-zero"
+  cat "$WORK/run.err"
+  exit 1
+}
+results="$(find "$EVALS_OUT" -name results.tsv)"
+
+# The row of task $1, fields joined by a space.
 row() {
-  local file
-  file="$(find "$EVALS_OUT" -name results.tsv | sort | tail -n 1)"
-  tail -n 1 "$file" | tr '\t' ' '
+  awk -F '\t' -v task="$1" '$1 == task { $1 = $1; print }' "$results"
 }
 
-bash "$RUN" varint >/dev/null 2>&1
-read -r task tests clippy house blocker major minor turns cost <<<"$(row)"
-check "scored: task and tests" "varint pass" "$task $tests"
-check "scored: clippy found the undocumented function" yes \
-  "$([[ "$clippy" =~ ^[0-9]+$ && "$clippy" -gt 0 ]] && echo yes || echo "no ($clippy)")"
-check "scored: one house-check finding" 1 "$house"
-check "scored: review counts" "1 2 0" "$blocker $major $minor"
-check "scored: turns and cost from the session" "3 0.5" "$turns $cost"
-check "header names the claude version" 1 \
-  "$(head -n 1 "$(find "$EVALS_OUT" -name results.tsv | sort | tail -n 1)" | grep -c 'stub 0.0.0')"
+check "header names both commits and the claude version" 1 \
+  "$(head -n 1 "$results" | grep -c '^# deployed .*, checkers .*, model default, stub 0.0.0$')"
+check "every row has nine fields" "" \
+  "$(awk -F '\t' 'NR > 1 && NF != 9 { print NR ": " $0 }' "$results")"
+check "scored: tests, no diagnostics, one house finding, review counts, turns, cost" \
+  "ring-buffer pass 0 1 1 2 0 3 0.5" "$(row ring-buffer)"
+check "a session that wrote nothing: dashes, not a clean score" \
+  "kv-parse no-change - - - - - - -" "$(row kv-parse)"
+check "a session that left only Cargo.lock: dashes" \
+  "lru-cache no-change - - - - - - -" "$(row lru-cache)"
+check "a session that committed its work is scored" \
+  "wal pass 0 1 1 2 0 3 0.5" "$(row wal)"
+check "a crate without tests: none, not pass" "varint none" \
+  "$(row varint | cut -d ' ' -f 1,2)"
+check "a deny lint and a warn lint: two diagnostics, each counted once, in one cell" \
+  "interner pass 2" "$(row interner | cut -d ' ' -f 1-3)"
+check "a review without the findings line: unknown, not zero" "? ? ?" \
+  "$(row array-vec | cut -d ' ' -f 5-7)"
+check "the last findings line wins over an example before it" "2 1 0" \
+  "$(row cli-wc | cut -d ' ' -f 5-7)"
 
-# Runs are named by the second, so the next one needs a new name.
-sleep 1
-STUB_AGENT=idle bash "$RUN" varint >/dev/null 2>&1
-check "no change: a row of dashes, not a clean score" "varint no-change - - - - - - -" "$(row)"
-
-sleep 1
-STUB_REVIEW=prose bash "$RUN" varint >/dev/null 2>&1
-read -r _ _ _ _ blocker major minor _ <<<"$(row)"
-check "review without the findings line: unknown, not zero" "? ? ?" "$blocker $major $minor"
-
-sleep 1
 code=0
 bash "$RUN" no-such-task >/dev/null 2>&1 || code=$?
 check "unknown task: exit 2" 2 "$code"
+check "unknown task: no second output directory" 1 \
+  "$(find "$EVALS_OUT" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
