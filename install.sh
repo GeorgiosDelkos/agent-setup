@@ -40,7 +40,12 @@ link() {
 # The merge for merge_json, with three inputs: $l the local file, $s the shared copy, $p the
 # shared copy as of the last merge (null before the first). Objects merge key by key, the
 # shared value winning. A key the shared copy had last time and has dropped since is deleted,
-# so a setting or hook event removed from the shared file leaves every machine. An array is
+# so a setting or hook event removed from the shared file leaves every machine. The exception
+# is a plain value (a string, number or boolean) the machine has changed since that merge: the
+# shared file dropping `model` means "each machine picks", and deleting the machine's pick
+# would undo it. A dropped object or array goes whole, changed or not: telling the machine's
+# part of it from the shared part would need the array rules below, for a case not seen yet.
+# An array is
 # the shared one plus the local entries that neither the shared copy has nor it had last
 # time: those are another tool's (a hook another tool registered under PreToolUse), while an
 # entry the shared copy dropped goes. A hook group (an object with `hooks`) whose matcher a
@@ -61,7 +66,9 @@ def merge($l; $s; $p):
       + [($s | keys_unsorted)[] | select(. as $k | $l | has($k) | not)])[] as $k ({};
       if $s | has($k) then
         .[$k] = merge($l[$k]; $s[$k]; (if ($p | type) == "object" then $p[$k] else null end))
-      elif ($p | type) == "object" and ($p | has($k)) then .
+      elif ($p | type) == "object" and ($p | has($k)) then
+        if ($l[$k] | type | IN("object", "array") | not) and $l[$k] != $p[$k]
+        then .[$k] = $l[$k] else . end
       else .[$k] = $l[$k]
       end)
   elif ($s | type) == "array" and ($l | type) == "array" and ($p | type) == "array" then
