@@ -54,8 +54,8 @@ machine reaches every machine.
 | `~/Library/Application Support/JetBrains/Air/themes/` | `$SETUP/air/themes/` | `Dark-Blue.json`: Air's Dark theme with loud comments (code comments orange, doc comments green, TODOs yellow), per the Comments section of `AGENTS.md`. Edit it in Air with Edit Color Theme…; the save lands in the synced folder. `install.sh` moves an existing local `themes/` folder to the backup dir; to keep a theme from it, copy the file into `$SETUP/air/themes/`, which shares it with every machine. |
 | `~/Library/Application Support/JetBrains/Air/settings.json` | (file, merged from `$SETUP/air/settings.json`) | Selects the `Dark-Blue` theme. Other Air settings stay local. |
 
-`settings.json` is the one file that is not linked: Claude Code rewrites it in place, which
-would replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
+`settings.json` is merged, not linked: Claude Code rewrites it in place, which would
+replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh`
 merges it in: shared keys win, local-only keys stay, and an array (a hook list) keeps the
 local entries another tool added, a command added inside a shared hook group included. It
 records the shared copy under `~/.local/state/agent-setup/`, so a key, hook event or hook
@@ -295,6 +295,12 @@ carry it, `install.sh` (`setup_git`) writes it on each machine, clones the git d
 where there is none, and leaves the synced files as they are. A run that
 stopped after the clone is finished by the next one.
 
+A machine without the file sync can use a plain clone as `$SETUP` instead: `setup_git`
+sees its `.git` directory and leaves it alone. That clone is then the deployed copy on that
+machine. The first rule below holds for it (edit in a separate clone, land through a PR), and
+it updates with `git pull --ff-only`. The fetch and mixed reset further down are for synced
+folders only: in a plain clone a mixed reset moves `HEAD` and leaves the old files live.
+
 - The synced folder is the deployed copy: it should match `origin/main`. An edit made in it
   is live on every machine at the next sync, before any review or test, which is how
   unreviewed changes piled up there before. So:
@@ -323,6 +329,10 @@ stopped after the clone is finished by the next one.
 - `~/.config/agents/AGENTS.md` is the one rules file both tools read, on every machine,
   through the links. Change it like any other file here: in a clone, through a PR (Version
   control), never in place.
+- The `AGENTS.md` at the repo root is this repo's own rules file, loaded by an agent that
+  works in the repo (Claude through the root `CLAUDE.md`, which imports it). It carries the
+  rules an agent must have before its first edit here: the deployed copy is live, work in a
+  clone, run `check.sh`.
 - After changing a hook or script, run `check.sh` and one end-to-end check in each tool.
 - Heavy plugins stay off globally (`testing-handbook-skills`, `cloudflare`): each adds about
   20 skill descriptions to every session. Grok follows `enabledPlugins` for skills but loads
