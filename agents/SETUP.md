@@ -96,10 +96,11 @@ Claude Code runs in `auto` permission mode on every machine (changed from
 
 Hooks run in every mode: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
 git commands that discard uncommitted work, pushes that update `main`/`master`,
-`gh pr merge --admin`, and `cargo mutants` runs that can exhaust memory. These are
-guardrails, not a sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the
-Read tool only, and any Bash command can still read those files. Only Claude Code's
-sandbox settings would close that.
+`gh pr merge --admin`, `cargo mutants` runs that can exhaust memory, force pushes, and
+`git stash drop` and `clear` (the Hooks table has each rule). These are guardrails, not a
+sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the Read tool only, and any
+Bash command can still read those files. Only Claude Code's sandbox settings would close
+that.
 
 ## Hooks
 
@@ -124,7 +125,7 @@ sandbox settings would close that.
 | `memory/remember-checkpoint.sh` | Stop | When the main agent of a session that recalled made edits since it was last asked and since its last `remember`, blocks the stop with one question: is there a durable decision, gotcha, convention or reference to record? At most once every 30 minutes, since each ask costs a turn: edits after an ask (the fix for a stop another hook blocked, the last half hour of a session) can go unasked. Counts, not a once-per-session flag. Not for subagents or a hook-driven continuation. |
 | `common.sh` | sourced | Shared helpers: input parsing, path resolution against the hook's `cwd`, per-agent state, edition and `max_width` lookup. |
 | `tests/run.sh` | `check.sh`, and CI | Fixture and hook-input tests for all of the above. Run after any hook change. |
-| `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`); `git clean -f`, `git reset --hard`, and a checkout or restore of the whole tree (stash first); any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`; `gh pr merge --admin`; and `cargo mutants` with more than 2 jobs (`-j`, `--jobs`, `CARGO_MUTANTS_JOBS`), `--timeout`/`-t`, or `--baseline=skip` (TST-20). Quoted text (a commit message, a grep pattern) and heredoc bodies are data and never match, unless the command hands them to a shell (`bash -c`, `eval`, a pipe or heredoc into a shell). Tested in `rust/tests/run.sh`. |
+| `../guards/bash-guard.sh` | PreToolUse `Bash` | Blocks recursive `rm` and `find -delete` (use `trash`); `git clean -f`, `git reset --hard`, and a checkout or restore of the whole tree (stash first); `git stash drop` and `git stash clear`; any push that updates `main`/`master`: an explicit refspec, `--all`/`--mirror`, or a bare `git push`/`git push origin HEAD` while the current branch is `main`/`master`; a force push to any branch (`-f`, `--force`, `--force-with-lease`, a `+refspec`); `gh pr merge --admin`; and `cargo mutants` with more than 2 jobs (`-j`, `--jobs`, `CARGO_MUTANTS_JOBS`), `--timeout`/`-t`, or `--baseline=skip` (TST-20). Quoted text (a commit message, a grep pattern) and heredoc bodies are data and never match, unless the command hands them to a shell (`bash -c`, `eval`, a heredoc into a shell, a pipe into a shell that reads its script from stdin; a pipe into `bash file.sh` is data for that script). Tested in `rust/tests/run.sh`. |
 
 Claude Code's session scratchpad (`/tmp/claude-<uid>/<project>/<session>/scratchpad/`) is
 exempt unless a path there is in a git work tree on a branch with a commit, which may become a
