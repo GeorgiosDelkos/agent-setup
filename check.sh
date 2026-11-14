@@ -88,6 +88,7 @@ if [[ "${1:-}" != --quick ]]; then
   step "script tests" bash "$SETUP_DIR/claude/scripts/tests/grok-review.test.sh"
   step "claude review script tests" bash "$SETUP_DIR/claude/scripts/tests/claude-review.test.sh"
   step "install tests" bash "$SETUP_DIR/tests/install.test.sh"
+  step "eval harness tests" bash "$SETUP_DIR/evals/tests/run.test.sh"
 fi
 
 exit "$failed"
