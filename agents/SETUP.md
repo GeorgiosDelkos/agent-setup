@@ -260,6 +260,37 @@ subscriptions have changed several times. If it stops being allowed, either:
     once, with the finding.
   - Afterwards `$TMPDIR/claude-rust-hooks/<session>.*.edited` is empty.
 
+## Evals
+
+The hook tests show that the hooks work. `evals/run.sh` shows what the rules produce: it
+runs fixed Rust tasks through headless Claude sessions on this machine and scores each
+result, so a rules change or a new model can be compared with the run before it.
+
+```sh
+bash evals/run.sh            # all ten tasks; about 20 sessions of usage
+bash evals/run.sh varint     # one task
+EVALS_MODEL=opus bash evals/run.sh
+```
+
+- A task is a prompt in `evals/tasks/`, written as a user would ask, with no hint at the
+  rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
+- A row of `results.tsv` has: whether the crate's own tests pass, the number of clippy
+  findings under the house lint table, the number of `house-check.pl` findings, the
+  `rust-style-reviewer` counts by severity, and the session's turns and cost. `no-change`
+  means the session failed or wrote nothing; `?` means a score could not be read. Neither
+  is a zero.
+- The sessions use this machine's `~/.claude`, so a run measures the deployed commit (the
+  header line names it), not the checkout the script is in. To measure a rules change,
+  merge and deploy it, then run.
+- Output goes to `~/.cache/agent-setup-evals/<UTC time>/` (`EVALS_OUT` moves it): the
+  crates, the transcripts and `results.tsv`. To keep a baseline, copy `results.tsv` into
+  `evals/results/` in a clone, named by date, commit and model, and commit it.
+- One run is one sample per task from a model. Read a difference between two runs only
+  when several tasks move the same way.
+- The tasks check no fixed behaviour: `tests` is the crate's own suite, which the session
+  wrote. A task whose result must be checked from outside needs a test file the harness
+  copies in after the session, which it does not do yet.
+
 ## Applying the Rust templates to a repo
 
 Per repo, and only with the owner's consent:
