@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PreToolUse (Bash / run_terminal_command): block recursive deletes (use `trash`, which can be
-# undone), git commands that throw away uncommitted work, pushes that update main or master
-# (use a feature branch and a PR), admin merges that skip a PR's checks, and `cargo mutants`
+# undone), git commands that throw away uncommitted or stashed work, pushes that update main
+# or master (use a feature branch and a PR), force pushes, admin merges that skip a PR's
+# checks, and `cargo mutants`
 # runs that let a runaway mutant exhaust memory. Reads Claude's `tool_input.command`, which
 # Grok also sends as a snake_case alias.
 #
@@ -22,8 +23,9 @@ block() {
 # written: heredoc bodies are dropped, and a quoted string holding a space or a shell operator
 # (a commit message, a grep pattern) becomes Q. Other quotes only lose their quote marks, so
 # `"main"` stays a refspec, and a double-quoted `$(...)` stays code. A command that hands text
-# to a shell (`bash -c`, `eval`, `ssh`, a pipe or heredoc into a shell) is kept whole: there
-# the quoted text is what runs. Backslash line continuations are joined first.
+# to a shell (`bash -c`, `eval`, `ssh`, a heredoc into a shell, a pipe into a shell that reads
+# its script from stdin) is kept whole: there the quoted text is what runs. Backslash line
+# continuations are joined first.
 code_text() {
   perl -0777 -ne '
     sub data { my $text = shift; $text =~ /[\s;&|()<>]/ ? "Q" : $text }
@@ -39,7 +41,14 @@ code_text() {
     my $shell = qr/(?:ba|z|da)?sh(?:\s+--?[\w-]+)*/;
     my $start = qr/(?:^|[;&|(]\s*|\s)/;
     my $runs = qr/(?:^|[;&|(]\s*)(?:eval|ssh)\s/;
-    if (/$start(?:$shell\s+-\w*c\b|$shell\s*<<)|$runs|\|\s*$shell(?:\s|$)/) {
+    # A pipe into a shell hands the piped text over only when the shell reads its script from
+    # stdin: nothing but options follow the shell, or -s is among them. `... | bash hook.sh`
+    # runs the file and gets the pipe as data, so its quoted arguments stay data.
+    my $options = qr/(?:\s+-[\w-]*)*/;
+    my $reads_stdin = qr/(?=$options\s+-[A-Za-z]*s[A-Za-z]*(?:\s|\z))/;
+    my $no_script = qr/$options\s*(?:\z|[;&|)\n]|\d*[<>])/;
+    my $piped = qr/\|\s*(?:ba|z|da)?sh(?:$reads_stdin|$no_script)/;
+    if (/$start(?:$shell\s+-\w*c\b|$shell\s*<<)|$runs|$piped/) {
       print $original;
       exit;
     }
@@ -78,7 +87,12 @@ simple_commands() {
 # Why the first simple command in $1 that throws away uncommitted work does so, or nothing.
 # trash cannot bring any of it back: `git clean -f` deletes untracked files, `git reset
 # --hard` and a checkout or restore of the whole tree overwrite every uncommitted change. A
-# single path (`git checkout -- src/x.rs`) and `git restore --staged` pass.
+# single path (`git checkout -- src/x.rs`) and `git restore --staged` pass. `git stash drop`
+# and `git stash clear` delete the changes a stash holds, which is where this guard's own
+# messages send uncommitted work.
+#
+# `git branch -D` is deliberately not here: the branch's commits stay reachable through the
+# reflog, and review-pr.md (Worktrees) uses it to remove a merged PR's branch.
 discards_work() {
   # git as a word anywhere in the simple command, with the same boundary as the gh check
   # below, so a prefix (VAR=value, `env`, `sudo`, `command`, a full path, `then`) does not
@@ -116,6 +130,11 @@ discards_work() {
     fi
     if [[ "$segment" =~ ${git}(checkout|switch)[[:space:]] && "$segment" =~ $discard ]]; then
       echo "a forced checkout or switch throws away uncommitted changes: git stash them first"
+      return
+    fi
+    if [[ "$segment" =~ ${git}stash[[:space:]]+(drop|clear)([[:space:]]|$) ]]; then
+      echo "git stash drop and git stash clear delete stashed changes: apply the stash" \
+        "(git stash pop), or leave it and tell the user"
       return
     fi
   done < <(simple_commands "$1")
@@ -171,6 +190,9 @@ git_push_at() {
 # Branches the `git push` invocations in $1 update, one per line: each refspec's
 # destination, the current branch for `HEAD` or a push without a refspec (it pushes the
 # current branch under push.default simple or upstream), `*` for --all, --branches, --mirror.
+# A forced push adds the line `~force`, which no branch name can be (git forbids `~` in a
+# ref name): -f alone or in a cluster of short options (-uf), --force, --force-with-lease
+# with or without a value, or a refspec that starts with `+`.
 # The command is walked one simple command at a time so that `cd repo && git push` looks up
 # the branch of `repo`, not of the session's directory.
 pushed_branches() {
@@ -194,6 +216,9 @@ pushed_branches() {
       case "$token" in
       --all | --branches | --mirror) echo '*' ;;
       -o | --push-option | --repo | --receive-pack | --exec) i=$((i + 1)) ;;
+      --force | --force-with-lease | --force-with-lease=*) echo '~force' ;;
+      --*) ;;
+      -*f*) echo '~force' ;;
       -*) ;;
       *) positional+=("$token") ;;
       esac
@@ -203,6 +228,9 @@ pushed_branches() {
       continue
     fi
     for refspec in "${positional[@]:1}"; do
+      if [[ "$refspec" == +* ]]; then
+        echo '~force'
+      fi
       refspec="${refspec#+}"
       refspec="${refspec##*:}"
       refspec="${refspec#refs/heads/}"
@@ -229,6 +257,12 @@ fi
 branches="$(pushed_branches "$code")"
 if grep -qxE 'main|master|\*' <<<"$branches"; then
   block "push to a feature branch and open a PR, never directly to main/master"
+fi
+# The permission deny list has `git push --force*`, but it matches only a command that starts
+# that way: `git push -f`, a `+refspec`, and `git -C dir push --force` got past it.
+if grep -qx '~force' <<<"$branches"; then
+  block "a force push replaces commits on the remote branch: add a commit on top and push" \
+    "it, or leave the force push to the user"
 fi
 
 # Why the first `cargo mutants` in $1 can let a runaway mutant exhaust memory, or nothing.

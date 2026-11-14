@@ -1909,5 +1909,47 @@ guard "cargo build -j 8 passes" 0 "cargo build -j 8"
 guard "cargo install cargo-mutants -j 8 passes" 0 "cargo install cargo-mutants -j 8"
 guard "quoted mutants mention passes" 0 "git commit -m 'never cargo mutants -j 4'"
 
+# Force pushes, to any branch. The refspec is named, so the current branch does not matter.
+guard "push -f blocked" 2 "git push -f origin feature"
+guard "push --force blocked" 2 "git push --force origin feature"
+guard "push --force-with-lease blocked" 2 "git push --force-with-lease origin feature"
+guard "push --force-with-lease=ref blocked" 2 \
+  "git push --force-with-lease=feature:abc origin feature"
+guard "push -uf blocked" 2 "git push -uf origin feature"
+guard "push +refspec blocked" 2 "git push origin +feature"
+guard "push +src:dst blocked" 2 "git push origin +HEAD:feature"
+guard "git -C dir push --force blocked" 2 "git -C $GREPO push --force origin feature"
+guard "bash -c push -f blocked" 2 "bash -c \"git push -f origin feature\""
+guard "push -f after && blocked" 2 "git commit -m x && git push -f origin feature"
+guard "push -u passes" 0 "git push -u origin feature"
+guard "push --follow-tags passes" 0 "git push --follow-tags origin feature"
+guard "push --force-if-includes alone passes" 0 "git push --force-if-includes origin feature"
+guard "push -o value with an f passes" 0 "git push -o notify=off origin feature"
+guard "quoted force push mention passes" 0 "git commit -m 'never git push -f origin feature'"
+
+# Stashed work, and the branch delete that is allowed on purpose.
+guard "stash drop blocked" 2 "git stash drop"
+guard "stash drop of one entry blocked" 2 "git -C $GREPO stash drop stash@{1}"
+guard "stash clear blocked" 2 "git stash clear"
+guard "stash passes" 0 "git stash"
+guard "stash pop passes" 0 "git stash pop"
+guard "stash list passes" 0 "git stash list"
+guard "quoted stash drop mention passes" 0 "git commit -m 'never git stash drop'"
+guard "branch -D passes" 0 "git branch -D feature"
+
+# A pipe into a shell that runs a script file is data for that script, so quoted text in the
+# command stays data; a pipe into a shell that reads its script from stdin is code.
+guard "pipe into bash file: quoted rm -r passes" 0 "echo '{}' | bash hook.sh; grep '$rm_r x' log"
+guard "pipe into bash file with a quoted arg passes" 0 "cat in | bash hook.sh '$rm_r x'"
+guard "pipe into bash file: unquoted rm -r blocked" 2 "cat in | bash hook.sh && $rm_r x"
+guard "pipe into bash blocked" 2 "echo '$rm_r x' | bash"
+guard "pipe into bash, then more, blocked" 2 "echo '$rm_r x' | bash; ls"
+guard "pipe into bash with a redirect blocked" 2 "echo '$rm_r x' | bash >/dev/null 2>&1"
+guard "pipe into bash -s with args blocked" 2 "echo '$rm_r x' | bash -s arg"
+guard "pipe into bash -es blocked" 2 "echo '$rm_r x' | bash -es -- arg"
+guard "pipe into bash - blocked" 2 "echo '$rm_r x' | bash -"
+guard "pipe into sh --posix blocked" 2 "echo '$rm_r x' | sh --posix"
+guard "pipe into bash on the next line blocked" 2 "echo '$rm_r x' | bash"$'\n'"ls"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
