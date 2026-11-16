@@ -276,22 +276,38 @@ not_written_by_git() {
 }
 
 # `<time><TAB><new commit><TAB><root>/<path>` for each file a HEAD move (checkout, reset,
-# clean merge, rebase,
-# pull) in the reflog of $1 at or after epoch second $2 changed, from the diff of the move's
-# old and new commit (the next older reflog entry's commit is the old one). Nothing for a
-# repo with no reflog.
+# clean merge, rebase, pull) in the reflog of $1 at or after epoch second $2 changed, from
+# the diff of the move's old and new commit (the next older reflog entry's commit is the old
+# one). Nothing for a repo with no reflog.
+#
+# The creation of the checkout is a move from nothing that wrote every tracked file. It is
+# the oldest entry, with no older one to diff against: `git worktree add` logs an empty
+# subject, then checks out the files and logs `reset: moving to HEAD` on the same commit, so
+# that entry's time bounds the files' mtimes; `git clone` logs `clone: from ...`.
+# `commit (initial)` is not one: the session wrote those files. An expired reflog cannot pass
+# for a creation, because the entry must be at or after the cutoff, inside this session.
 git_moves_since() {
   local root="$1" cutoff="$2" time old new
   while read -r time old new; do
-    git -c core.quotepath=off -C "$root" diff --name-only "$old" "$new" 2>/dev/null |
-      awk -v time="$time" -v new="$new" -v root="$root" \
-        '{ print time "\t" new "\t" root "/" $0 }' || true
+    if [[ "$old" == - ]]; then
+      git -c core.quotepath=off -C "$root" ls-tree -r --name-only "$new" 2>/dev/null
+    else
+      git -c core.quotepath=off -C "$root" diff --name-only "$old" "$new" 2>/dev/null
+    fi | awk -v time="$time" -v new="$new" -v root="$root" \
+      '{ print time "\t" new "\t" root "/" $0 }' || true
   done < <({ git -C "$root" reflog show --date=unix --format='%gd %H %gs' HEAD 2>/dev/null ||
     true; } | awk -v cutoff="$cutoff" '
       { sub(/^HEAD@\{/, "", $1); sub(/\}$/, "", $1)
-        time[NR] = $1; sha[NR] = $2; move[NR] = ($3 ~ /^(checkout|reset|merge|rebase|pull)/) }
+        time[NR] = $1; sha[NR] = $2; subject = $0; sub(/^[^ ]+ [^ ]+ ?/, "", subject)
+        move[NR] = (subject ~ /^(checkout|reset|merge|rebase|pull)/)
+        reset_head[NR] = (subject == "reset: moving to HEAD")
+        created[NR] = (subject == "" || subject ~ /^clone: /) }
       END { for (i = 1; i < NR; i++)
-              if (move[i] && time[i] >= cutoff) print time[i], sha[i + 1], sha[i] }')
+              if (move[i] && time[i] >= cutoff) print time[i], sha[i + 1], sha[i]
+            if (NR && created[NR] && time[NR] >= cutoff) {
+              t = time[NR]
+              if (NR > 1 && reset_head[NR - 1] && sha[NR - 1] == sha[NR]) t = time[NR - 1]
+              print t, "-", sha[NR] } }')
 }
 
 # The files among the `root<TAB>file` pairs $1 that skill $2 covers, modified after this

@@ -1486,6 +1486,50 @@ run_hook tests-ran.sh "$(bash_cmd py1 'shellcheck run.sh && shfmt -d -i 2 run.sh
 expect "lang-stop: shellcheck and shfmt cover the shell change" 0 check-on-stop.sh \
   "$(cstop py1 "$PY")"
 
+# A worktree or clone made in the session, of a branch whose commits change files against
+# main: git wrote every file, so nothing asks until the session edits one, and then only
+# that one (issue #34).
+PYW="$WORK/py-new-checkouts"
+mkdir -p "$PYW"
+printf 'x = 1\n' >"$PYW/app.py"
+git -C "$PYW" init -q -b main
+old_commit "$PYW" init
+git -C "$PYW" checkout -q -b side
+printf 'x = 2\n' >"$PYW/app.py"
+printf 'echo a\n' >"$PYW/a.sh"
+printf 'echo b\n' >"$PYW/b.sh"
+old_commit "$PYW" "someone else's branch"
+git -C "$PYW" checkout -q main
+prompt py3 "$PYW"
+# new_checkout_case NAME DIR: a stop in the new checkout DIR records its baseline; the
+# session then commits notes there, so it changed the checkout, and the next stop judges the
+# files the branch carries.
+new_checkout_case() {
+  run_hook check-on-stop.sh "$(cstop py3 "$2")"
+  printf 'notes\n' >"$2/notes-$1.md"
+  commit_all "$2" notes
+  expect "lang-stop: a new $1's checkout does not ask" 0 check-on-stop.sh "$(cstop py3 "$2")"
+}
+git -C "$PYW" worktree add -q "$WORK/py-new-worktree" side
+new_checkout_case worktree "$WORK/py-new-worktree"
+printf 'echo mine\n' >>"$WORK/py-new-worktree/a.sh"
+expect "lang-stop: an edit in the new worktree asks" 2 check-on-stop.sh \
+  "$(cstop py3 "$WORK/py-new-worktree")" "No check since this shell changed"
+check "lang-stop: only the edited file is named" \
+  "$([[ "$out" == *a.sh* && "$out" != *b.sh* && "$out" != *app.py* ]] && echo yes)" "$out"
+git clone -q -b side "$PYW" "$WORK/py-new-clone"
+new_checkout_case clone "$WORK/py-new-clone"
+# A repo the session made itself: its first commit holds the session's own files.
+PYI="$WORK/py-session-init"
+mkdir -p "$PYI"
+prompt py4 "$PYI"
+printf 'echo new\n' >"$PYI/new.sh"
+run_hook fmt-on-edit.sh "$(edit py4 "$PYI/new.sh" 'echo new')"
+git -C "$PYI" init -q -b main
+commit_all "$PYI" init
+expect "lang-stop: files of a repo the session created ask" 2 check-on-stop.sh \
+  "$(cstop py4 "$PYI")" "No check since this shell changed"
+
 # A subagent is asked only about the language file it recorded.
 PY2="$WORK/py-sub"
 mkdir -p "$PY2"
