@@ -11,7 +11,8 @@
 #
 # Exit status: 0 review written; 1 the run failed (output not usable); 2 the output held
 # material from the review home's credential and was deleted; 3 Grok is unavailable (not
-# installed, review home missing, not signed in, sign-in could not be refreshed); 64 usage.
+# installed, review home or profile missing, profile not expanded by install.sh, not signed
+# in, sign-in could not be refreshed); 64 usage.
 #
 # GROK_BIN, GROK_REVIEW_HOME and GROK_DOCKER_SOCKET override the grok binary, the review
 # home and the socket path /var/run/docker.sock (tests).
@@ -44,8 +45,9 @@ docker_socket="${GROK_DOCKER_SOCKET:-/var/run/docker.sock}"
 [[ -f "$home/sandbox.toml" && ! -L "$home/sandbox.toml" ]] ||
   unavailable "no pr-review profile in $home (run install.sh)"
 # A `~` deny would resolve against the review's empty HOME and deny nothing. A profile
-# copied before install.sh expanded them still has one.
-if grep -q '"~' "$home/sandbox.toml"; then
+# copied before install.sh expanded them still has one. Any TOML string that starts with `~`,
+# basic ("...") or literal ('...'), outside comments.
+if grep -v '^[[:space:]]*#' "$home/sandbox.toml" | grep -q "[\"']~"; then
   unavailable "the pr-review profile in $home has '~' paths (run install.sh)"
 fi
 # A regular, non-empty file; never read here, so the credential stays out of any output.

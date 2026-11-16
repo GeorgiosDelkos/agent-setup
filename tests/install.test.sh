@@ -114,7 +114,12 @@ check "no record: shared arrays, no removal" '{"hooks":{"Stop":["s1"]},"old":1}'
 # own empty HOME; a second run finds the copy current and changes nothing.
 profile="$HOME/.grok-review/sandbox.toml"
 setup_grok_review >/dev/null
-check "review profile: no ~ path left" 0 "$(grep -c '"~' "$profile" || true)"
+# The same test grok-review.sh applies before a review.
+check "review profile: no ~ path left" 0 \
+  "$(grep -v '^[[:space:]]*#' "$profile" | grep -c "[\"']~" || true)"
+check "review profile: comments unchanged" same \
+  "$(diff <(grep '^#' "$SETUP_DIR/grok/review-sandbox.toml") <(grep '^#' "$profile") >/dev/null &&
+    echo same)"
 check "review profile: ~/.grok denied by absolute path" 1 \
   "$(grep -cxF "  \"$HOME/.grok\"," "$profile" || true)"
 check "review profile: mode 600" 600 "$(stat -f %Lp "$profile")"

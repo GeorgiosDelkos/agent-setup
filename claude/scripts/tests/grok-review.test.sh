@@ -393,11 +393,18 @@ mv "$WORK/home-real" "$home"
 # A profile copied before install.sh expanded `~`: under the review's own HOME it would
 # deny nothing.
 cp "$home/sandbox.toml" "$WORK/sandbox.toml"
-printf '[profiles.pr-review]\ndeny = ["~/.grok"]\n' >"$home/sandbox.toml"
+for deny in '"~/.grok"' "'~/.grok'"; do
+  printf '[profiles.pr-review]\ndeny = [%s]\n' "$deny" >"$home/sandbox.toml"
+  code="$(run ok "$WORK/x.txt")"
+  check "profile with $deny: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+  check "profile with $deny: grok not run" "$([[ ! -e "$WORK/log.order" ]] &&
+    echo yes || echo no)"
+done
+# A comment that mentions `"~/` is not a path.
+printf '# each "~/ path is expanded\n' >>"$WORK/sandbox.toml"
+cp "$WORK/sandbox.toml" "$home/sandbox.toml"
 code="$(run ok "$WORK/x.txt")"
-check "profile with ~ paths: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
-check "profile with ~ paths: grok not run" "$([[ ! -e "$WORK/log.order" ]] &&
-  echo yes || echo no)"
+check "profile with ~ only in a comment: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
 mv "$WORK/sandbox.toml" "$home/sandbox.toml"
 # ---- a relative repo path and a head that is not in the clone ------------------------------
 printf 'ok\n' >"$WORK/stub.mode"

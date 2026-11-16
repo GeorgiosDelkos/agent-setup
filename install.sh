@@ -381,7 +381,9 @@ setup_grok_review() {
   mkdir -p "$home"
   chmod 700 "$home"
   # Write beside it, then rename over it, so a failed copy leaves the old profile.
-  HOME_DIR="$HOME" perl -pe 's{"~/}{"$ENV{HOME_DIR}/}g' "$source" >"$target.new"
+  # A TOML basic ("...") or literal ('...') string; comments are left as they are.
+  HOME_DIR="$HOME" perl -pe 'next if /^\s*#/; s{(["'\''])~/}{$1$ENV{HOME_DIR}/}g' "$source" \
+    >"$target.new"
   if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$target.new" "$target"; then
     rm -f "$target.new"
     echo "ok      $target"

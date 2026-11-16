@@ -1,8 +1,9 @@
 # Sandbox profile for the Grok review (claude/scripts/grok-review.sh, which
 # claude/commands/review-pr.md calls). install.sh copies it to ~/.grok-review/sandbox.toml:
 # a copy, not a link, because grok refuses to apply a profile from a symlinked sandbox.toml.
-# The copy has each `"~/` expanded to the machine's HOME: the review runs with an empty
-# HOME, where `~` would deny nothing, and grok-review.sh refuses a profile that still has one.
+# The copy has each path that starts with `~/` expanded to the machine's HOME: the review
+# runs with an empty HOME, where `~` would deny nothing, and grok-review.sh refuses a
+# profile that still has one.
 #
 # The review runs with GROK_HOME=~/.grok-review, a separate home with its own login, so the
 # main ~/.grok (its credential and its session transcripts) can be denied here. The script
