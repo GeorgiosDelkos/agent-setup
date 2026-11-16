@@ -1501,14 +1501,16 @@ printf 'echo b\n' >"$PYW/b.sh"
 old_commit "$PYW" "someone else's branch"
 git -C "$PYW" checkout -q main
 prompt py3 "$PYW"
-# new_checkout_case NAME DIR: a stop in the new checkout DIR records its baseline; the
-# session then commits notes there, so it changed the checkout, and the next stop judges the
-# files the branch carries.
+# new_checkout_case NAME DIR [SESSION]: a stop in the new checkout DIR records its baseline;
+# the session then commits notes there, so it changed the checkout, and the next stop judges
+# the files the branch carries.
 new_checkout_case() {
-  run_hook check-on-stop.sh "$(cstop py3 "$2")"
+  local session="${3:-py3}"
+  run_hook check-on-stop.sh "$(cstop "$session" "$2")"
   printf 'notes\n' >"$2/notes-$1.md"
   commit_all "$2" notes
-  expect "lang-stop: a new $1's checkout does not ask" 0 check-on-stop.sh "$(cstop py3 "$2")"
+  expect "lang-stop: a new $1's checkout does not ask" 0 check-on-stop.sh \
+    "$(cstop "$session" "$2")"
 }
 git -C "$PYW" worktree add -q "$WORK/py-new-worktree" side
 new_checkout_case worktree "$WORK/py-new-worktree"
@@ -1519,6 +1521,31 @@ check "lang-stop: only the edited file is named" \
   "$([[ "$out" == *a.sh* && "$out" != *b.sh* && "$out" != *app.py* ]] && echo yes)" "$out"
 git clone -q -b side "$PYW" "$WORK/py-new-clone"
 new_checkout_case clone "$WORK/py-new-clone"
+# A large clone logs its entry, then writes files for seconds. Moving the entry 2s back
+# makes the files written after it, as there; the index, written last, still bounds them.
+prompt py5 "$PYW"
+sleep 2.1
+git clone -q -b side "$PYW" "$WORK/py-slow-clone"
+perl -i -pe 's/(> )(\d+)( [-+]\d{4}\tclone: )/$1 . ($2 - 2) . $3/e' \
+  "$WORK/py-slow-clone/.git/logs/HEAD"
+new_checkout_case "slow clone" "$WORK/py-slow-clone" py5
+# A branch of thousands of files: the checkout's list of every tracked file once passed the
+# limit on a program's environment, and every file asked.
+PYB="$WORK/py-big"
+mkdir -p "$PYB"
+printf 'x = 1\n' >"$PYB/app.py"
+git -C "$PYB" init -q -b main
+old_commit "$PYB" init
+git -C "$PYB" checkout -q -b side
+mkdir -p "$PYB/scripts/with-a-long-directory-name-to-fill-the-path"
+for ((i = 0; i < 8000; i++)); do
+  printf 'echo %d\n' "$i" >"$PYB/scripts/with-a-long-directory-name-to-fill-the-path/s$i.sh"
+done
+old_commit "$PYB" "a big branch"
+git -C "$PYB" checkout -q main
+prompt py6 "$PYB"
+git -C "$PYB" worktree add -q "$WORK/py-big-worktree" side
+new_checkout_case "large worktree" "$WORK/py-big-worktree" py6
 # A repo the session made itself: its first commit holds the session's own files.
 PYI="$WORK/py-session-init"
 mkdir -p "$PYI"
