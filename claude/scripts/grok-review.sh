@@ -41,6 +41,14 @@ grok_bin="${GROK_BIN:-$(command -v grok || true)}"
 [[ -d "$home" && ! -L "$home" ]] || unavailable "no review home at $home (run install.sh)"
 [[ -f "$home/sandbox.toml" && ! -L "$home/sandbox.toml" ]] ||
   unavailable "no pr-review profile in $home (run install.sh)"
+# The policy that stops plugin hooks and MCP servers (grok/review-requirements.toml). An
+# older install has an empty requirements.toml there, which Grok creates itself.
+policy="$home/requirements.toml"
+if [[ ! -f "$policy" || -L "$policy" ]] ||
+  ! grep -qx 'allow_managed_hooks_only = true' "$policy" ||
+  ! grep -qx 'allow_managed_mcp_servers_only = true' "$policy"; then
+  unavailable "no review policy in $policy (run install.sh)"
+fi
 # A regular, non-empty file; never read here, so the credential stays out of any output.
 [[ -f "$home/auth.json" && ! -L "$home/auth.json" && -s "$home/auth.json" ]] ||
   unavailable "the review home is not signed in: GROK_HOME=$home grok login"
@@ -167,6 +175,18 @@ purge_runs() {
   fi
 }
 
+# The review runs with the user's HOME (see below), so it turns off Grok's scans of Claude
+# and Cursor config: skills, commands, rules, agents, hooks and MCP servers. The sign-in,
+# with an empty HOME, gets the same switches so the two calls cannot drift apart. `0`, not
+# `false`: grok 1.0.77 ignored `false` (`grok inspect` showed the cells at their default).
+# Plugin hooks escape these; the review home's policy stops them.
+no_compat=()
+for vendor in CLAUDE CURSOR; do
+  for surface in SKILLS RULES AGENTS MCPS HOOKS; do
+    no_compat+=("GROK_${vendor}_${surface}_ENABLED=0")
+  done
+done
+
 mkdir -p "$home/runs" "$home/tmp"
 run=""
 locked=""
@@ -214,7 +234,7 @@ mkdir "$run/signin" "$run/signin-home"
 signin_status=0
 run_limited "$signin_limit" env -i HOME="$run/signin-home" PATH="/usr/bin:/bin" \
   TMPDIR="$home/tmp/" \
-  GROK_HOME="$home" GROK_MEMORY=0 GROK_AUTH_EARLY_INVALIDATION_SECS=86400 \
+  GROK_HOME="$home" GROK_MEMORY=0 "${no_compat[@]}" GROK_AUTH_EARLY_INVALIDATION_SECS=86400 \
   "$grok_bin" --cwd "$run/signin" \
   --tools list_dir --disallowed-tools search_tool,use_tool \
   --disable-web-search --no-subagents --max-turns 1 \
@@ -245,12 +265,14 @@ cp "$prompt" "$run/prompt.md"
 
 # The user's HOME, unlike the sign-in: the profile's `~` denies and strict's own runtime
 # socket denies resolve against it. With an empty HOME the sandbox refuses to start,
-# because /var/run/docker.sock links into ~/.docker (grok 1.0.77). Asked from inside, a
-# review run this way saw none of ~/.claude's skills, rules, plugin hooks or MCP servers,
-# only Grok's bundled skills (checked 2026-11-11), though `grok inspect` lists them.
+# because /var/run/docker.sock links into ~/.docker (grok 1.0.77). So the Claude config
+# under that HOME is kept out by `no_compat` and the review home's policy instead. Asked
+# from inside, a review run this way listed only Grok's bundled skills and no hooks, MCP
+# servers or instruction files (checked 2026-11-16). `grok inspect` still lists the skills
+# in ~/.agents/skills, a native Grok directory with no switch.
 status=0
 run_limited "$review_limit" env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
-  GROK_HOME="$home" GROK_MEMORY=0 \
+  GROK_HOME="$home" GROK_MEMORY=0 "${no_compat[@]}" \
   "$grok_bin" --cwd "$wt" --sandbox pr-review \
   --tools read_file,grep,list_dir --disallowed-tools search_tool,use_tool \
   --disable-web-search --no-subagents \

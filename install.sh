@@ -366,33 +366,42 @@ setup_cargo() {
 }
 
 # The Grok review home (claude/scripts/grok-review.sh): GROK_HOME for review runs, with its
-# own login so the main ~/.grok is out of reach, and the pr-review sandbox profile. The
-# profile is copied, not linked: grok refuses a symlinked sandbox.toml. A symlinked home is
-# refused: chmod and the copy would follow it, into ~/.grok for example.
+# own login so the main ~/.grok is out of reach, the pr-review sandbox profile, and the
+# policy that keeps hooks and MCP servers from loading. Both files are copied, not linked:
+# grok refuses a symlinked sandbox.toml, and a policy file must not change under a running
+# review. A symlinked home is refused: chmod and the copy would follow it, into ~/.grok for
+# example.
 setup_grok_review() {
-  local home="$HOME/.grok-review" source="$SETUP_DIR/grok/review-sandbox.toml"
-  local target="$home/sandbox.toml"
+  local home="$HOME/.grok-review"
   if [[ -L "$home" ]]; then
     echo "skip    $home is a symlink; make it a real directory to enable Grok reviews" >&2
     return 0
   fi
   mkdir -p "$home"
   chmod 700 "$home"
-  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
-    echo "ok      $target"
-  else
-    # Write beside it, then rename over it, so a failed copy leaves the old profile.
-    cp "$source" "$target.new"
-    chmod 600 "$target.new"
-    if [[ -e "$target" || -L "$target" ]]; then
-      backup "$target"
-    fi
-    mv -f "$target.new" "$target"
-    echo "copied  $target"
-  fi
+  copy_review_file "$SETUP_DIR/grok/review-sandbox.toml" "$home/sandbox.toml"
+  copy_review_file "$SETUP_DIR/grok/review-requirements.toml" "$home/requirements.toml"
   if [[ ! -f "$home/auth.json" || -L "$home/auth.json" || ! -s "$home/auth.json" ]]; then
     echo "note    Grok reviews need a login in the review home: GROK_HOME=$home grok login"
   fi
+}
+
+# Copy $1 to $2 (mode 600) unless $2 is already a regular file with the same content. The
+# copy is written beside the target and renamed over it, so a failed copy leaves the old
+# file; a differing old file is backed up first.
+copy_review_file() {
+  local source="$1" target="$2"
+  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
+    echo "ok      $target"
+    return 0
+  fi
+  cp "$source" "$target.new"
+  chmod 600 "$target.new"
+  if [[ -e "$target" || -L "$target" ]]; then
+    backup "$target"
+  fi
+  mv -f "$target.new" "$target"
+  echo "copied  $target"
 }
 
 # Team memory is mandatory (AGENTS.md, Team memory), so check that both agents reach

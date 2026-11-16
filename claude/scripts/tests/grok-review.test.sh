@@ -38,6 +38,9 @@ secret="sk-test-0123456789abcdefghijklmnop"
 home="$WORK/home"
 mkdir -p "$home/sessions/old-session"
 printf '[profiles.pr-review]\n' >"$home/sandbox.toml"
+# The policy install.sh ships, so a change to it that drops a pin fails here.
+policy_src="$(dirname "$SCRIPT")/../../grok/review-requirements.toml"
+cp "$policy_src" "$home/requirements.toml"
 printf '{"api_key": "%s"}\n' "$secret" >"$home/auth.json"
 prompt="$WORK/prompt.md"
 printf 'review this\n' >"$prompt"
@@ -219,6 +222,14 @@ check "signin: GROK_HOME is the review home" "$(grep -qxF "GROK_HOME=$home" \
   "$WORK/log.signin.env" && echo yes || echo no)"
 check "signin: tokens stay out of the env" "$(grep -q GH_TOKEN "$WORK/log.signin.env" &&
   echo no || echo yes)"
+# Both calls turn off every Claude and Cursor compat scan (issue #18).
+for vendor in CLAUDE CURSOR; do
+  for surface in SKILLS RULES AGENTS MCPS HOOKS; do
+    var="GROK_${vendor}_${surface}_ENABLED=0"
+    check "review: $var" "$(grep -qxF "$var" "$WORK/log.env" && echo yes || echo no)"
+    check "signin: $var" "$(grep -qxF "$var" "$WORK/log.signin.env" && echo yes || echo no)"
+  done
+done
 
 # ---- a sign-in that cannot be refreshed stops before the review ---------------------------
 printf 'fail\n' >"$WORK/stub.signin"
@@ -365,6 +376,22 @@ code="$(run ok "$WORK/x.txt")"
 check "symlinked home: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
 rm "$home"
 mv "$WORK/home-real" "$home"
+# Grok creates an empty requirements.toml itself; without the pins, plugin hooks would run.
+for policy in "" "allow_managed_hooks_only = true" "allow_managed_mcp_servers_only = true"; do
+  printf '%s\n' "$policy" >"$home/requirements.toml"
+  code="$(run ok "$WORK/x.txt")"
+  check "policy '$policy' alone: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+  check "policy '$policy' alone: grok not run" "$([[ ! -e "$WORK/log.order" ]] &&
+    echo yes || echo no)"
+done
+rm "$home/requirements.toml"
+code="$(run ok "$WORK/x.txt")"
+check "no policy: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+ln -s "$policy_src" "$home/requirements.toml"
+code="$(run ok "$WORK/x.txt")"
+check "symlinked policy: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+rm "$home/requirements.toml"
+cp "$policy_src" "$home/requirements.toml"
 # ---- a relative repo path and a head that is not in the clone ------------------------------
 printf 'ok\n' >"$WORK/stub.mode"
 code=0

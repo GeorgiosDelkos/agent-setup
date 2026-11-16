@@ -1,0 +1,20 @@
+# Policy for the Grok review home (claude/scripts/grok-review.sh). install.sh copies it to
+# ~/.grok-review/requirements.toml, beside the pr-review sandbox profile.
+#
+# The review runs with the user's HOME (the sandbox will not start without it), so Grok's
+# compatibility layer finds ~/.claude, ~/.claude.json and the Claude plugins. The script
+# turns the compat scans off (GROK_CLAUDE_*_ENABLED=0), which disables Claude's skills,
+# commands, rules, agents, hooks and MCP servers and the plugins' skills. It does not reach
+# plugin hooks: Grok runs the hooks of every installed Claude plugin, disabled or not. These
+# two pins do, from a policy layer the review home owns (issue #18):
+#
+# - allow_managed_hooks_only: no hook runs but the enforced ones from /etc/grok or a signed
+#   requirements file, of which a personal login has none. Plugin hooks included.
+# - allow_managed_mcp_servers_only with no allow list: no MCP server starts.
+#
+# Checked with `GROK_HOME=<copy of this home> grok inspect --json` on 2026-11-16 (grok
+# 1.0.77): `permissions.enforced` lists nonManagedHooks off, `mcpManagedServersOnly` is
+# "enforced", and hippius-mem reports "not in allowedMcpServers".
+
+allow_managed_hooks_only = true
+allow_managed_mcp_servers_only = true

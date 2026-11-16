@@ -110,5 +110,22 @@ merge_json '{"hooks": {"Stop": ["s1"]}}' "$file" >/dev/null
 check "no record: shared arrays, no removal" '{"hooks":{"Stop":["s1"]},"old":1}' \
   "$(jq -c -S . "$file")"
 
+# The Grok review home gets the sandbox profile and the policy. The empty requirements.toml
+# Grok writes itself is replaced and kept in the backup; a second run changes nothing.
+review="$HOME/.grok-review"
+mkdir -p "$review"
+: >"$review/requirements.toml"
+setup_grok_review >/dev/null
+check "review home: profile copied" same \
+  "$(cmp -s "$SETUP_DIR/grok/review-sandbox.toml" "$review/sandbox.toml" && echo same)"
+check "review home: policy replaces Grok's empty file" same \
+  "$(cmp -s "$SETUP_DIR/grok/review-requirements.toml" "$review/requirements.toml" &&
+    echo same)"
+check "review home: the empty file is backed up" yes \
+  "$([[ -f "$BACKUP_DIR/.grok-review/requirements.toml" ]] && echo yes)"
+check "review home: policy mode 600" 600 "$(stat -f %Lp "$review/requirements.toml")"
+check "review home: a second run changes nothing" 0 \
+  "$(setup_grok_review | grep -c '^copied' || true)"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
