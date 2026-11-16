@@ -1521,6 +1521,13 @@ check "lang-stop: only the edited file is named" \
   "$([[ "$out" == *a.sh* && "$out" != *b.sh* && "$out" != *app.py* ]] && echo yes)" "$out"
 git clone -q -b side "$PYW" "$WORK/py-new-clone"
 new_checkout_case clone "$WORK/py-new-clone"
+# A checkout after the clone, then a commit seconds later that rewrites the index: the
+# checkout still decides for the files it changed.
+prompt py7 "$PYW"
+git clone -q -b main "$PYW" "$WORK/py-clone-then-checkout"
+git -C "$WORK/py-clone-then-checkout" checkout -q side
+sleep 1.1
+new_checkout_case "clone then checkout" "$WORK/py-clone-then-checkout" py7
 # A large clone logs its entry, then writes files for seconds. Moving the entry 2s back
 # makes the files written after it, as there; the index, written last, still bounds them.
 prompt py5 "$PYW"

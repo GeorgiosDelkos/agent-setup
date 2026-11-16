@@ -298,19 +298,23 @@ not_written_by_git() {
 # the oldest entry, with no older one to diff against: `git worktree add` logs an empty
 # subject, `git clone` logs `clone: from ...`. Both log it before they write the files (a
 # large clone wrote for seconds after), so the entry's time does not bound their mtimes. The
-# index's does: the checkout writes it after the files. A later git command that rewrites
-# the index only widens the bound, and a file inside it still counts only while it holds
-# what the checkout wrote. `commit (initial)` is not a creation: the session wrote those
-# files. An expired reflog cannot pass for one: the entry must be at or after the cutoff.
+# index's does: the checkout writes it after the files. A later git command rewrites the
+# index too, so the bound is capped at the next reflog entry's time, when there is one: any
+# later command starts after the checkout ends. Without the cap a commit made after a later
+# checkout dated the creation past that checkout, and since the latest move that changed a
+# path decides for it, the files the checkout changed asked again. `commit (initial)` is not
+# a creation: the session wrote those files. An expired reflog cannot pass for one: the
+# entry must be at or after the cutoff.
 git_moves_since() {
-  local root="$1" cutoff="$2" time old new index
-  while read -r time old new; do
+  local root="$1" cutoff="$2" time old new next index
+  while read -r time old new next; do
     # Outside the `if`: its pipe into awk runs it in a subshell.
     if [[ "$old" == - ]]; then
       index="$(git -C "$root" rev-parse --path-format=absolute --git-path index 2>/dev/null ||
         true)"
-      time="$(perl -e 'my $t = (stat $ARGV[1])[9]; print defined $t && $t > $ARGV[0]
-        ? $t : $ARGV[0]' "$time" "$index")"
+      time="$(perl -e 'my ($entry, $index, $next) = @ARGV; my $t = (stat $index)[9];
+        $t = $next if defined $t && $next ne "" && $next < $t;
+        print defined $t && $t > $entry ? $t : $entry' "$time" "$index" "${next:-}")"
     fi
     if [[ "$old" == - ]]; then
       git -c core.quotepath=off -C "$root" ls-tree -r --name-only "$new" 2>/dev/null
@@ -326,7 +330,8 @@ git_moves_since() {
         created[NR] = (subject == "" || subject ~ /^clone: /) }
       END { for (i = 1; i < NR; i++)
               if (move[i] && time[i] >= cutoff) print time[i], sha[i + 1], sha[i]
-            if (NR && created[NR] && time[NR] >= cutoff) print time[NR], "-", sha[NR] }')
+            if (NR && created[NR] && time[NR] >= cutoff)
+              print time[NR], "-", sha[NR], (NR > 1 ? time[NR - 1] : "") }')
 }
 
 # The files among the `root<TAB>file` pairs $1 that skill $2 covers, modified after this
