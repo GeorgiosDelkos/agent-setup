@@ -37,7 +37,13 @@ sha="$(git -C "$repo" rev-parse HEAD)"
 secret="sk-test-0123456789abcdefghijklmnop"
 home="$WORK/home"
 mkdir -p "$home/sessions/old-session"
-printf '[profiles.pr-review]\n' >"$home/sandbox.toml"
+printf '[profiles.pr-review]\ndeny = ["%s/.grok"]\n' "$WORK" >"$home/sandbox.toml"
+# The user's HOME for the script, with Claude config the review must not see, and a Docker
+# socket that links into it, as Docker Desktop's /var/run/docker.sock does.
+user_home="$WORK/user"
+mkdir -p "$user_home/.claude" "$user_home/.docker/run"
+printf '{}\n' >"$user_home/.claude.json"
+ln -s "$user_home/.docker/run/docker.sock" "$WORK/docker.sock"
 printf '{"api_key": "%s"}\n' "$secret" >"$home/auth.json"
 prompt="$WORK/prompt.md"
 printf 'review this\n' >"$prompt"
@@ -82,6 +88,15 @@ fi
 echo review >>"$log.order"
 printf '%s\n' "$@" >"$log.args"
 env >"$log.env"
+# What the review's HOME holds: `name -> target` for a link, else the name.
+for entry in "$HOME"/.[!.]* "$HOME"/*; do
+  [[ -e "$entry" || -L "$entry" ]] || continue
+  if [[ -L "$entry" ]]; then
+    echo "$(basename "$entry") -> $(readlink "$entry")"
+  else
+    basename "$entry"
+  fi
+done >"$log.home"
 lock_state=held
 perl -MFcntl=:flock -e 'open(my $f, ">>", $ARGV[0]) or exit 2;
   flock($f, LOCK_EX | LOCK_NB) or exit 1' \
@@ -153,8 +168,9 @@ run() {
   local code=0
   printf '%s\n' "$mode" >"$WORK/stub.mode"
   rm -f "$WORK/log.args" "$WORK/log.env" "$WORK/log.order" "$WORK/log.signin.args" \
-    "$WORK/log.signin.env" "$WORK/log.signin.wt" "$WORK/log.lock"
-  GH_TOKEN=leak-me GROK_BIN="$stub" GROK_REVIEW_HOME="$home" GROK_SIGNIN_LIMIT_SECS=3 \
+    "$WORK/log.signin.env" "$WORK/log.signin.wt" "$WORK/log.lock" "$WORK/log.home"
+  HOME="$user_home" GH_TOKEN=leak-me GROK_BIN="$stub" GROK_REVIEW_HOME="$home" \
+    GROK_DOCKER_SOCKET="$WORK/docker.sock" GROK_SIGNIN_LIMIT_SECS=3 \
     bash "$SCRIPT" "$repo" "$sha" "$prompt" "$out" >"$WORK/stdout" 2>"$WORK/stderr" || code=$?
   echo "$code"
 }
@@ -210,8 +226,17 @@ check "signin: forces the refresh" "$(grep -qxF GROK_AUTH_EARLY_INVALIDATION_SEC
   "$WORK/log.signin.env" && echo yes || echo no)"
 check "review: no forced refresh" "$(grep -q GROK_AUTH_EARLY_INVALIDATION_SECS \
   "$WORK/log.env" && echo no || echo yes)"
-check "review: the user's HOME, which the profile's ~ denies are written against" \
-  "$(grep -qxF "HOME=$HOME" "$WORK/log.env" && echo yes || echo no)"
+# The review's HOME is its own, so Grok finds none of the user's Claude config there
+# (issue #18); it holds only the link to the directory the Docker socket points into.
+check "review: its own HOME, not the user's" "$(grep -qE \
+  "^HOME=$home/runs/pr-[^/]+/home\$" "$WORK/log.env" && echo yes || echo no)"
+check "review: HOME holds only the socket's directory, linked" \
+  "$([[ "$(cat "$WORK/log.home")" == ".docker -> $user_home/.docker" ]] && echo yes || echo no)"
+ln -sfn /elsewhere/docker.sock "$WORK/docker.sock"
+code="$(run ok "$WORK/review-socket.txt")"
+check "review: a socket outside HOME links nothing" \
+  "$([[ "$code" == 0 && ! -s "$WORK/log.home" ]] && echo yes || echo no)"
+ln -sfn "$user_home/.docker/run/docker.sock" "$WORK/docker.sock"
 check "review: runs under the lock" "$([[ "$(cat "$WORK/log.lock")" == held ]] &&
   echo yes || echo no)"
 check "ok: lock released" "$(lock_free && echo yes || echo no)"
@@ -365,6 +390,22 @@ code="$(run ok "$WORK/x.txt")"
 check "symlinked home: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
 rm "$home"
 mv "$WORK/home-real" "$home"
+# A profile copied before install.sh expanded `~`: under the review's own HOME it would
+# deny nothing.
+cp "$home/sandbox.toml" "$WORK/sandbox.toml"
+for deny in '"~/.grok"' "'~/.grok'"; do
+  printf '[profiles.pr-review]\ndeny = [%s]\n' "$deny" >"$home/sandbox.toml"
+  code="$(run ok "$WORK/x.txt")"
+  check "profile with $deny: exit 3" "$([[ "$code" == 3 ]] && echo yes || echo no)"
+  check "profile with $deny: grok not run" "$([[ ! -e "$WORK/log.order" ]] &&
+    echo yes || echo no)"
+done
+# A comment that mentions `"~/` is not a path.
+printf '# each "~/ path is expanded\n' >>"$WORK/sandbox.toml"
+cp "$WORK/sandbox.toml" "$home/sandbox.toml"
+code="$(run ok "$WORK/x.txt")"
+check "profile with ~ only in a comment: exit 0" "$([[ "$code" == 0 ]] && echo yes || echo no)"
+mv "$WORK/sandbox.toml" "$home/sandbox.toml"
 # ---- a relative repo path and a head that is not in the clone ------------------------------
 printf 'ok\n' >"$WORK/stub.mode"
 code=0

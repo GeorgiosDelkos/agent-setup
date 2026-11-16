@@ -220,8 +220,7 @@ newer_than() {
 # commits, or switching away from them and back, rewrites its files with its own content,
 # and they read as git's.
 not_written_by_git() {
-  local pairs="$1" stamp="$2" root start cutoff dirty written file commit rel
-  local head_blob moved_blob
+  local pairs="$1" stamp="$2" root start cutoff dirty written candidates commit changed
   local git_wrote=""
   # No associative array: the hooks run under macOS's bash 3.2.
   while IFS= read -r root; do
@@ -246,28 +245,43 @@ not_written_by_git() {
         2>/dev/null || true
     )"
     # `<file><TAB><commit>` for each candidate: clean, changed by a move, written no later
-    # than the latest move that changed it, whose new commit is named.
-    while IFS=$'\t' read -r file commit; do
-      # HEAD's content for the path must be what that move left, not a later commit's.
-      rel="${file#"$root"/}"
-      head_blob="$(git -C "$root" rev-parse -q --verify "HEAD:$rel" 2>/dev/null || true)"
-      moved_blob="$(git -C "$root" rev-parse -q --verify "$commit:$rel" 2>/dev/null || true)"
-      if [[ -n "$head_blob" && "$head_blob" == "$moved_blob" ]]; then
-        git_wrote+="$file"$'\n'
-      fi
-    done < <(awk -F '\t' -v root="$root" '$1 == root { print $2 }' <<<"$pairs" |
-      ROOT="$root" DIRTY="$dirty" WRITTEN="$written" perl -MTime::HiRes=stat -lne '
-        BEGIN {
-          %dirty = map { ("$ENV{ROOT}/$_" => 1) } split /\n/, $ENV{DIRTY};
-          for (split /\n/, $ENV{WRITTEN}) {
-            my ($time, $commit, $path) = split /\t/, $_, 3;
-            next if defined $latest{$path} && $time <= $latest{$path};
-            ($latest{$path}, $commit{$path}) = ($time, $commit);
-          }
+    # than the latest move that changed it, whose new commit is named. The lists go in as
+    # files, not environment variables: a new checkout lists every tracked file, which
+    # passed macOS's 1 MiB limit on a program's arguments and environment.
+    candidates="$(awk -F '\t' -v root="$root" '$1 == root { print $2 }' <<<"$pairs" |
+      perl -MTime::HiRes=stat -e '
+        my ($root, $dirty_list, $written_list) = @ARGV;
+        open(my $d, "<", $dirty_list) or die "$dirty_list: $!\n";
+        my %dirty = map { chomp; ("$root/$_" => 1) } <$d>;
+        open(my $w, "<", $written_list) or die "$written_list: $!\n";
+        my (%latest, %commit);
+        while (<$w>) {
+          chomp;
+          my ($time, $commit, $path) = split /\t/, $_, 3;
+          next if !defined $path || (defined $latest{$path} && $time <= $latest{$path});
+          ($latest{$path}, $commit{$path}) = ($time, $commit);
         }
-        my $modified = (stat $_)[9];
-        print "$_\t$commit{$_}" if defined $modified && !$dirty{$_} && defined $latest{$_}
-          && $modified <= $latest{$_} + 1;')
+        while (my $file = <STDIN>) {
+          chomp $file;
+          my $modified = (stat $file)[9];
+          print "$file\t$commit{$file}\n" if defined $modified && !$dirty{$file}
+            && defined $latest{$file} && $modified <= $latest{$file} + 1;
+        }' "$root" <(printf '%s\n' "$dirty") <(printf '%s\n' "$written"))"
+    # HEAD's content for the path must be what that move left, not a later commit's: the
+    # path is absent from the diff of that commit and HEAD. One diff per commit, not two
+    # lookups per file, which cost minutes on a branch with thousands of changed files.
+    while IFS= read -r commit; do
+      if [[ -z "$commit" ]] ||
+        ! changed="$(git -c core.quotepath=off -C "$root" diff --name-only --no-renames \
+          "$commit" HEAD 2>/dev/null)"; then
+        continue
+      fi
+      # The first input always has a line (`%s\n`); see the note at the end.
+      git_wrote+="$(awk -F '\t' -v commit="$commit" -v root="$root" '
+        NR == FNR { if ($0 != "") changed[root "/" $0] = 1; next }
+        $2 == commit && !($1 in changed) { print $1 }' \
+        <(printf '%s\n' "$changed") - <<<"$candidates")"$'\n'
+    done < <(cut -f 2 <<<"$candidates" | sort -u)
   done < <(cut -f 1 <<<"$pairs" | sort -u)
   # Every line of stdin not in that list. The list always has a line (`%s\n`): an empty
   # first input would make `NR == FNR` hold for stdin too, and swallow it.
@@ -276,22 +290,48 @@ not_written_by_git() {
 }
 
 # `<time><TAB><new commit><TAB><root>/<path>` for each file a HEAD move (checkout, reset,
-# clean merge, rebase,
-# pull) in the reflog of $1 at or after epoch second $2 changed, from the diff of the move's
-# old and new commit (the next older reflog entry's commit is the old one). Nothing for a
-# repo with no reflog.
+# clean merge, rebase, pull) in the reflog of $1 at or after epoch second $2 changed, from
+# the diff of the move's old and new commit (the next older reflog entry's commit is the old
+# one). Nothing for a repo with no reflog.
+#
+# The creation of the checkout is a move from nothing that wrote every tracked file. It is
+# the oldest entry, with no older one to diff against: `git worktree add` logs an empty
+# subject, `git clone` logs `clone: from ...`. Both log it before they write the files (a
+# large clone wrote for seconds after), so the entry's time does not bound their mtimes. The
+# index's does: the checkout writes it after the files. A later git command rewrites the
+# index too, so the bound is capped at the next reflog entry's time, when there is one: any
+# later command starts after the checkout ends. Without the cap a commit made after a later
+# checkout dated the creation past that checkout, and since the latest move that changed a
+# path decides for it, the files the checkout changed asked again. `commit (initial)` is not
+# a creation: the session wrote those files. An expired reflog cannot pass for one: the
+# entry must be at or after the cutoff.
 git_moves_since() {
-  local root="$1" cutoff="$2" time old new
-  while read -r time old new; do
-    git -c core.quotepath=off -C "$root" diff --name-only "$old" "$new" 2>/dev/null |
-      awk -v time="$time" -v new="$new" -v root="$root" \
-        '{ print time "\t" new "\t" root "/" $0 }' || true
+  local root="$1" cutoff="$2" time old new next index
+  while read -r time old new next; do
+    # Outside the `if`: its pipe into awk runs it in a subshell.
+    if [[ "$old" == - ]]; then
+      index="$(git -C "$root" rev-parse --path-format=absolute --git-path index 2>/dev/null ||
+        true)"
+      time="$(perl -e 'my ($entry, $index, $next) = @ARGV; my $t = (stat $index)[9];
+        $t = $next if defined $t && $next ne "" && $next < $t;
+        print defined $t && $t > $entry ? $t : $entry' "$time" "$index" "${next:-}")"
+    fi
+    if [[ "$old" == - ]]; then
+      git -c core.quotepath=off -C "$root" ls-tree -r --name-only "$new" 2>/dev/null
+    else
+      git -c core.quotepath=off -C "$root" diff --name-only "$old" "$new" 2>/dev/null
+    fi | awk -v time="$time" -v new="$new" -v root="$root" \
+      '{ print time "\t" new "\t" root "/" $0 }' || true
   done < <({ git -C "$root" reflog show --date=unix --format='%gd %H %gs' HEAD 2>/dev/null ||
     true; } | awk -v cutoff="$cutoff" '
       { sub(/^HEAD@\{/, "", $1); sub(/\}$/, "", $1)
-        time[NR] = $1; sha[NR] = $2; move[NR] = ($3 ~ /^(checkout|reset|merge|rebase|pull)/) }
+        time[NR] = $1; sha[NR] = $2; subject = $0; sub(/^[^ ]+ [^ ]+ ?/, "", subject)
+        move[NR] = (subject ~ /^(checkout|reset|merge|rebase|pull)/)
+        created[NR] = (subject == "" || subject ~ /^clone: /) }
       END { for (i = 1; i < NR; i++)
-              if (move[i] && time[i] >= cutoff) print time[i], sha[i + 1], sha[i] }')
+              if (move[i] && time[i] >= cutoff) print time[i], sha[i + 1], sha[i]
+            if (NR && created[NR] && time[NR] >= cutoff)
+              print time[NR], "-", sha[NR], (NR > 1 ? time[NR - 1] : "") }')
 }
 
 # The files among the `root<TAB>file` pairs $1 that skill $2 covers, modified after this

@@ -11,9 +11,11 @@
 #
 # Exit status: 0 review written; 1 the run failed (output not usable); 2 the output held
 # material from the review home's credential and was deleted; 3 Grok is unavailable (not
-# installed, review home missing, not signed in, sign-in could not be refreshed); 64 usage.
+# installed, review home or profile missing, profile not expanded by install.sh, not signed
+# in, sign-in could not be refreshed); 64 usage.
 #
-# GROK_BIN and GROK_REVIEW_HOME override the grok binary and the review home (tests).
+# GROK_BIN, GROK_REVIEW_HOME and GROK_DOCKER_SOCKET override the grok binary, the review
+# home and the socket path /var/run/docker.sock (tests).
 set -euo pipefail
 
 usage() {
@@ -37,10 +39,17 @@ repo="$(cd "$repo" && pwd -P)"
 
 home="${GROK_REVIEW_HOME:-$HOME/.grok-review}"
 grok_bin="${GROK_BIN:-$(command -v grok || true)}"
+docker_socket="${GROK_DOCKER_SOCKET:-/var/run/docker.sock}"
 [[ -n "$grok_bin" && -x "$grok_bin" ]] || unavailable "grok is not installed"
 [[ -d "$home" && ! -L "$home" ]] || unavailable "no review home at $home (run install.sh)"
 [[ -f "$home/sandbox.toml" && ! -L "$home/sandbox.toml" ]] ||
   unavailable "no pr-review profile in $home (run install.sh)"
+# A `~` deny would resolve against the review's empty HOME and deny nothing. A profile
+# copied before install.sh expanded them still has one. Any TOML string that starts with `~`,
+# basic ("...") or literal ('...'), outside comments.
+if grep -v '^[[:space:]]*#' "$home/sandbox.toml" | grep -q "[\"']~"; then
+  unavailable "the pr-review profile in $home has '~' paths (run install.sh)"
+fi
 # A regular, non-empty file; never read here, so the credential stays out of any output.
 [[ -f "$home/auth.json" && ! -L "$home/auth.json" && -s "$home/auth.json" ]] ||
   unavailable "the review home is not signed in: GROK_HOME=$home grok login"
@@ -243,13 +252,29 @@ done < <(find "$wt" -path "$wt/.git" -prune -o \( -name .claude -o -name .grok -
   -o -name CLAUDE.local.md \) -prune -print0)
 cp "$prompt" "$run/prompt.md"
 
-# The user's HOME, unlike the sign-in: the profile's `~` denies and strict's own runtime
-# socket denies resolve against it. With an empty HOME the sandbox refuses to start,
-# because /var/run/docker.sock links into ~/.docker (grok 1.0.77). Asked from inside, a
-# review run this way saw none of ~/.claude's skills, rules, plugin hooks or MCP servers,
-# only Grok's bundled skills (checked 2026-11-11), though `grok inspect` lists them.
+# An empty HOME, as for the sign-in, so Grok's compatibility layer finds no ~/.claude,
+# ~/.claude.json, Claude plugins or ~/.agents: with the user's HOME it loaded their skills,
+# rules, the hooks of every installed plugin and the MCP servers (issue #18). Settings in
+# the review home cannot switch those off: Grok rewrites its requirements.toml and
+# managed_config.toml at a signed-in start, and deleted pins written there (2026-11-16,
+# grok 1.0.77). The profile's denies are absolute paths (install.sh expands `~`), so they
+# hold under this HOME.
+#
+# Strict's runtime-socket deny resolves /var/run/docker.sock and refuses to start when its
+# target lies outside the deny list it builds from HOME. Docker Desktop links it into
+# ~/.docker/run, so the top directory of HOME that holds the target is linked into this
+# one. Reads through the link stay denied: the sandbox checks the resolved path, which
+# strict does not allow (checked 2026-11-16).
+review_home="$run/home"
+mkdir "$review_home"
+socket="$(readlink "$docker_socket" 2>/dev/null || true)"
+if [[ "$socket" == "$HOME"/*/* ]]; then
+  top="${socket#"$HOME"/}"
+  ln -s "$HOME/${top%%/*}" "$review_home/${top%%/*}"
+fi
 status=0
-run_limited "$review_limit" env -i HOME="$HOME" PATH="/usr/bin:/bin" TMPDIR="$home/tmp/" \
+run_limited "$review_limit" env -i HOME="$review_home" PATH="/usr/bin:/bin" \
+  TMPDIR="$home/tmp/" \
   GROK_HOME="$home" GROK_MEMORY=0 \
   "$grok_bin" --cwd "$wt" --sandbox pr-review \
   --tools read_file,grep,list_dir --disallowed-tools search_tool,use_tool \
