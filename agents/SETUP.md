@@ -47,8 +47,7 @@ machine reaches every machine.
 | `~/.grok/agents/rust-style-reviewer.md` | `$SETUP/claude/agents/…` | The reviewer, for Grok. |
 | `~/.claude/CLAUDE.md` | (file) | `@~/.config/agents/AGENTS.md`, plus `@~/.config/agents/AGENTS.local.md` when the local layer has one. |
 | `~/.claude/settings.json` | (file, merged) | Hooks, permissions, plugins. Grok reads its hooks too. |
-| `~/.grok-review/sandbox.toml` | (file, a copy of `$SETUP/grok/review-sandbox.toml`) | The `pr-review` sandbox profile for the Grok review in `review-pr`. `~/.grok-review` is a separate Grok home, with its own login, so the review cannot read the main `~/.grok`. It is a copy because grok refuses a symlinked `sandbox.toml`. Re-run `install.sh` after editing the shared file. |
-| `~/.grok-review/requirements.toml` | (file, a copy of `$SETUP/grok/review-requirements.toml`) | Policy for the review home: `allow_managed_hooks_only` and `allow_managed_mcp_servers_only`, so no hook (plugin hooks included) and no MCP server loads in a review. `grok-review.sh` also turns off Grok's Claude and Cursor compat scans, and refuses to run while either pin is missing. Re-run `install.sh` after editing the shared file. |
+| `~/.grok-review/sandbox.toml` | (file, a copy of `$SETUP/grok/review-sandbox.toml`) | The `pr-review` sandbox profile for the Grok review in `review-pr`. `~/.grok-review` is a separate Grok home, with its own login, so the review cannot read the main `~/.grok`. It is a copy because grok refuses a symlinked `sandbox.toml`, with each `~/` expanded to this machine's HOME: the review runs with an empty HOME of its own, so no Claude skills, rules, plugins, hooks or MCP servers load, and `grok-review.sh` refuses a profile that still has a `~` path. Re-run `install.sh` after editing the shared file. |
 | `~/.cargo/config.toml` | (file, holds a marked copy of `$SETUP/cargo/config.toml`) | Shared Cargo settings: no dependency debug info in dev builds, which keeps each worktree's `target/` small. Local linkers and rustflags stay outside the markers. Re-run `install.sh` after editing the shared file. |
 | `~/Library/Application Support/JetBrains/Air/acp.json` | (file, merged from `$SETUP/air/acp.json`) | Grok and Claude Code as ACP agents in JetBrains Air. |
 | `~/Library/Application Support/JetBrains/Air/review/review-prompt.md` | `$SETUP/air/review-prompt.md` | Air's code-review task list, aligned with the review order in `AGENTS.md`. Air sends it as the user turn, so it outranks `AGENTS.md`. If Air replaces the link with a plain file, re-run `install.sh`. |
@@ -261,11 +260,11 @@ subscriptions have changed several times. If it stops being allowed, either:
     - Run: `~/.claude/scripts/grok-review.sh <scratch-repo> <its HEAD> <prompt> <out>`.
     - Expected: exit 0; the tools are `read_file`, `list_dir` and `grep`; the worktree
       probe reads; every other probe reports `Permission denied`.
-    - Load check: from an empty directory, run `env -i HOME="$HOME" PATH=/usr/bin:/bin
-      GROK_HOME=~/.grok-review GROK_CLAUDE_HOOKS_ENABLED=0 ... grok inspect --json` with
-      the ten `GROK_*_ENABLED=0` variables `grok-review.sh` sets. Expected: every
-      `~/.claude` skill, rule and hook shows `"disabled": true`, `permissions.enforced`
-      lists `nonManagedHooks` off, and `hippius-mem` reports `not in allowedMcpServers`.
+    - Load check: from an empty directory `d`, with an empty directory `h` holding only a
+      `.docker` link to `~/.docker`, run `env -i HOME=h PATH=/usr/bin:/bin
+      GROK_HOME=~/.grok-review grok inspect --json`, as the review starts. Expected: only
+      bundled skills and built-in agents; no plugins, hooks, MCP servers or instruction
+      files.
     - Use probe files, not real secrets. Asked to read `~/.ssh` and the like, the model
       refuses on its own, and that tests nothing about the sandbox.
 - Hooks and scripts: `bash "$SETUP/check.sh"` runs shellcheck, shfmt,
@@ -375,7 +374,9 @@ folders only: in a plain clone a mixed reset moves `HEAD` and leaves the old fil
   2. `bash check.sh`, commit, open a draft PR; review, fix, `gh pr ready`, CI green, merge.
   3. On one machine: `git -C "$SETUP" pull --ff-only`, then `bash "$SETUP/install.sh"` when
      `settings.json` or a hook registration changed. The sync carries the files to the
-     other machines.
+     other machines. A file `install.sh` copies or merges outside the synced folder
+     (`grok/`, `cargo/config.toml`, `air/acp.json`) does not travel that way: run
+     `install.sh` on every machine after it changes.
 - `install.sh` warns when the synced folder is off `main`, has changes not in git, or is
   behind the last fetched `origin/main`. Tools that install into `~/.claude/skills/` write
   into the synced folder too; such a skill shows up there as untracked until it is committed

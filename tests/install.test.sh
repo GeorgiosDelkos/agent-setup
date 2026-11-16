@@ -110,5 +110,17 @@ merge_json '{"hooks": {"Stop": ["s1"]}}' "$file" >/dev/null
 check "no record: shared arrays, no removal" '{"hooks":{"Stop":["s1"]},"old":1}' \
   "$(jq -c -S . "$file")"
 
+# The review profile's `~/` paths are expanded to this HOME, since the review runs with its
+# own empty HOME; a second run finds the copy current and changes nothing.
+profile="$HOME/.grok-review/sandbox.toml"
+setup_grok_review >/dev/null
+check "review profile: no ~ path left" 0 "$(grep -c '"~' "$profile" || true)"
+check "review profile: ~/.grok denied by absolute path" 1 \
+  "$(grep -cxF "  \"$HOME/.grok\"," "$profile" || true)"
+check "review profile: mode 600" 600 "$(stat -f %Lp "$profile")"
+check "review profile: second run is current" "ok      $profile" \
+  "$(setup_grok_review | grep -F "$profile")"
+check "review profile: no scratch copy left" no "$([[ -e "$profile.new" ]] && echo yes || echo no)"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

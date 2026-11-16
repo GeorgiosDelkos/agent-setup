@@ -367,8 +367,10 @@ setup_cargo() {
 
 # The Grok review home (claude/scripts/grok-review.sh): GROK_HOME for review runs, with its
 # own login so the main ~/.grok is out of reach, and the pr-review sandbox profile. The
-# profile is copied, not linked: grok refuses a symlinked sandbox.toml. A symlinked home is
-# refused: chmod and the copy would follow it, into ~/.grok for example.
+# profile is copied, not linked: grok refuses a symlinked sandbox.toml. Its `~/` paths are
+# expanded to this machine's HOME in the copy, because the review runs with an empty HOME
+# that `~` would resolve to. A symlinked home is refused: chmod and the copy would follow
+# it, into ~/.grok for example.
 setup_grok_review() {
   local home="$HOME/.grok-review" source="$SETUP_DIR/grok/review-sandbox.toml"
   local target="$home/sandbox.toml"
@@ -378,11 +380,12 @@ setup_grok_review() {
   fi
   mkdir -p "$home"
   chmod 700 "$home"
-  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$source" "$target"; then
+  # Write beside it, then rename over it, so a failed copy leaves the old profile.
+  HOME_DIR="$HOME" perl -pe 's{"~/}{"$ENV{HOME_DIR}/}g' "$source" >"$target.new"
+  if [[ -f "$target" && ! -L "$target" ]] && cmp -s "$target.new" "$target"; then
+    rm -f "$target.new"
     echo "ok      $target"
   else
-    # Write beside it, then rename over it, so a failed copy leaves the old profile.
-    cp "$source" "$target.new"
     chmod 600 "$target.new"
     if [[ -e "$target" || -L "$target" ]]; then
       backup "$target"
