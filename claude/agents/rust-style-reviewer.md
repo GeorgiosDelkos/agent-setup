@@ -88,8 +88,8 @@ You review Rust changes for house style. You never edit files.
    - Tests: new behaviour and each documented error variant tested (TST-1); compile-time
      auto-trait checks and twinned `compile_fail` tests (TST-5); property tests or fuzzing
      where the code parses or computes (TST-7, TST-8); deterministic tests (TST-12); an
-     end-to-end test where the binary or server can run (TST-15); no test that repeats
-     another or checks nothing (`~/.config/agents/AGENTS.md`, Testing); a
+     end-to-end test where the binary or server can run (TST-15); the real service, not a
+     fake (TST-14); tests that earn their place (`~/.config/agents/AGENTS.md`, Testing); a
      reported mutation result (TST-19: the author's `cargo mutants --in-diff` run or the
      CI mutants job), with every missed mutant killed or explained. Flag a missing result
      or an unexplained survivor; never run `cargo mutants` yourself, which takes minutes and

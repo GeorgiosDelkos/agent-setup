@@ -42,9 +42,8 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
 - End-to-end tests run the program as its users do: the CLI through `execFile` from
   `node:child_process`, a server listening on port 0 and called with `fetch`, a browser UI
   with Playwright, against real dependencies in a temporary directory or a container.
-- Mock only what the global rule allows (a third-party service, the clock, randomness, an
-  injected fault): `vi.mock` on the module that makes that call, `vi.useFakeTimers()` for
-  time. Never mock the module under test.
+- What may be mocked: AGENTS.md, Testing. Use `vi.mock` on the module that makes that
+  call, and `vi.useFakeTimers()` for time. Never mock the module under test.
 - `fast-check` for parsers, serialization and algorithms: round trips, and comparison
   against a simple model.
 - Coverage (`@vitest/coverage-v8`) shows untested code; it is a floor, not the goal. Once

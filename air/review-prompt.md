@@ -24,8 +24,10 @@ Check in this order:
 5. Errors and API shape: concrete error types with actionable messages; `expect` states the
    invariant; no leaked dependency error types; newtypes and enums over primitives and bools.
 6. Security and dependencies: untrusted input handling; every new dependency justified.
-7. Tests: behavior changes have tests covering edges and errors; property tests for parsers,
-   serialization, and algorithms; mocks only at boundaries.
+7. Tests: as `~/.config/agents/AGENTS.md`, Testing, sets out: behavior changes have tests
+   covering edges and errors, end to end where the entry point can run, mocks only where
+   it allows, and no test that repeats another or checks nothing; property tests for
+   parsers, serialization, and algorithms.
 8. Docs: public APIs documented, with Errors/Panics/Safety sections where they apply.
    Comments explain why, never what. Do not ask for comments that narrate code. A comment
    that contradicts the code or has gone stale is high; one that only restates the code is

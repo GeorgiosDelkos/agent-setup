@@ -52,11 +52,12 @@ The global rules (AGENTS.md, Testing) apply; this is how in Python.
 
 - Each test builds its own state with fixtures (`tmp_path`, `monkeypatch`); none depends on
   another having run first.
-- End-to-end tests run the program as its users do: the CLI through
-  `subprocess.run([sys.executable, "-m", "<package>", ...])`, a server started on a free
-  port and called over HTTP, against real dependencies in `tmp_path` or a container.
-- Mock only what the global rule allows (a third-party service, the clock, randomness, an
-  injected fault), with `monkeypatch` at the call into it. Never mock the module under test.
+- End-to-end tests run the program as its users do: the installed console script through
+  `subprocess.run` (`python -m <package>` only where that is the documented entry point),
+  or a server bound to port 0 and called over HTTP, with real dependencies in `tmp_path`
+  or a container.
+- What may be mocked: AGENTS.md, Testing. Patch it with `monkeypatch` at the call into it.
+  Never mock the module under test.
 - `hypothesis` for parsers, serialization and algorithms: round trips, and comparison
   against a simple model.
 - Coverage (`pytest-cov` with `--cov-branch`) shows untested code; it is a floor, not the

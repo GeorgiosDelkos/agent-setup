@@ -98,11 +98,12 @@ anything, which a line-coverage metric cannot.
 
 ## External services
 
-- **TST-14** Mock the transport, not the protocol (a `MockStream` with scripted bytes,
-  errors and EOF). Storage code runs each test against an in-memory fake by default and
-  against the real service under `#[ignore]`; CI starts the service and runs
-  `--include-ignored`. Endpoints come from env vars with local defaults, and a test skips
-  when its service variable is unset. Tests sharing external state are serialized
+- **TST-14** Code that talks to a service is tested against the real service (a container
+  or local process the test or CI starts), not an in-memory fake. Faults the real service
+  cannot be made to produce are scripted at the transport, not the protocol (a `MockStream`
+  with scripted bytes, errors and EOF). Endpoints come from env vars with local defaults,
+  and a test skips when its service variable is unset; CI sets every variable, so it skips
+  nothing. Tests sharing external state are serialized
   (`serial_test`). Waiting on a live service uses a configurable timeout, raised in CI.
   [ref: J]
 - **TST-15** CLIs are tested end to end by spawning the binary (`std::process::Command`
