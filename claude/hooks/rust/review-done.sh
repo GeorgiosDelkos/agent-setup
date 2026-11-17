@@ -26,6 +26,11 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 read_hook_input
+# Before the first field is read: without jq every field reads as empty, the hook would
+# exit 0 as if another agent had stopped, and the review would go unrecorded with nothing
+# in the failure log.
+need_tools fail-open jq
+
 # True when agent type $1 is this reviewer. Grok names a user agent as `user:name` and a
 # plugin agent as `plugin:name`. Any prefix of this reviewer counts. A prefix of a different
 # agent does not.
@@ -36,33 +41,24 @@ is_reviewer() {
   esac
 }
 
-# The type of the agent that stopped. For an agent spawned with a name (an agent-team
-# teammate in Claude Code), `agent_type` is that name, not the definition it runs: a
-# reviewer named `pr42-rust-reviewer` stopped with `agent_type` `pr42-rust-reviewer`, was
-# not recorded, and the gate kept asking for a review that had happened (issue #43). The
-# definition is then only in the metadata file beside the agent's transcript, as
-# `spawnedAgentType`. That file is not documented: the field names are from inputs captured
-# from Claude Code 2.1.326 on 2026-11-17, and a test pins them. When the file or the field
-# is gone, a named reviewer is not recorded again, and one run without a name is.
-stopped_agent_type() {
-  local type meta
-  type="$(hook_field '.agent_type // .subagentType')"
-  if is_reviewer "$type"; then
-    printf '%s' "$type"
-    return
+# For an agent spawned with a name (an agent-team teammate in Claude Code), `agent_type` is
+# that name, not the definition it runs. Reviewers named that way were not recorded, and
+# the gate kept asking for a review that had happened (issue #43). The definition is then
+# only in the metadata file beside the agent's transcript, as `spawnedAgentType`. That file
+# is not documented. The names are from a capture of Claude Code 2.1.326 on 2026-11-17 (an
+# agent named `capture-probe`, spawned from this reviewer, stopped with `agent_type`
+# `capture-probe`), and the test's fixture is a copy of that capture: it shows the hook
+# reads the captured shape, not that Claude Code still writes it. When the file or the
+# field is gone, a named reviewer is not recorded again, and one run without a name is.
+# An input without a transcript path (Grok sends none) names no such file.
+if ! is_reviewer "$(hook_field '.agent_type // .subagentType')"; then
+  transcript="$(hook_field '.agent_transcript_path')"
+  if [[ -z "$transcript" ]] || ! is_reviewer "$(jq -r '.spawnedAgentType // empty' \
+    "${transcript%.jsonl}.meta.json" 2>/dev/null)"; then
+    exit 0
   fi
-  meta="$(hook_field '.agent_transcript_path')"
-  meta="${meta/#\~/$HOME}"
-  meta="${meta%.jsonl}.meta.json"
-  if [[ -f "$meta" ]]; then
-    type="$(jq -r '.spawnedAgentType // empty' "$meta" 2>/dev/null || true)"
-  fi
-  printf '%s' "$type"
-}
-if ! is_reviewer "$(stopped_agent_type)"; then
-  exit 0
 fi
-need_tools fail-open jq git shasum perl
+need_tools fail-open git shasum perl
 # shellcheck source-path=SCRIPTDIR source=changes.sh
 source "$(dirname "${BASH_SOURCE[0]}")/changes.sh"
 
