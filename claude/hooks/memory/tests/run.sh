@@ -184,6 +184,11 @@ expect "gate: Claude daemon down fails open" 1 recall-gate.sh \
   "$(edit c4 "$FILE")" "does not answer"
 expect "gate: Grok daemon down fails open" 1 recall-gate.sh \
   "$(grok_edit c5 "$FILE")" "does not answer"
+# An ungated edit is on record (failure-log.sh), one line for each of the two edits above.
+check "gate: a fail-open is written to the failure log" "$(
+  [[ "$(grep -c $'\trecall-gate\\.sh\tedit not gated: the hippius-mem daemon at .* does not' \
+    "$FAKE_HOME/.local/state/agent-setup/hook-failures.log")" -eq 2 ]] && echo yes
+)" "$(cat "$FAKE_HOME/.local/state/agent-setup/hook-failures.log" 2>&1)"
 register stdio stdio
 expect "gate: Grok stdio registration is enforced" 2 recall-gate.sh \
   "$(grok_edit c6 "$FILE")" "recall team memory"

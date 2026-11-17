@@ -29,6 +29,9 @@ HOUSE_LANG_SKILLS='python-style ts-style bash-style gh-actions-style'
 RUST_HOOKS_STATE="${TMPDIR:-/tmp}/claude-rust-hooks"
 mkdir -p "$RUST_HOOKS_STATE"
 
+# shellcheck source-path=SCRIPTDIR source=../failure-log.sh
+source "$RUST_HOOKS_DIR/../failure-log.sh"
+
 # Hook input JSON arrives on stdin once; every hook calls read_hook_input first.
 read_hook_input() {
   HOOK_INPUT="$(cat)"
@@ -54,6 +57,7 @@ need_tools() {
   echo "Rust hooks ($(basename "$0")): missing tool(s):$missing. Install them" \
     "(~/.config/agents/SETUP.md, 'Install on a new machine'); the Rust checks are off" \
     "until then." >&2
+  log_hook_failure "missing tool(s):$missing"
   if [[ "$on_missing" == block-stop ]] &&
     ! grep -qE '"(stop_hook_active|stopHookActive)"[[:space:]]*:[[:space:]]*true' \
       <<<"$HOOK_INPUT"; then
@@ -66,6 +70,7 @@ need_tools() {
 # finding. Callers exit 1 when nothing else was found, so the stop is not blocked by it.
 internal_error() {
   echo "Rust hooks ($(basename "$0")) internal error: $*" >&2
+  log_hook_failure "internal error: $*"
 }
 
 hook_field() {

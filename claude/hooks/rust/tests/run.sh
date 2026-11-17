@@ -466,6 +466,12 @@ done
 run_hook style-gate.sh "$(edit m1 "$LIB/src/x.rs" 'fn a() {}')" "$NOJQ"
 check "missing jq: gate fails open with a message" \
   "$([[ $code -eq 1 && "$out" == *"missing tool(s): jq"* ]] && echo yes)" "exit $code: $out"
+# The failure log (failure-log.sh): the edit above went through unchecked, and that is on
+# record with the hook's name and the reason.
+FAILURES="$FAKE_HOME/.local/state/agent-setup/hook-failures.log"
+check "failure log: a fail-open names its hook and reason" "$(
+  grep -qE $'^[0-9T:Z-]+\tstyle-gate\\.sh\tmissing tool\\(s\\): jq$' "$FAILURES" && echo yes
+)" "$(cat "$FAILURES" 2>&1)"
 run_hook check-on-stop.sh "$(stop m1)" "$NOJQ"
 check "missing jq: stop blocks once with the fix" \
   "$([[ $code -eq 2 && "$out" == *"missing tool(s): jq"* ]] && echo yes)" "exit $code: $out"
@@ -1801,6 +1807,35 @@ touch -t 202001010000 "$PS/prune-old2.main.edited"
 prompt prune2 "$WORK"
 check "prune: at most once a day" "$([[ -e "$PS/prune-old2.main.edited" ]] && echo yes)"
 
+# The same daily pass trims the failure log to its newest 500 lines.
+saved_failures="$(cat "$FAILURES")"
+seq 600 >"$FAILURES"
+rm -f "$PS/pruned"
+prompt prune3 "$WORK"
+check "prune: failure log keeps its newest 500 lines" "$(
+  [[ "$(wc -l <"$FAILURES" | tr -d ' ')" -eq 500 && "$(head -n 1 "$FAILURES")" == 101 &&
+  "$(tail -n 1 "$FAILURES")" == 600 ]] && echo yes
+)" "$(wc -l <"$FAILURES") lines, first $(head -n 1 "$FAILURES")"
+printf '%s\n' "$saved_failures" >"$FAILURES"
+
+# The status line counts the failures of the last 24 hours and says nothing without one.
+# statusline NAME WANT COUNT: the status line's output contains (WANT=yes) or lacks
+# "hook failures: COUNT".
+statusline() {
+  local shown=no
+  if HOME="$FAKE_HOME" bash "$HOOKS/../../statusline.sh" \
+    <<<'{"workspace": {"current_dir": "/"}, "model": {"display_name": "m"}}' |
+    grep -q "hook failures: $3"; then
+    shown=yes
+  fi
+  check "status line: $1" "$([[ "$shown" == "$2" ]] && echo yes)"
+}
+printf '2020-01-01T00:00:00Z\tstyle-gate.sh\told\n' >"$FAILURES"
+statusline "a failure older than 24 hours is not counted" no ""
+printf '%s\tstyle-gate.sh\tnew\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$FAILURES"
+statusline "one recent failure among old ones is counted once" yes "1"
+printf '%s\n' "$saved_failures" >"$FAILURES"
+
 # ---- 4. bash guard ---------------------------------------------------------------------------
 
 GUARD="$HOOKS/../guards/bash-guard.sh"
@@ -1812,9 +1847,26 @@ git -C "$GREPO" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
 guard() {
   local code=0
   jq -nc --arg c "$3" --arg d "$GREPO" '{tool_input: {command: $c}, cwd: $d}' |
-    bash "$GUARD" >/dev/null 2>&1 || code=$?
+    HOME="$FAKE_HOME" bash "$GUARD" >/dev/null 2>&1 || code=$?
   check "guard: $1 (exit $code, want $2)" "$([[ $code -eq $2 ]] && echo yes)"
 }
+# A guard that dies lets the command run, so the failure log must say so; a block and a pass
+# are verdicts and leave no line.
+guard_failures() {
+  grep -c $'\tbash-guard\\.sh\t' "$FAILURES" || true
+}
+code=0
+HOME="$FAKE_HOME" bash "$GUARD" <<<'not json' >/dev/null 2>&1 || code=$?
+check "guard: an unreadable input is not a verdict (exit $code)" \
+  "$([[ $code -ne 0 && $code -ne 2 ]] && echo yes)"
+check "failure log: a hook that dies is recorded" "$(
+  grep -qE $'\tbash-guard\\.sh\texited [0-9]+ without a verdict' "$FAILURES" && echo yes
+)" "$(cat "$FAILURES")"
+guard_failures_before="$(guard_failures)"
+guard "a block is a verdict" 2 "git push --force origin feature"
+guard "a pass is a verdict" 0 "ls"
+check "failure log: a block and a pass add nothing" \
+  "$([[ "$(guard_failures)" -eq "$guard_failures_before" ]] && echo yes)"
 # Built from parts so the strings never trip the guard of the shell running this file.
 rm_r="rm -""r"
 guard "rm -r blocked" 2 "$rm_r build"
