@@ -2205,7 +2205,7 @@ check "settings: every registered hook file exists" "$([[ -z "$missing" ]] && ec
   "$missing"
 # install.sh merges a machine's hook groups into the shared ones by matcher, so a matcher
 # names one group per event: with two, a command a machine added is copied into both.
-repeated="$(jq -r '.hooks | to_entries[] | .key as $event | .value | group_by(.matcher)[]
+repeated="$(jq -r '.hooks | to_entries[] | .key as $event | .value | group_by(.matcher // "")[]
   | select(length > 1) | "\($event): \(length) groups with matcher \"\(.[0].matcher)\""' \
   "$HOOKS/../../settings.json")"
 check "settings: one hook group per matcher in each event" \
