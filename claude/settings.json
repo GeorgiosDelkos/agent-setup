@@ -99,22 +99,12 @@
           {
             "type": "command",
             "command": "afplay /System/Library/Sounds/Hero.aiff &"
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/run.sh rust/check-on-stop.sh",
             "timeout": 600
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/run.sh memory/remember-checkpoint.sh"
@@ -169,12 +159,7 @@
             "type": "command",
             "command": "bash ~/.claude/hooks/run.sh rust/check-on-stop.sh",
             "timeout": 600
-          }
-        ]
-      },
-      {
-        "matcher": "",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "bash ~/.claude/hooks/run.sh rust/review-done.sh",

@@ -53,7 +53,11 @@ link() {
 # hook group (an object with `hooks`) whose matcher a shared group has is merged into that
 # group instead, hook by hook the same way: Claude's /hooks adds a command inside the
 # existing group, and keeping the whole local group beside
-# the shared one would run the shared hooks twice. Without $p, arrays are taken from the
+# the shared one would run the shared hooks twice. The matcher is the group's key, so the
+# shared copy has one group per matcher in each event: with two, a command added locally to
+# either would be appended to both (three `Stop` groups with the empty matcher ran such a
+# command three times, issue #39). The hook tests fail on a second group with a matcher.
+# Without $p, arrays are taken from the
 # shared copy whole, as before this record existed, because no local entry can be told apart
 # yet. Keys keep the local file's order, then the shared copy's new keys: sorting them would
 # differ from the order Claude Code writes, and every install would report a change.
