@@ -19,7 +19,8 @@ fn pairs(input: &str) -> Vec<(String, String)> {
 
 /// Through `AsRef`, not `to_string` or `String::from`: each of those is a lint finding for
 /// one of the types a session may return (`String`, `&str`), and an `#[expect]` would be
-/// unfulfilled for the other.
+/// unfulfilled for the other. Checked by hand with `cargo clippy --all-targets` in a crate
+/// seeded as the harness seeds one: the harness itself only runs `cargo test` on this file.
 fn owned(text: impl AsRef<str>) -> String {
     text.as_ref().to_owned()
 }
@@ -28,7 +29,9 @@ fn pair(key: &str, value: &str) -> (String, String) {
     (key.to_owned(), value.to_owned())
 }
 
-/// The `Display` text of the error for `input`.
+/// The `Display` text of the error for `input`. Callers look for the line number as a
+/// digit, so no input they pass holds a digit of its own: an error that echoed the line
+/// would otherwise pass with the wrong number.
 fn error(input: &str) -> String {
     match parse(input) {
         Ok(_) => panic!("{input:?} must be rejected"),

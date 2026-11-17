@@ -121,6 +121,8 @@ fn an_unreadable_file_is_reported_and_the_rest_still_counted() {
         !output.stderr.is_empty(),
         "the unreadable file is reported on standard error"
     );
+    // `contains`, not equality: the prompt does not say whether a total line is printed
+    // when one of two named files cannot be read.
     let counted: Vec<String> = ["2", "3", "14", "a.txt"].map(str::to_owned).into();
     assert!(lines(&output).contains(&counted));
 }
