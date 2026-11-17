@@ -2111,6 +2111,28 @@ wrap unbound.sh '{}' "$WORK/home-is-a-file"
 check "wrapper: an unwritable log leaves status and stderr alone" \
   "$([[ $code -eq 1 && "$(wc -l <<<"$out" | tr -d ' ')" -eq 1 ]] && echo yes)" "exit $code: $out"
 
+# A tool that gives up on a hook at its timeout signals the wrapper. The hook must stop
+# with it, or it runs on after the stop it was checking, and the stop is on record.
+# shellcheck disable=SC2016 # the hook under test writes its own process id
+printf 'echo $$ >"$0.pid"\nsleep 20\n' >"$WRAP/slow.sh"
+HOME="$FAKE_HOME" bash "$WRAP/run.sh" slow.sh </dev/null >/dev/null 2>&1 &
+wrapper=$!
+for _ in $(seq 100); do
+  if [[ -s "$WRAP/slow.sh.pid" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+kill -TERM "$wrapper"
+code=0
+wait "$wrapper" || code=$?
+check "wrapper: stopped by SIGTERM, it exits 143 (exit $code)" "$([[ $code -eq 143 ]] && echo yes)"
+check "wrapper: stopped by a signal, it stops its hook" \
+  "$(kill -0 "$(cat "$WRAP/slow.sh.pid")" 2>/dev/null || echo yes)"
+check "wrapper: a hook stopped by a signal is logged" \
+  "$([[ "$(logged slow.sh)" == "exit 143: "*"stopped by a signal"* ]] && echo yes)" \
+  "$(cat "$FAILURES")"
+
 # The real guard through the real wrapper: an input it cannot read is a failure on record,
 # and without HOME it still blocks.
 code=0
@@ -2139,7 +2161,10 @@ check "wrapper: a hook without jq fails open and says so in the log" "$(
 # The log is trimmed to its newest lines once it passes the limit, by the failure that
 # crosses it.
 saved_failures="$(cat "$FAILURES")"
-seq 1000 >"$FAILURES"
+seq 999 >"$FAILURES"
+wrap unbound.sh '{}'
+check "wrapper: a log of exactly 1000 lines is left whole" \
+  "$([[ "$(wc -l <"$FAILURES" | tr -d ' ')" -eq 1000 ]] && echo yes)"
 wrap unbound.sh '{}'
 check "wrapper: a log past 1000 lines keeps its newest 500" "$(
   [[ "$(wc -l <"$FAILURES" | tr -d ' ')" -eq 500 && "$(head -n 1 "$FAILURES")" == 502 &&
