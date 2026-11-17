@@ -5,23 +5,33 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-/// Lines, words and (wrongly) characters of `text`.
-fn count(text: &str) -> [usize; 3] {
+/// Lines, words and (wrongly) characters of `bytes`. A byte that is not UTF-8 counts as one
+/// character, so only text with a multi-byte character shows the defect.
+fn count(bytes: &[u8]) -> [usize; 3] {
     [
-        text.matches('\n').count(),
-        text.split_whitespace().count(),
-        text.chars().count(),
+        // One piece more than there are newlines.
+        bytes.split(|&byte| byte == b'\n').count() - 1,
+        bytes
+            .split(u8::is_ascii_whitespace)
+            .filter(|word| !word.is_empty())
+            .count(),
+        String::from_utf8_lossy(bytes).chars().count(),
     ]
 }
 
+#[expect(
+    clippy::print_stdout,
+    clippy::print_stderr,
+    reason = "a command-line tool prints its counts and its errors from main"
+)]
 fn main() -> ExitCode {
     let paths: Vec<String> = std::env::args().skip(1).collect();
     if paths.is_empty() {
-        let mut text = String::new();
-        if std::io::stdin().read_to_string(&mut text).is_err() {
+        let mut input = Vec::new();
+        if std::io::stdin().read_to_end(&mut input).is_err() {
             return ExitCode::FAILURE;
         }
-        let [lines, words, bytes] = count(&text);
+        let [lines, words, bytes] = count(&input);
         println!("{lines} {words} {bytes}");
         return ExitCode::SUCCESS;
     }
@@ -29,9 +39,9 @@ fn main() -> ExitCode {
     let mut total = [0; 3];
     let mut failed = false;
     for path in &paths {
-        match std::fs::read_to_string(path) {
-            Ok(text) => {
-                let counts = count(&text);
+        match std::fs::read(path) {
+            Ok(contents) => {
+                let counts = count(&contents);
                 println!("{} {} {} {path}", counts[0], counts[1], counts[2]);
                 for (sum, count) in total.iter_mut().zip(counts) {
                     *sum += count;

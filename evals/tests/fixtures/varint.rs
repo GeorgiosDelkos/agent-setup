@@ -23,7 +23,7 @@ pub fn encode(mut value: u64, buf: &mut [u8]) -> Result<usize, BufferTooSmall> {
     let mut written = 0;
     loop {
         let slot = buf.get_mut(written).ok_or(BufferTooSmall)?;
-        let low = value.to_le_bytes()[0] & 0x7F;
+        let low = (value & 0x7F) as u8;
         value >>= 7;
         written += 1;
         if value == 0 {

@@ -4,19 +4,20 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
-/// A directory of this test's own under the system temporary directory, emptied first.
+/// A directory of this test's own, emptied first, inside the directory Cargo gives
+/// integration tests: it goes with the build, and nothing is left in the system's.
 fn scratch(test: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("wcount-oracle-{}-{test}", std::process::id()));
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("wcount-oracle-{test}"));
     drop(fs::remove_dir_all(&dir));
-    fs::create_dir_all(&dir).expect("the temporary directory is writable");
+    fs::create_dir_all(&dir).expect("the target directory is writable");
     dir
 }
 
 /// Writes `contents` to `name` in `dir` and returns the path as the tool will print it.
-fn file(dir: &PathBuf, name: &str, contents: &str) -> String {
+fn file(dir: &Path, name: &str, contents: impl AsRef<[u8]>) -> String {
     let path = dir.join(name);
     fs::write(&path, contents).expect("the scratch directory is writable");
     path.to_str()
@@ -63,6 +64,16 @@ fn bytes_are_counted_not_characters() {
     assert_eq!(
         lines(&wcount(&[&path], "")),
         [["1", "1", "7", path.as_str()]]
+    );
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_counted_by_its_bytes() {
+    let dir = scratch("not-utf8");
+    let path = file(&dir, "latin1.txt", [0xFF, b'\n']);
+    assert_eq!(
+        lines(&wcount(&[&path], "")),
+        [["1", "1", "2", path.as_str()]]
     );
 }
 

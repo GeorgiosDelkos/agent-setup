@@ -147,7 +147,7 @@ check "a correct solution without tests of its own: none, and the whole oracle p
 check "the kv-parse oracle passes against a correct solution" \
   "kv-parse none 8/8" "$(row kv-parse | cut -d ' ' -f 1-3)"
 check "a defect fails its oracle test only, and the oracle is no part of the crate's score" \
-  "cli-wc pass 5/6" "$(row cli-wc | cut -d ' ' -f 1-3)"
+  "cli-wc pass 6/7" "$(row cli-wc | cut -d ' ' -f 1-3)"
 check "the oracle adds no diagnostics or house findings to the crate's counts" \
   "0 0" "$(row varint | cut -d ' ' -f 4,5)"
 check "a deny lint and a warn lint: two diagnostics, each counted once, in one cell" \

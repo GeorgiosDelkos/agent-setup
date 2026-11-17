@@ -10,8 +10,15 @@ fn pairs(input: &str) -> Vec<(String, String)> {
     parse(input)
         .expect("the input is valid")
         .into_iter()
-        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .map(|(key, value)| (owned(key), owned(value)))
         .collect()
+}
+
+/// Through `AsRef`, not `to_string` or `String::from`: each of those is a lint finding for
+/// one of the types a session may return (`String`, `&str`), and an `#[expect]` would be
+/// unfulfilled for the other.
+fn owned(text: impl AsRef<str>) -> String {
+    text.as_ref().to_owned()
 }
 
 fn pair(key: &str, value: &str) -> (String, String) {
@@ -64,17 +71,17 @@ fn the_last_line_needs_no_newline() {
 
 #[test]
 fn a_duplicate_key_is_an_error_that_names_its_line() {
-    assert!(error("a = 1\nb = 2\n\na = 9\n").contains('4'));
+    assert!(error("a = x\nb = y\n\na = z\n").contains('4'));
 }
 
 #[test]
 fn a_key_with_other_characters_is_an_error_that_names_its_line() {
-    assert!(error("ok = 1\nnot-ok = 2\n").contains('2'));
-    assert!(error("with space = 1\n").contains('1'));
+    assert!(error("ok = x\nnot-ok = y\n").contains('2'));
+    assert!(error("with space = x\n").contains('1'));
 }
 
 #[test]
 fn a_line_without_a_key_or_an_equals_sign_is_an_error_that_names_its_line() {
-    assert!(error("a = 1\n\n# c\n\njust words\n").contains('5'));
-    assert!(error("a = 1\n = value\n").contains('2'));
+    assert!(error("a = x\n\n# c\n\njust words\n").contains('5'));
+    assert!(error("a = x\n = value\n").contains('2'));
 }
