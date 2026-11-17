@@ -672,6 +672,31 @@ run_hook review-done.sh \
   "$(subagent_stop grok-plugin "$GATE" '{"subagentType": "plugin:rust-style-reviewer"}')"
 expect "gate: a plugin-prefixed Grok reviewer counts" 0 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+# A reviewer spawned with a name (a Claude Code agent-team teammate). Its SubagentStop has
+# the name as `agent_type`; the definition is `spawnedAgentType` in the metadata file beside
+# its transcript. Field names as captured from Claude Code 2.1.326 on 2026-11-17.
+lines "$GATE/src/lib.rs" 108 25
+commit_all "$GATE" "more after the plugin review"
+# named_stop SESSION NAME SPAWNED_TYPE: the stop of agent NAME, spawned from SPAWNED_TYPE.
+named_stop() {
+  local transcript="$WORK/transcripts/agent-a$2-0123456789abcdef.jsonl"
+  mkdir -p "$WORK/transcripts"
+  : >"$transcript"
+  jq -nc --arg n "$2" --arg t "$3" '{agentType: $n, name: $n, taskKind: "in_process_teammate",
+    customAgentType: $t, spawnedAgentType: $t}' >"${transcript%.jsonl}.meta.json"
+  subagent_stop "$1" "$GATE" "$(jq -nc --arg n "$2" --arg p "$transcript" \
+    '{agent_id: ("a" + $n + "-0123456789abcdef"), agent_type: $n, agent_transcript_path: $p}')"
+}
+run_hook review-done.sh "$(named_stop v1 pr-explorer Explore)"
+expect "gate: a named agent of another type is no review" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh "$(subagent_stop v1 "$GATE" '{"agent_id": "apr-reviewer-1",
+  "agent_type": "pr-reviewer", "agent_transcript_path": "/nonexistent/agent.jsonl"}')"
+expect "gate: a named agent without a metadata file is no review" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh "$(named_stop v1 pr-reviewer rust-style-reviewer)"
+expect "gate: a reviewer spawned with a name counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
 printf '# Notes\n%.0s' {1..30} >"$GATE/NOTES.md"
 commit_all "$GATE" "docs"
 expect "gate: non-Rust changes do not count" 0 review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready')"
