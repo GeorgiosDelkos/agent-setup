@@ -172,8 +172,10 @@ between the lines* (Rust Munich 2026).
 - Cover edges and errors.
 - Break the code once to confirm the test fails. Once per PR with logic changes, before
   `gh pr ready`, run the language's mutation tool over the PR's changed code (the language
-  skill names it, where one exists) and kill or explain survivors. A mutation job the
-  repo's CI runs on the PR counts. Not per edit: a run takes minutes.
+  skill names it, where one exists), kill or explain survivors, and post the result on the
+  PR. Run it locally: CI runners run a suite several times slower, so a CI mutation job
+  costs hours where the local run takes minutes. A repo's CI job runs only on a PR labelled
+  `mutants`, when a second run is wanted. Not per edit: a run takes minutes.
 - Property tests for parsers, serialization, and algorithms.
 - Docs, formatting, and pure renames need no new tests.
 

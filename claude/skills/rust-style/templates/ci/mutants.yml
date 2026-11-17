@@ -2,20 +2,30 @@
 # breaks each changed function in small ways (returns a default, flips a comparison) and fails
 # when the tests still pass, which means the tests do not check that code (TST-19). From the
 # cargo-mutants guide, https://mutants.rs/pr-diff.html (`--in-diff`), with house pinning.
-# Delete for a crate whose test suite takes more than a few minutes: every mutant reruns it.
-# Not required on day one: start it as advisory, make it required once it is green.
+# Runs only on a PR labelled `mutants`: the author's local run is the evidence (TST-19), and
+# every mutant reruns the suite, which on GitHub's runners costs hours where a laptop takes
+# minutes. Never a required check: most PRs skip it.
 permissions:
   contents: read
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
-concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}-${{ github.event.pull_request.draft }}
-  cancel-in-progress: true
+    # `labeled`: adding the label starts a run.
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 name: mutants
 jobs:
   mutants:
-    if: ${{ !github.event.pull_request.draft }}
+    # Adding another label also sends `labeled`; only the `mutants` label itself starts a run
+    # then.
+    if: >-
+      ${{ !github.event.pull_request.draft
+      && contains(github.event.pull_request.labels.*.name, 'mutants')
+      && (github.event.action != 'labeled' || github.event.label.name == 'mutants') }}
+    # On the job, not the workflow: a skipped run (another label, a draft) takes no slot, so it
+    # cannot cancel a run in progress. Add the matrix entry to the group if you shard the job,
+    # or the shards cancel each other.
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     name: cargo mutants (PR diff)
     steps:
