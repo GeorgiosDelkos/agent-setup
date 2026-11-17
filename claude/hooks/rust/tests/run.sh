@@ -1711,10 +1711,12 @@ check "lang-stop: Rust without cargo still names the missing tool" "$(
 check "lang-stop: Rust without cargo does not ask for a cargo test run" "$(
   [[ "$out" != *"No test run since this Rust changed"* ]] && echo yes
 )" "$out"
-# The next turn's stop, with the same Rust, was told already: it passes and keeps the file.
+# The next turn's stop, with the same Rust, was told already: it is not blocked again and
+# keeps the file, but it exits 1 with the reason, never 0: the Rust check did not run, and
+# exit 1 is what puts that in the failure log.
 run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
-check "lang-stop: missing cargo blocks once per Rust state" "$([[ $code -eq 0 ]] && echo yes)" \
-  "exit $code: $out"
+check "lang-stop: missing cargo blocks once per Rust state, then fails open on record" \
+  "$([[ $code -eq 1 && "$out" == *"missing tool(s): cargo"* ]] && echo yes)" "exit $code: $out"
 printf 'fn main() { let _ = 2; }\n' >"$RN/src/main.rs"
 run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
 check "lang-stop: missing cargo blocks again once the Rust changes" "$(
@@ -2063,6 +2065,144 @@ guard "push with 2>&1 on main blocked" 2 "git -C $LIB push origin 2>&1"
 guard "push with 2>&1 | tail on main blocked" 2 "git -C $LIB push -u origin 2>&1 | tail -3"
 guard "push of a named branch with redirects passes" 0 "git push origin feature >push.log 2>&1"
 guard "a push inside a substitution is still seen" 2 "echo \"\$(git push origin main)\""
+
+# ---- 5. run.sh: the wrapper every hook is registered through, and the failure log -------------
+
+# A copy of the wrapper beside three hooks of the test's own: one that crashes the way the
+# system bash 3.2 hides from an EXIT trap (an unbound variable), one that blocks, and one
+# that passes its input through.
+WRAP="$WORK/wrap"
+mkdir -p "$WRAP"
+cp "$HOOKS/../run.sh" "$WRAP/run.sh"
+# shellcheck disable=SC2016 # the hook under test must read the unset variable itself
+printf 'set -euo pipefail\necho "$nope"\n' >"$WRAP/unbound.sh"
+printf 'echo deny-on-stdout\necho the-reason >&2\nexit 2\n' >"$WRAP/block.sh"
+printf 'cat\n' >"$WRAP/pass.sh"
+FAILURES="$FAKE_HOME/.local/state/agent-setup/hook-failures.log"
+# wrap HOOK INPUT [HOME]: runs the copied wrapper. Sets $code, $stdout and $out (stderr).
+wrap() {
+  code=0
+  stdout="$(HOME="${3:-$FAKE_HOME}" bash "$WRAP/run.sh" "$1" <<<"$2" 2>"$WORK/stderr")" ||
+    code=$?
+  out="$(cat "$WORK/stderr")"
+}
+# The log's lines for hook $1, without the time.
+logged() {
+  awk -F '\t' -v hook="$1" '$2 == hook { print $3 }' "$FAILURES" 2>/dev/null || true
+}
+
+wrap unbound.sh '{}'
+check "wrapper: a crash keeps its exit status (exit $code)" "$([[ $code -eq 1 ]] && echo yes)"
+check "wrapper: a crash keeps its stderr" "$([[ "$out" == *"unbound variable"* ]] && echo yes)"
+check "wrapper: a crash is logged once, with its reason" "$(
+  [[ "$(logged unbound.sh)" == "exit 1: "*"nope: unbound variable" ]] && echo yes
+)" "$(cat "$FAILURES" 2>&1)"
+wrap block.sh '{}'
+check "wrapper: a block keeps exit 2, stdout and stderr" \
+  "$([[ $code -eq 2 && "$stdout" == deny-on-stdout && "$out" == the-reason ]] && echo yes)" \
+  "exit $code, stdout: $stdout, stderr: $out"
+wrap pass.sh 'the hook input'
+check "wrapper: stdin reaches the hook and a pass exits 0" \
+  "$([[ $code -eq 0 && "$stdout" == "the hook input" && -z "$out" ]] && echo yes)"
+check "wrapper: a block and a pass are verdicts, not failures" \
+  "$([[ -z "$(logged block.sh)$(logged pass.sh)" ]] && echo yes)" "$(cat "$FAILURES")"
+
+# A log that cannot be written (HOME is a file) changes neither the status nor the output.
+touch "$WORK/home-is-a-file"
+wrap unbound.sh '{}' "$WORK/home-is-a-file"
+check "wrapper: an unwritable log leaves status and stderr alone" \
+  "$([[ $code -eq 1 && "$(wc -l <<<"$out" | tr -d ' ')" -eq 1 ]] && echo yes)" "exit $code: $out"
+
+# A tool that gives up on a hook at its timeout signals the wrapper. The hook must stop
+# with it, or it runs on after the stop it was checking, and the stop is on record.
+# shellcheck disable=SC2016 # the hook under test writes its own process id
+printf 'echo $$ >"$0.pid"\nsleep 20\n' >"$WRAP/slow.sh"
+HOME="$FAKE_HOME" bash "$WRAP/run.sh" slow.sh </dev/null >/dev/null 2>&1 &
+wrapper=$!
+for _ in $(seq 100); do
+  if [[ -s "$WRAP/slow.sh.pid" ]]; then
+    break
+  fi
+  sleep 0.1
+done
+kill -TERM "$wrapper"
+code=0
+wait "$wrapper" || code=$?
+check "wrapper: stopped by SIGTERM, it exits 143 (exit $code)" "$([[ $code -eq 143 ]] && echo yes)"
+check "wrapper: stopped by a signal, it stops its hook" \
+  "$(kill -0 "$(cat "$WRAP/slow.sh.pid")" 2>/dev/null || echo yes)"
+check "wrapper: a hook stopped by a signal is logged" \
+  "$([[ "$(logged slow.sh)" == "exit 143: "*"stopped by a signal"* ]] && echo yes)" \
+  "$(cat "$FAILURES")"
+
+# The real guard through the real wrapper: an input it cannot read is a failure on record,
+# and without HOME it still blocks.
+code=0
+HOME="$FAKE_HOME" bash "$HOOKS/../run.sh" guards/bash-guard.sh <<<'not json' >/dev/null 2>&1 ||
+  code=$?
+check "wrapper: the guard dying on its input is logged (exit $code)" "$(
+  [[ $code -ne 0 && $code -ne 2 && "$(logged guards/bash-guard.sh)" == "exit $code: "* ]] &&
+    echo yes
+)" "$(cat "$FAILURES")"
+code=0
+jq -nc --arg d "$GREPO" '{tool_input: {command: "git push --force origin feature"}, cwd: $d}' |
+  env -u HOME bash "$HOOKS/../run.sh" guards/bash-guard.sh >/dev/null 2>&1 || code=$?
+check "wrapper: the guard blocks without HOME (exit $code)" "$([[ $code -eq 2 ]] && echo yes)"
+
+# A missing tool, the commonest failure, through the registered path of a real hook.
+code=0
+# Built first: the PATH without jq below also applies to the expansion of a here-string.
+input="$(edit w1 "$LIB/src/x.rs" 'fn a() {}')"
+PATH="$NOJQ" HOME="$FAKE_HOME" TMPDIR="$STATE_TMP" bash "$HOOKS/../run.sh" rust/style-gate.sh \
+  <<<"$input" >/dev/null 2>&1 || code=$?
+check "wrapper: a hook without jq fails open and says so in the log" "$(
+  [[ $code -eq 1 && "$(logged rust/style-gate.sh)" == "exit 1: "*"missing tool(s): jq"* ]] &&
+    echo yes
+)" "exit $code; $(cat "$FAILURES")"
+
+# The log is trimmed to its newest lines once it passes the limit, by the failure that
+# crosses it.
+saved_failures="$(cat "$FAILURES")"
+seq 999 >"$FAILURES"
+wrap unbound.sh '{}'
+check "wrapper: a log of exactly 1000 lines is left whole" \
+  "$([[ "$(wc -l <"$FAILURES" | tr -d ' ')" -eq 1000 ]] && echo yes)"
+wrap unbound.sh '{}'
+check "wrapper: a log past 1000 lines keeps its newest 500" "$(
+  [[ "$(wc -l <"$FAILURES" | tr -d ' ')" -eq 500 && "$(head -n 1 "$FAILURES")" == 502 &&
+  "$(tail -n 1 "$FAILURES")" == *"unbound variable" ]] && echo yes
+)" "$(wc -l <"$FAILURES") lines, first $(head -n 1 "$FAILURES")"
+
+# The status line counts the failures of the last 24 hours and says nothing without one.
+# statusline NAME WANT COUNT: its output has (WANT=yes) or lacks "hook failures: COUNT".
+statusline() {
+  local shown=no
+  if HOME="$FAKE_HOME" bash "$HOOKS/../../statusline.sh" \
+    <<<'{"workspace": {"current_dir": "/"}, "model": {"display_name": "m"}}' |
+    grep -q "hook failures: $3"; then
+    shown=yes
+  fi
+  check "status line: $1" "$([[ "$shown" == "$2" ]] && echo yes)"
+}
+printf '%s\tx.sh\texit 1: old\n' "$(date -u -v-25H +%Y-%m-%dT%H:%M:%SZ)" >"$FAILURES"
+statusline "a failure 25 hours old is not counted" no ""
+printf '%s\tx.sh\texit 1: new\n' "$(date -u -v-23H +%Y-%m-%dT%H:%M:%SZ)" >>"$FAILURES"
+statusline "a failure 23 hours old is counted, the older one still is not" yes "1"
+printf '%s\n' "$saved_failures" >"$FAILURES"
+
+# Every hook in the shared settings is registered through the wrapper and names a file that
+# exists: a hook started directly, or a path with a typo, would fail with no line in the log.
+registered="$(jq -r '.hooks[][].hooks[].command | select(test("\\.claude/hooks/"))' \
+  "$HOOKS/../../settings.json")"
+unwrapped="$(grep -v '^bash ~/\.claude/hooks/run\.sh [a-z]*/[a-z-]*\.sh$' <<<"$registered" ||
+  true)"
+check "settings: every hook command goes through run.sh" \
+  "$([[ -n "$registered" && -z "$unwrapped" ]] && echo yes)" "$unwrapped"
+missing="$(while read -r _ _ file; do
+  [[ -f "$HOOKS/../$file" ]] || echo "$file"
+done <<<"$registered")"
+check "settings: every registered hook file exists" "$([[ -z "$missing" ]] && echo yes)" \
+  "$missing"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

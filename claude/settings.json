@@ -68,11 +68,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/guards/bash-guard.sh"
+            "command": "bash ~/.claude/hooks/run.sh guards/bash-guard.sh"
           },
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/review-gate.sh",
+            "command": "bash ~/.claude/hooks/run.sh rust/review-gate.sh",
             "timeout": 60
           }
         ]
@@ -82,11 +82,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/style-gate.sh"
+            "command": "bash ~/.claude/hooks/run.sh rust/style-gate.sh"
           },
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/memory/recall-gate.sh",
+            "command": "bash ~/.claude/hooks/run.sh memory/recall-gate.sh",
             "timeout": 10
           }
         ]
@@ -107,7 +107,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/check-on-stop.sh",
+            "command": "bash ~/.claude/hooks/run.sh rust/check-on-stop.sh",
             "timeout": 600
           }
         ]
@@ -117,7 +117,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/memory/remember-checkpoint.sh"
+            "command": "bash ~/.claude/hooks/run.sh memory/remember-checkpoint.sh"
           }
         ]
       }
@@ -128,7 +128,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/memory/recall-seen.sh"
+            "command": "bash ~/.claude/hooks/run.sh memory/recall-seen.sh"
           }
         ]
       },
@@ -137,7 +137,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/style-loaded.sh"
+            "command": "bash ~/.claude/hooks/run.sh rust/style-loaded.sh"
           }
         ]
       },
@@ -146,7 +146,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/fmt-on-edit.sh",
+            "command": "bash ~/.claude/hooks/run.sh rust/fmt-on-edit.sh",
             "timeout": 60
           }
         ]
@@ -156,7 +156,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/tests-ran.sh"
+            "command": "bash ~/.claude/hooks/run.sh rust/tests-ran.sh"
           }
         ]
       }
@@ -167,7 +167,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/check-on-stop.sh",
+            "command": "bash ~/.claude/hooks/run.sh rust/check-on-stop.sh",
             "timeout": 600
           }
         ]
@@ -177,7 +177,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/review-done.sh",
+            "command": "bash ~/.claude/hooks/run.sh rust/review-done.sh",
             "timeout": 120
           }
         ]
@@ -189,7 +189,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/session-baseline.sh",
+            "command": "bash ~/.claude/hooks/run.sh rust/session-baseline.sh",
             "timeout": 30
           }
         ]
@@ -201,7 +201,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/rust/tests-ran.sh"
+            "command": "bash ~/.claude/hooks/run.sh rust/tests-ran.sh"
           }
         ]
       },
@@ -210,7 +210,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash ~/.claude/hooks/memory/recall-seen.sh"
+            "command": "bash ~/.claude/hooks/run.sh memory/recall-seen.sh"
           }
         ]
       }
