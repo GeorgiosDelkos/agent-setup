@@ -672,6 +672,61 @@ run_hook review-done.sh \
   "$(subagent_stop grok-plugin "$GATE" '{"subagentType": "plugin:rust-style-reviewer"}')"
 expect "gate: a plugin-prefixed Grok reviewer counts" 0 review-gate.sh \
   "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+# A reviewer spawned with a name (a Claude Code agent-team teammate). Its SubagentStop has
+# the name as `agent_type`; the definition is `spawnedAgentType` in the metadata file beside
+# its transcript. The metadata below is the file captured from Claude Code 2.1.326 on
+# 2026-11-17 for an agent named capture-probe, with the name and the type put in. In the
+# capture `customAgentType` equals `spawnedAgentType`; here it differs, so a hook that read
+# that field instead would fail these cases.
+lines "$GATE/src/lib.rs" 108 25
+commit_all "$GATE" "more after the plugin review"
+# named_stop SESSION NAME SPAWNED_TYPE: the stop of agent NAME, spawned from SPAWNED_TYPE.
+named_stop() {
+  local transcript="$WORK/transcripts/subagents/agent-a$2-dac1c06012aa2c92.jsonl"
+  mkdir -p "$WORK/transcripts/subagents"
+  : >"$transcript"
+  jq -nc --arg n "$2" --arg t "$3" '{agentType: $n, isBuiltIn: false,
+    description: "capture probe", name: $n, spawnDepth: 0, requestShape: "background",
+    requestNonInteractive: true, model: "claude-fable-5-2[1m]",
+    pickedEffortModel: "claude-fable-5-2[1m]", taskKind: "in_process_teammate",
+    teamName: "session-f7aec210", color: "blue", planModeRequired: false,
+    customAgentType: "not-the-field-the-hook-reads", spawnedAgentType: $t,
+    permissionMode: "auto"}' >"${transcript%.jsonl}.meta.json"
+  subagent_stop "$1" "$GATE" "$(jq -nc --arg n "$2" --arg p "$transcript" \
+    '{agent_id: ("a" + $n + "-dac1c06012aa2c92"), agent_type: $n, agent_transcript_path: $p}')"
+}
+# quiet NAME: the last hook run passed without a word. A lookup that failed would exit
+# with another status, which run.sh logs as a hook failure.
+quiet() {
+  check "review-done: $1 exits 0 in silence" "$([[ $code -eq 0 && -z "$out" ]] && echo yes)" \
+    "exit $code: $out"
+}
+run_hook review-done.sh "$(named_stop v1 pr-explorer Explore)"
+quiet "a named agent of another type"
+expect "gate: a named agent of another type is no review" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+input="$(named_stop v1 pr-broken rust-style-reviewer)"
+printf 'not json' >"$WORK/transcripts/subagents/agent-apr-broken-dac1c06012aa2c92.meta.json"
+run_hook review-done.sh "$input"
+quiet "a named agent whose metadata is not JSON"
+expect "gate: a named agent whose metadata cannot be read is no review" 2 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+# No transcript path (Grok sends none): no file is looked for, not even one in the hook's
+# working directory that would otherwise be read as `.meta.json`.
+(cd "$WORK/transcripts" &&
+  jq -nc '{spawnedAgentType: "rust-style-reviewer"}' >.meta.json &&
+  run_hook review-done.sh "$(subagent_stop v1 "$GATE" '{"subagentType": "user:other-agent"}')")
+expect "gate: an agent without a transcript path is judged by its type alone" 2 \
+  review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+run_hook review-done.sh "$(named_stop v1 pr-reviewer rust-style-reviewer)"
+quiet "a reviewer spawned with a name"
+expect "gate: a reviewer spawned with a name counts" 0 review-gate.sh \
+  "$(pr_cmd v1 "$GATE" 'gh pr ready')"
+# Without jq no field can be read. The hook must say so (exit 1, which run.sh logs), not
+# pass as if some other agent had stopped.
+run_hook review-done.sh "$(named_stop v1 pr-reviewer rust-style-reviewer)" "$NOJQ"
+check "review-done: without jq it fails open with the missing tool" \
+  "$([[ $code -eq 1 && "$out" == *"missing tool(s): jq"* ]] && echo yes)" "exit $code: $out"
 printf '# Notes\n%.0s' {1..30} >"$GATE/NOTES.md"
 commit_all "$GATE" "docs"
 expect "gate: non-Rust changes do not count" 0 review-gate.sh "$(pr_cmd v1 "$GATE" 'gh pr ready')"
