@@ -22,7 +22,9 @@ refactors, `docs/` for documentation (`fix/` when unclear). Create the branch
 `{prefix}issue-$ARGUMENTS` from the up-to-date default branch before changing anything.
 First prune the repo's finished worktrees (`review-pr.md`, Worktrees).
 
-Write the plan to `plan-issue-$ARGUMENTS.md` in the repo root:
+Write the plan to `plan-issue-$ARGUMENTS.md` outside the repository (the session scratchpad,
+else a `mktemp -d` directory): a working file in the repo root can be committed with the
+change, as review scratch files were in PR #23.
 
 - the issue's requirements, as what must be true when it is fixed;
 - every file to create or change, with `file:line` references to the code involved;
@@ -46,7 +48,6 @@ lint, format, and type checks. The commands are in the repo's `AGENTS.md`, `CLAU
 
 ## 5. Commit and push
 
-- Delete `plan-issue-$ARGUMENTS.md` with `trash`: a working file, not part of the change.
 - Commit with an imperative subject of at most 72 characters and a body that says why,
   ending with `Refs #$ARGUMENTS`.
 - Push the branch.
