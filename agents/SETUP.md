@@ -59,7 +59,10 @@ replace a symlink. `$SETUP/claude/settings.json` is the shared copy; `install.sh
 merges it in: shared keys win, local-only keys stay, and an array (a hook list) keeps the
 local entries another tool added, a command added inside a shared hook group included.
 Groups are matched by matcher, so the shared copy has one group per matcher in each event
-(a hook test checks it). It records the shared copy under `~/.local/state/agent-setup/`,
+(a hook test checks it), and a group without a `matcher` key counts as the empty matcher.
+A hook is identified by its `type` and `command`: a machine that changes another field of
+a shared hook (its `timeout`) gets the shared entry back at the next install, so change
+such a field in the shared copy. It records the shared copy under `~/.local/state/agent-setup/`,
 so a key, hook event or hook the shared copy drops later is removed from the machine at
 the next install. One exception:
 a plain value the machine changed since the last install stays when the shared copy drops

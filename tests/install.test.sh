@@ -86,6 +86,32 @@ for groups in '[0]' '[1]' '[2]' '[0, 1, 2]'; do
     '[["a","b","c","mine"]]' "$(jq -c '[.hooks.Stop[] | [.hooks[].command]]' "$file")"
 done
 
+# A machine that changed a field of a shared hook (its timeout) holds that hook, not a new
+# one: the shared entry comes back, once. Compared as whole objects, both entries stayed
+# (issue #41).
+timed='{"hooks": {"Stop": [{"matcher": "", "hooks": [
+  {"type": "command", "command": "a", "timeout": 600}, {"type": "command", "command": "b"}]}]}}'
+trash "$HOME/.local/state/agent-setup"
+printf '{}\n' >"$file"
+merge_json "$timed" "$file" >/dev/null
+jq -c '.hooks.Stop[0].hooks[0].timeout = 900' "$file" >"$file.tmp"
+mv "$file.tmp" "$file"
+merge_json "$timed" "$file" >/dev/null
+check "a changed timeout on a shared hook: one entry, the shared value" \
+  '[["a",600],["b",null]]' "$(jq -c '[.hooks.Stop[].hooks[] | [.command, .timeout]]' "$file")"
+check "a changed timeout: the next install changes nothing" "ok      $file" \
+  "$(merge_json "$timed" "$file")"
+
+# A tool that rewrites the groups without the `matcher` key leaves the same groups: a
+# missing matcher is the empty one. Kept beside the shared group, every command was there
+# twice (issue #41). A command that tool added stays, once.
+jq -c '.hooks.Stop |= map(del(.matcher))
+  | .hooks.Stop[0].hooks += [{type: "command", command: "mine"}]' "$file" >"$file.tmp"
+mv "$file.tmp" "$file"
+merge_json "$timed" "$file" >/dev/null
+check "groups rewritten without a matcher key: one group, every command once" \
+  '[["","a","b","mine"]]' "$(jq -c '[.hooks.Stop[] | [.matcher] + [.hooks[].command]]' "$file")"
+
 # Keys keep the local file's order, so a file Claude Code wrote in its own order is unchanged.
 printf '{"zeta": 1, "model": "x"}\n' >"$file"
 check "key order: unchanged file says ok" "ok      $file" "$(merge_json '{"model": "x"}' "$file")"
