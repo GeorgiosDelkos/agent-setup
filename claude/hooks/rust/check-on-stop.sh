@@ -404,7 +404,14 @@ if [[ "$run_rust" -eq 1 ]]; then
   if [[ ${#files[@]} -gt 0 ]]; then
     if ! command -v cargo >/dev/null 2>&1; then
       if [[ -f "$cargo_told" && "$(cat "$cargo_told")" == "$rust_state" ]]; then
+        # Told already, so this stop is not blocked again. It still passes without the
+        # Rust check, and it must not look like a clean one: exit 1, as need_tools does on
+        # its second stop, puts it in the failure log (run.sh), which leaves out the first
+        # stop's exit 2.
+        echo "Rust hooks ($(basename "$0")): missing tool(s): cargo; the Rust checks did" \
+          "not run." >&2
         cargo_missing=2
+        internal=1
       else
         echo "Rust hooks ($(basename "$0")): missing tool(s): cargo. Install them" \
           "(~/.config/agents/SETUP.md, 'Install on a new machine'); the Rust checks are" \

@@ -1711,10 +1711,12 @@ check "lang-stop: Rust without cargo still names the missing tool" "$(
 check "lang-stop: Rust without cargo does not ask for a cargo test run" "$(
   [[ "$out" != *"No test run since this Rust changed"* ]] && echo yes
 )" "$out"
-# The next turn's stop, with the same Rust, was told already: it passes and keeps the file.
+# The next turn's stop, with the same Rust, was told already: it is not blocked again and
+# keeps the file, but it exits 1 with the reason, never 0: the Rust check did not run, and
+# exit 1 is what puts that in the failure log.
 run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
-check "lang-stop: missing cargo blocks once per Rust state" "$([[ $code -eq 0 ]] && echo yes)" \
-  "exit $code: $out"
+check "lang-stop: missing cargo blocks once per Rust state, then fails open on record" \
+  "$([[ $code -eq 1 && "$out" == *"missing tool(s): cargo"* ]] && echo yes)" "exit $code: $out"
 printf 'fn main() { let _ = 2; }\n' >"$RN/src/main.rs"
 run_hook check-on-stop.sh "$(cstop rn "$RN")" "$NOCARGO"
 check "lang-stop: missing cargo blocks again once the Rust changes" "$(
