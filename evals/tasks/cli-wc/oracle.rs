@@ -66,9 +66,9 @@ fn bytes_are_counted_not_characters() {
 #[test]
 fn a_file_that_is_not_utf8_is_counted_by_its_bytes() {
     let dir = scratch("not-utf8");
-    write(&dir, "latin1.txt", [0xFF, b'\n']);
+    write(&dir, "latin1.txt", [b'a', 0xFF, b'\n']);
     let output = wcount(&dir, &["latin1.txt"], "");
-    assert_eq!(lines(&output), [["1", "1", "2", "latin1.txt"]]);
+    assert_eq!(lines(&output), [["1", "1", "3", "latin1.txt"]]);
 }
 
 #[test]

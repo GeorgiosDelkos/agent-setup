@@ -5,10 +5,13 @@
 use kv_parse::parse;
 
 /// The parsed pairs as owned strings, so the check holds whether `parse` returns borrowed or
-/// owned keys and values.
+/// owned keys and values. `let ... else`, not `expect`, which would need the error type to
+/// implement `Debug`: the prompt asks only for `Display`.
 fn pairs(input: &str) -> Vec<(String, String)> {
-    parse(input)
-        .expect("the input is valid")
+    let Ok(parsed) = parse(input) else {
+        panic!("{input:?} is valid");
+    };
+    parsed
         .into_iter()
         .map(|(key, value)| (owned(key), owned(value)))
         .collect()

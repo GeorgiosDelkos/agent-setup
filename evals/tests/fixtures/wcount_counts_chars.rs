@@ -5,8 +5,8 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-/// Lines, words and (wrongly) characters of `bytes`. A byte that is not UTF-8 counts as one
-/// character, so only text with a multi-byte character shows the defect.
+/// Lines, words and (wrongly) characters of `bytes`. A lone invalid byte counts as one
+/// character, so the oracle's file that is not UTF-8 does not show the defect.
 fn count(bytes: &[u8]) -> [usize; 3] {
     [
         // One piece more than there are newlines.

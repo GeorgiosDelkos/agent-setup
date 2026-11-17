@@ -4,7 +4,10 @@
 use std::fmt;
 
 /// A line that is not a comment, blank, or a valid `key = value`.
-#[derive(Debug)]
+#[expect(
+    missing_debug_implementations,
+    reason = "the task asks only for Display; without Debug here, an oracle that needs it fails"
+)]
 pub struct ParseError {
     line: usize,
     reason: &'static str,

@@ -5,10 +5,23 @@
 use varint::{decode, encode};
 
 /// The LEB128 encoding of `value`, through a buffer of the largest size a `u64` needs.
+///
+/// `let ... else` here and below, not `unwrap` or `expect`: those need the error type to
+/// implement `Debug`, which the prompt does not ask for.
 fn encoded(value: u64) -> Vec<u8> {
     let mut buf = [0_u8; 10];
-    let written = encode(value, &mut buf).expect("ten bytes hold any u64");
+    let Ok(written) = encode(value, &mut buf) else {
+        panic!("ten bytes hold any u64, {value} included");
+    };
     buf[..written].to_vec()
+}
+
+/// The value at the start of `bytes` and the number of bytes it took.
+fn decoded(bytes: &[u8]) -> (u64, usize) {
+    let Ok(decoded) = decode(bytes) else {
+        panic!("{bytes:02X?} must decode");
+    };
+    decoded
 }
 
 #[test]
@@ -32,11 +45,7 @@ fn round_trips_at_every_length_boundary() {
     }
     for value in values {
         let bytes = encoded(value);
-        assert_eq!(
-            decode(&bytes).unwrap(),
-            (value, bytes.len()),
-            "value {value}"
-        );
+        assert_eq!(decoded(&bytes), (value, bytes.len()), "value {value}");
     }
 }
 
@@ -45,13 +54,13 @@ fn encode_reports_a_buffer_that_is_too_small() {
     assert!(encode(300, &mut [0_u8; 1]).is_err());
     assert!(encode(u64::MAX, &mut [0_u8; 9]).is_err());
     assert!(encode(0, &mut []).is_err());
-    assert_eq!(encode(300, &mut [0_u8; 2]).unwrap(), 2);
+    assert!(matches!(encode(300, &mut [0_u8; 2]), Ok(2)));
 }
 
 #[test]
 fn decode_stops_after_the_first_value() {
-    assert_eq!(decode(&[0x7F, 0xFF, 0xFF]).unwrap(), (127, 1));
-    assert_eq!(decode(&[0xAC, 0x02, 0x80]).unwrap(), (300, 2));
+    assert_eq!(decoded(&[0x7F, 0xFF, 0xFF]), (127, 1));
+    assert_eq!(decoded(&[0xAC, 0x02, 0x80]), (300, 2));
 }
 
 #[test]
