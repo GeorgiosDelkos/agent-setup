@@ -409,7 +409,6 @@ if [[ "$run_rust" -eq 1 ]]; then
         echo "Rust hooks ($(basename "$0")): missing tool(s): cargo. Install them" \
           "(~/.config/agents/SETUP.md, 'Install on a new machine'); the Rust checks are" \
           "off until then." >&2
-        log_hook_failure "missing tool(s): cargo"
         printf '%s' "$rust_state" >"$cargo_told"
         cargo_missing=1
       fi

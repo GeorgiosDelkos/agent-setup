@@ -95,7 +95,6 @@ registration() {
 fail_open() {
   echo "hippius-mem recall gate: $*, so this edit is not gated. Team memory is still" \
     "mandatory: recall before acting once it works (AGENTS.md, Team memory)." >&2
-  log_hook_failure "edit not gated: $*"
   allow 1
 }
 entry="$(registration)"

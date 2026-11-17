@@ -184,11 +184,16 @@ expect "gate: Claude daemon down fails open" 1 recall-gate.sh \
   "$(edit c4 "$FILE")" "does not answer"
 expect "gate: Grok daemon down fails open" 1 recall-gate.sh \
   "$(grok_edit c5 "$FILE")" "does not answer"
-# An ungated edit is on record (failure-log.sh), one line for each of the two edits above.
-check "gate: a fail-open is written to the failure log" "$(
-  [[ "$(grep -c $'\trecall-gate\\.sh\tedit not gated: the hippius-mem daemon at .* does not' \
-    "$FAKE_HOME/.local/state/agent-setup/hook-failures.log")" -eq 2 ]] && echo yes
-)" "$(cat "$FAKE_HOME/.local/state/agent-setup/hook-failures.log" 2>&1)"
+# As registered, through run.sh: the ungated edit is on record in the failure log.
+code=0
+env HOME="$FAKE_HOME" TMPDIR="$STATE_TMP" bash "$HOOKS/../run.sh" memory/recall-gate.sh \
+  <<<"$(edit c4b "$FILE")" >/dev/null 2>&1 || code=$?
+logged="$(cut -f 2,3 "$FAKE_HOME/.local/state/agent-setup/hook-failures.log" 2>&1)"
+want="memory/recall-gate.sh"$'\t'"exit 1: "
+check "gate: an edit let through ungated is written to the failure log" "$(
+  [[ $code -eq 1 && "$logged" == "$want"*"does not answer, so this edit is not gated"* ]] &&
+    echo yes
+)" "exit $code; $logged"
 register stdio stdio
 expect "gate: Grok stdio registration is enforced" 2 recall-gate.sh \
   "$(grok_edit c6 "$FILE")" "recall team memory"

@@ -43,12 +43,6 @@ if [[ -z "$(find "$pruned" -mtime -1 2>/dev/null)" ]]; then
     }' "$RUST_HOOKS_STATE" "$(($(date +%s) - 7 * 86400))" 2>/dev/null || true
   find "$RUST_HOOKS_STATE" -mindepth 2 -maxdepth 2 -path '*/review-*/*' -type f -mtime +30 \
     -delete 2>/dev/null || true
-  # The failure log (failure-log.sh) keeps its last 500 lines. Arbitrary: a daemon that is
-  # down logs one line per edit, and the status line reads only the last 24 hours.
-  if [[ -f "$HOOK_FAILURE_LOG" ]]; then
-    kept="$(tail -n 500 "$HOOK_FAILURE_LOG")"
-    printf '%s\n' "$kept" >"$HOOK_FAILURE_LOG"
-  fi
 fi
 
 # When the session started, for the stop check's "changed after the last test run": one stamp

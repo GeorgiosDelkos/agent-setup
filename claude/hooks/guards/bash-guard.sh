@@ -9,12 +9,6 @@
 # `xargs` gets past any pattern match.
 set -euo pipefail
 
-# Not through rust/common.sh: it sets LC_ALL=C, and the patterns below match the command as
-# text. A guard that dies (no jq, an input that is not JSON) lets the command run, and the
-# log's exit trap records that.
-# shellcheck source-path=SCRIPTDIR source=../failure-log.sh
-source "$(dirname "${BASH_SOURCE[0]}")/../failure-log.sh"
-
 input="$(cat)"
 command="$(jq -r '.tool_input.command // empty' <<<"$input")"
 cwd="$(jq -r '.cwd // empty' <<<"$input")"

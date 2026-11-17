@@ -189,9 +189,9 @@ if [ -n "$illu_segment" ]; then
   line="${line}$(printf '%b%b' "$SEP" "$illu_segment")"
 fi
 
-# Hook failures of the last 24 hours (hooks/failure-log.sh): each is a tool call a hook let
-# through unchecked. The times are UTC in ISO form, so they compare as text. `date -v` is BSD
-# date; where it fails the segment is left out.
+# Hook failures of the last 24 hours (hooks/run.sh writes the log): each is a tool call or a
+# stop that a hook let through unchecked. The times are UTC in ISO form, so they compare as
+# text. `date -v` is BSD date; where it fails the segment is left out.
 hook_log="$HOME/.local/state/agent-setup/hook-failures.log"
 if [ -f "$hook_log" ] && since=$(date -u -v-24H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null); then
   hook_failures=$(awk -F '\t' -v since="$since" '$1 >= since { n++ } END { print n + 0 }' \
