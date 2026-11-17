@@ -144,7 +144,27 @@ between the lines* (Rust Munich 2026).
 ## Testing
 
 - Behavior changes need tests. Test behavior, not implementation.
-- Cover edges and errors. Mock only boundaries (slow, external, non-deterministic).
+- **End to end first.** Test through the entry point its users call: spawn the binary,
+  call the HTTP or RPC API, run the hook or script as its host runs it, drive the UI. Run
+  it against real dependencies (a database in a container, a temporary directory, a local
+  server) wherever they can run on the machine and in CI. A mock never stands in for a
+  service whose behavior the test asserts. Unit tests cover only what an end-to-end test
+  cannot reach cheaply: one function's edge cases and error paths, property tests, faults
+  that need injecting. Where no end-to-end test can run, the PR says why.
+- **Every test catches a bug no other test catches.** Name that bug before adding the
+  test. Do not write a test that:
+  - restates the implementation: asserts a mock was called the way the code calls it, or
+    snapshots internal structure;
+  - tests the language, the standard library, a dependency, or code with no logic (a
+    derive, a getter, a constructor that only stores its arguments);
+  - asserts only that nothing failed (no panic, `is_ok()`, status 200) when the output can
+    be checked;
+  - repeats a case another test covers, differing only in values that take the same path.
+
+  When an end-to-end test checks what a unit test checks, delete the unit test. In a test
+  file you edit, delete the redundant tests you find.
+- Cover edges and errors. Mock only what cannot run in the test: a third-party or paid
+  service, wall-clock time, randomness, a fault that cannot be triggered for real.
 - Break the code once to confirm the test fails. Once per PR with logic changes, before
   `gh pr ready`, run the language's mutation tool over the PR's changed code (the language
   skill names it, where one exists) and kill or explain survivors. A mutation job the

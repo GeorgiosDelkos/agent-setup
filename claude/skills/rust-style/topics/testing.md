@@ -108,7 +108,9 @@ anything, which a line-coverage metric cannot.
 - **TST-15** CLIs are tested end to end by spawning the binary (`std::process::Command`
   with `env!("CARGO_BIN_EXE_<name>")`; `assert_cmd` when the crate already uses it), and their
   argument parsing by `Opt::try_parse_from(args)` compared against the expected library
-  options. [ref: J]
+  options. Servers are tested end to end too: bound to port 0 in the test and called
+  through their real client or protocol. [ref: J; house: servers, AGENTS.md end to end
+  first]
 
 ## Miri and sanitizers
 
