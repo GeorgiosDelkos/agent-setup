@@ -1,0 +1,5 @@
+# arm bare, deployed 4f24360, checkers 6fc3f17, model default, effort high, 2.1.326 (Claude Code)
+task	tests	oracle	diagnostics	house	blocker	major	minor	model	turns	cost_usd
+varint	pass	7/7	0	0	0	3	6	claude-fable-5-2	7	0.6763896
+kv-parse	pass	8/8	0	0	0	4	1	claude-fable-5-2	5	0.6996092
+cli-wc	pass	8/8	0	0	0	1	8	claude-fable-5-2	10	1.0359332

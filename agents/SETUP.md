@@ -298,16 +298,40 @@ result, so a rules change or a new model can be compared with the run before it.
 bash evals/run.sh            # all ten tasks; about 20 sessions of usage
 bash evals/run.sh varint     # one task
 EVALS_MODEL=opus bash evals/run.sh
+EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
 ```
 
-- A task is a prompt in `evals/tasks/`, written as a user would ask, with no hint at the
-  rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
+- A task is `evals/tasks/<name>/prompt.md`, written as a user would ask, with no hint at
+  the rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
+- A task may have an oracle beside its prompt, `oracle.rs`: tests of the behaviour the
+  prompt states, which the session never sees. The harness copies it into the crate as
+  `tests/eval_oracle.rs` after the reviewer and every other score. Such a prompt names the entry
+  points the oracle calls (a function and its success type, a binary and its output
+  format), never an error type or anything else about the design. `varint`, `kv-parse` and
+  `cli-wc` have one. `evals/tests/fixtures/` holds a solution for each, and the harness
+  tests fail when an oracle and its solution disagree.
+- `EVALS_ARM` picks what the task session runs with: `setup` (the default) is the deployed
+  rules, skills, hooks and plugins; `bare` is `claude --safe-mode`, none of them, with the
+  same login. The reviewer and every other score run with the setup in both, so two runs
+  that differ only in the arm show what the setup changes in the code. The header line
+  names the arm.
+- Every session is given its effort by flag, `EVALS_EFFORT` (default `high`), and the
+  header names it. The bare arm reads no settings file, so an `effortLevel` set there
+  would apply to the setup arm only. Compare two runs only when, arm aside, their headers
+  match (effort and Claude Code version) and their `model` columns do. Two things the
+  harness cannot align: `alwaysThinkingEnabled` and the permission deny list come from the
+  settings file, so the setup arm has them and the bare arm does not.
 - A row of `results.tsv` has:
   - `tests`: `pass`, `fail`, or `none` when the crate has no test;
+  - `oracle`: `passed/total` of the oracle's tests, `build` when the crate does not compile
+    with the oracle in it (usually the session missed an entry point or a type the prompt
+    names), or `-` for a task without one;
   - `diagnostics`: the distinct rustc and clippy diagnostics with the house lint table on,
     errors included, each counted once though clippy reports it per build target;
   - `house`: the number of `house-check.pl` findings;
   - `blocker`, `major`, `minor`: the `rust-style-reviewer` counts;
+  - `model`: the model the task session reported using. The header names only the model
+    that was asked for, and with none asked for each arm takes its own default;
   - `turns`, `cost_usd`: the task session's.
 
   `no-change` means the session wrote no Rust, committed or not; `?` means a score could
@@ -328,9 +352,12 @@ EVALS_MODEL=opus bash evals/run.sh
   `evals/results/` in a clone, named by date, commit and model, and commit it.
 - One run is one sample per task from a model. Read a difference between two runs only
   when several tasks move the same way.
-- The tasks check no fixed behaviour: `tests` is the crate's own suite, which the session
-  wrote. A task whose result must be checked from outside needs a test file the harness
-  copies in after the session, which it does not do yet.
+- `tests` is the crate's own suite, which the session wrote, so it checks no fixed
+  behaviour: only `oracle` does, and only for the tasks that have one. The other seven
+  tasks have none yet.
+- The oracles are files in this checkout, and a session has the user's permissions: one
+  that searched the disk could read them. Nothing in the crate or the prompt points at
+  them, and the session's transcript would show the search.
 
 ## Applying the Rust templates to a repo
 
