@@ -48,8 +48,8 @@ The global rules (AGENTS.md, Testing) apply; this is how in TS.
   against a simple model.
 - Coverage (`@vitest/coverage-v8`) shows untested code; it is a floor, not the goal. Once
   per PR, before `gh pr ready`, run StrykerJS (`@stryker-mutator/vitest-runner`) with
-  `--mutate` set to the files the branch changed, and kill or explain each surviving mutant;
-  a mutation job the repo's CI runs on the PR counts instead.
+  `--mutate` set to the files the branch changed, kill or explain each surviving mutant, and
+  post the result on the PR.
 - No CRAP-score gate (retired 2026-11-11, as for Rust, rust-style TST-21): it needed a
   second coverage run of the merge base for every change, and Stryker already shows whether
   the tests check anything, which a line-coverage metric cannot.
