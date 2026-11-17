@@ -39,10 +39,12 @@ reasoning, so the review is not anchored on it:
 
 A general-purpose agent gets the PR number, the files to read, and the review order from
 `AGENTS.md` (design principles first: could it be simpler, are the data structures right
-for the access pattern, does the call site read well; then correctness, quality, tests,
-performance), never your view of the change. A large diff with independent areas gets one
-agent per area. At tiers 1 and 2, the `rust-style-reviewer` agent joins when the diff has
-20 or more lines of Rust (the review gate enforces it); tier 0 has no code.
+for the access pattern, does the call site read well; then correctness, quality, tests
+(end to end where the entry point can run, mocks, tests that earn their place:
+`AGENTS.md`, Testing), performance), never your view of the change. A large diff with
+independent areas gets one agent per area. At tiers 1 and 2, the `rust-style-reviewer` agent
+joins when the diff has 20 or more lines of Rust (the review gate enforces it); tier 0 has
+no code.
 
 A required review that fails or comes back empty is not a clean one: rerun it, or replace
 it with the fallback above and say so on the PR. Until then it blocks `gh pr ready`, as an

@@ -144,7 +144,32 @@ between the lines* (Rust Munich 2026).
 ## Testing
 
 - Behavior changes need tests. Test behavior, not implementation.
-- Cover edges and errors. Mock only boundaries (slow, external, non-deterministic).
+- **End to end first.** Test through the entry point its users call: spawn the binary,
+  call the HTTP or RPC API or a library's public API, run the hook or script as its host
+  runs it, drive the UI. Run it against real dependencies wherever they can run on the
+  machine and in CI: a database in a container, a temporary directory, a local server or
+  emulator. Unit tests cover only what an end-to-end test cannot reach cheaply: one
+  function's edge cases and error paths, property tests, faults that need injecting.
+  Where no end-to-end test can run, the PR says why.
+- **Mock only what cannot run in the test:** a third-party or paid service with no local
+  stand-in, wall-clock time, randomness, a fault the real dependency cannot be made to
+  produce. A test of how your code handles a service's behavior runs against that service,
+  or its local stand-in, whenever one can run.
+- **Every test catches a bug no other test catches.** Name that bug before adding the
+  test. Do not write a test that:
+  - restates the implementation: asserts a mock was called the way the code calls it, or
+    snapshots internal structure;
+  - tests the language, the standard library, a dependency, or code with no logic (a
+    derive, a getter, a constructor that only stores its arguments). A test that pins a
+    dependency's undocumented behavior the code relies on is not this;
+  - asserts only that nothing failed (no panic, `is_ok()`, status 200) when the output can
+    be checked;
+  - repeats another test: same path, same assertions, and no input that could catch a bug
+    the other misses. A boundary value, another mode, and another caller are new cases.
+
+  Delete a test only when you can name the test that already catches its bug, and list
+  both in the PR. A unit test that an end-to-end test fully covers is deleted that way.
+- Cover edges and errors.
 - Break the code once to confirm the test fails. Once per PR with logic changes, before
   `gh pr ready`, run the language's mutation tool over the PR's changed code (the language
   skill names it, where one exists) and kill or explain survivors. A mutation job the

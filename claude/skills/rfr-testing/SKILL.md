@@ -68,8 +68,10 @@ Source: RfR Ch 6 "#[cfg(test)]" (TOC p. 88); RfR Ch 6 index "mocks" (p. 88), "te
   (Tokio calls it `test-util`): `#[cfg(any(test, feature = "test-util"))]`.
 - To give tests access to an internal field without making it public, use `pub(crate)`
   (the book's errata fixes an example on exactly this point).
-- Mock at boundaries (clock, network, filesystem) by making the code generic over a trait
-  or by passing the dependency in. Do not mock your own pure logic.
+- Mock at boundaries by making the code generic over a trait or by passing the dependency
+  in. Do not mock your own pure logic. House rule: only the clock, randomness, and services
+  that cannot run in the test are mocked; the filesystem (a temporary directory) and a
+  service that can run locally are real (`~/.config/agents/AGENTS.md`, Testing).
 
 ```rust
 pub trait Clock {
