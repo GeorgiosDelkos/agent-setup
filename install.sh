@@ -52,15 +52,21 @@ link() {
 # another tool registered under PreToolUse), while an entry the shared copy dropped goes. A
 # hook group (an object with `hooks`) whose matcher a shared group has is merged into that
 # group instead, hook by hook the same way: Claude's /hooks adds a command inside the
-# existing group, and keeping the whole local group beside
-# the shared one would run the shared hooks twice. Without $p, arrays are taken from the
-# shared copy whole, as before this record existed, because no local entry can be told apart
-# yet. Keys keep the local file's order, then the shared copy's new keys: sorting them would
-# differ from the order Claude Code writes, and every install would report a change.
+# existing group, and keeping the whole local group beside the shared one would run the
+# shared hooks twice. The matcher is the group's key, so the shared copy has one group per
+# matcher in each event: with two, a command added locally to either is appended to both
+# (with three `Stop` groups it was written into all three, issue #39). The hook tests fail
+# on a second group with a matcher. A command the local groups hold more than once is
+# added once: a machine that merge already reached has it in every old group. Without $p,
+# arrays are taken from the shared copy whole, as before this record existed, because no
+# local entry can be told apart yet. Keys keep the local file's order, then the shared
+# copy's new keys: sorting them would differ from the order Claude Code writes, and every
+# install would report a change.
 # shellcheck disable=SC2016 # jq variables, not shell ones
 MERGE_JQ='
 def new_in($a; $s; $p): [$a[] | select(. as $x | ($s | index([$x])) == null
   and ($p | index([$x])) == null)];
+def once($a): reduce $a[] as $x ([]; if index([$x]) == null then . + [$x] else . end);
 def group($x): ($x | type) == "object" and ($x | has("hooks"));
 def merge($l; $s; $p):
   if ($s | type) == "object" and ($l | type) == "object" then
@@ -79,7 +85,7 @@ def merge($l; $s; $p):
         | if group($g) then
             [$extra[] | select(group(.) and .matcher == $g.matcher) | .hooks[]] as $more
             | [$p[] | select(group(.) and .matcher == $g.matcher) | .hooks[]] as $old
-            | .hooks += new_in($more; $g.hooks; $old)
+            | .hooks += once(new_in($more; $g.hooks; $old))
           else . end]
       + [$extra[] | select(. as $x | group($x)
           and any($s[]; group(.) and .matcher == $x.matcher) | not)]

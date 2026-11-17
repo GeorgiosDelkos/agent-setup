@@ -2203,6 +2203,13 @@ missing="$(while read -r _ _ file; do
 done <<<"$registered")"
 check "settings: every registered hook file exists" "$([[ -z "$missing" ]] && echo yes)" \
   "$missing"
+# install.sh merges a machine's hook groups into the shared ones by matcher, so a matcher
+# names one group per event: with two, a command a machine added is copied into both.
+repeated="$(jq -r '.hooks | to_entries[] | .key as $event | .value | group_by(.matcher)[]
+  | select(length > 1) | "\($event): \(length) groups with matcher \"\(.[0].matcher)\""' \
+  "$HOOKS/../../settings.json")"
+check "settings: one hook group per matcher in each event" \
+  "$([[ -z "$repeated" ]] && echo yes)" "$repeated"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

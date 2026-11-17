@@ -66,6 +66,26 @@ merge_json "{\"hooks\": {\"Stop\": [$(group b)]}}" "$file" >/dev/null
 check "hook group: shared hook replaced, added command kept" '["b","mine"]' \
   "$(jq -c '[.hooks.Stop[].hooks[].command]' "$file")"
 
+# A machine set up when the shared copy had three groups with one matcher, with a command
+# added to one of them, or to all three, which is what that merge wrote at the next install
+# (issue #39): after the shared copy folds the groups into one, each shared command and the
+# added one are there once.
+old_shared="{\"hooks\": {\"Stop\": [$(group a), $(group b), $(group c)]}}"
+folded="$(jq -c '.hooks.Stop = [{matcher: "", hooks: [.hooks.Stop[].hooks[]]}]' \
+  <<<"$old_shared")"
+for groups in '[0]' '[1]' '[2]' '[0, 1, 2]'; do
+  # From an empty file and no record, so no earlier case leaves anything in this one.
+  trash "$HOME/.local/state/agent-setup"
+  printf '{}\n' >"$file"
+  merge_json "$old_shared" "$file" >/dev/null
+  jq -c --argjson groups "$groups" 'reduce $groups[] as $i (.;
+    .hooks.Stop[$i].hooks += [{type: "command", command: "mine"}])' "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+  merge_json "$folded" "$file" >/dev/null
+  check "groups folded, command added to old groups $groups: every command once" \
+    '[["a","b","c","mine"]]' "$(jq -c '[.hooks.Stop[] | [.hooks[].command]]' "$file")"
+done
+
 # Keys keep the local file's order, so a file Claude Code wrote in its own order is unchanged.
 printf '{"zeta": 1, "model": "x"}\n' >"$file"
 check "key order: unchanged file says ok" "ok      $file" "$(merge_json '{"model": "x"}' "$file")"
