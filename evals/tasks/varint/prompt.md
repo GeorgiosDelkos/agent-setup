@@ -5,4 +5,4 @@ tests.
 
 The crate root exports two functions. `encode(value: u64, buf: &mut [u8])` returns a `Result`
 holding the number of bytes written, or an error when the buffer is too small.
-`decode(bytes: &[u8])` returns a `Result` holding `(value, bytes_read)`.
+`decode(bytes: &[u8])` returns a `Result` holding `(value, bytes_read)`. Both counts are `usize`.

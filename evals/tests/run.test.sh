@@ -106,7 +106,7 @@ else
     a_test
     ;;
   esac
-  echo '{"num_turns": 3, "total_cost_usd": 0.5}'
+  echo '{"num_turns": 3, "total_cost_usd": 0.5, "modelUsage": {"stub-model": {}}}'
 fi
 EOF
 chmod +x "$WORK/claude"
@@ -131,23 +131,28 @@ row() {
 
 check "header names the arm, both commits and the claude version" 1 "$(head -n 1 "$results" |
   grep -c '^# arm setup, deployed .*, checkers .*, model default, effort high, stub 0.0.0$')"
-check "every row has ten fields" "" \
-  "$(awk -F '\t' 'NR > 1 && NF != 10 { print NR ": " $0 }' "$results")"
+check "every row has eleven fields" "" \
+  "$(awk -F '\t' 'NR > 1 && NF != 11 { print NR ": " $0 }' "$results")"
 check "scored: tests, no oracle, no diagnostics, one house finding, review, turns, cost" \
-  "ring-buffer pass - 0 1 1 2 0 3 0.5" "$(row ring-buffer)"
+  "ring-buffer pass - 0 1 1 2 0 stub-model 3 0.5" "$(row ring-buffer)"
 check "a session that wrote nothing: dashes, not a clean score" \
-  "rate-limiter no-change - - - - - - - -" "$(row rate-limiter)"
+  "rate-limiter no-change - - - - - - - - -" "$(row rate-limiter)"
 check "a session that left only Cargo.lock: dashes" \
-  "lru-cache no-change - - - - - - - -" "$(row lru-cache)"
+  "lru-cache no-change - - - - - - - - -" "$(row lru-cache)"
 check "a session that committed its work is scored" \
-  "wal pass - 0 1 1 2 0 3 0.5" "$(row wal)"
+  "wal pass - 0 1 1 2 0 stub-model 3 0.5" "$(row wal)"
 # The oracle column, and with it each oracle against a reference solution.
 check "a correct solution without tests of its own: none, and the whole oracle passes" \
   "varint none 7/7" "$(row varint | cut -d ' ' -f 1-3)"
 check "the kv-parse oracle passes against a correct solution" \
   "kv-parse none 8/8" "$(row kv-parse | cut -d ' ' -f 1-3)"
 check "a defect fails its oracle test only, and the oracle is no part of the crate's score" \
-  "cli-wc pass 6/7" "$(row cli-wc | cut -d ' ' -f 1-3)"
+  "cli-wc pass 7/8" "$(row cli-wc | cut -d ' ' -f 1-3)"
+# By name: with only the count, a wrong expectation in the byte-count test would fail that
+# same test against this fixture and go unnoticed.
+check "the oracle test that fails against the fixture is the one for its defect" \
+  "test bytes_are_counted_not_characters ... FAILED" \
+  "$(grep -E '^test .* FAILED$' "$(dirname "$results")/cli-wc.oracle.log")"
 check "the oracle adds no diagnostics or house findings to the crate's counts" \
   "0 0" "$(row varint | cut -d ' ' -f 4,5)"
 check "a deny lint and a warn lint: two diagnostics, each counted once, in one cell" \

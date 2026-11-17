@@ -303,7 +303,7 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
   the rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
 - A task may have an oracle beside its prompt, `oracle.rs`: tests of the behaviour the
   prompt states, which the session never sees. The harness copies it into the crate as
-  `tests/oracle.rs` after the reviewer and every other score. Such a prompt names the entry
+  `tests/eval_oracle.rs` after the reviewer and every other score. Such a prompt names the entry
   points the oracle calls (a function and its success type, a binary and its output
   format), never an error type or anything else about the design. `varint`, `kv-parse` and
   `cli-wc` have one. `evals/tests/fixtures/` holds a solution for each, and the harness
@@ -316,16 +316,20 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
 - Every session is given its effort by flag, `EVALS_EFFORT` (default `high`), and the
   header names it. The bare arm reads no settings file, so an `effortLevel` set there
   would apply to the setup arm only. Compare two runs only when, arm aside, their headers
-  match: model, effort and Claude Code version.
+  match (effort and Claude Code version) and their `model` columns do. Two things the
+  harness cannot align: `alwaysThinkingEnabled` and the permission deny list come from the
+  settings file, so the setup arm has them and the bare arm does not.
 - A row of `results.tsv` has:
   - `tests`: `pass`, `fail`, or `none` when the crate has no test;
-  - `oracle`: `passed/total` of the oracle's tests, `build` when the oracle does not compile
-    against the crate (the session missed an entry point the prompt names), or `-` for a
-    task without one;
+  - `oracle`: `passed/total` of the oracle's tests, `build` when the crate does not compile
+    with the oracle in it (usually the session missed an entry point or a type the prompt
+    names), or `-` for a task without one;
   - `diagnostics`: the distinct rustc and clippy diagnostics with the house lint table on,
     errors included, each counted once though clippy reports it per build target;
   - `house`: the number of `house-check.pl` findings;
   - `blocker`, `major`, `minor`: the `rust-style-reviewer` counts;
+  - `model`: the model the task session reported using. The header names only the model
+    that was asked for, and with none asked for each arm takes its own default;
   - `turns`, `cost_usd`: the task session's.
 
   `no-change` means the session wrote no Rust, committed or not; `?` means a score could
@@ -349,6 +353,9 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
 - `tests` is the crate's own suite, which the session wrote, so it checks no fixed
   behaviour: only `oracle` does, and only for the tasks that have one. The other seven
   tasks have none yet.
+- The oracles are files in this checkout, and a session has the user's permissions: one
+  that searched the disk could read them. Nothing in the crate or the prompt points at
+  them, and the session's transcript would show the search.
 
 ## Applying the Rust templates to a repo
 

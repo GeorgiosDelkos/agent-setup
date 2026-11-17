@@ -145,7 +145,7 @@ test_score() {
 # The oracle of task $1 run in the crate at $2: `passed/total`, `build` when the oracle does
 # not compile against what the session wrote (it missed the entry points the prompt names),
 # `?` when the run gave no result (a hung test), or `-` for a task without an oracle.
-# Call it after every other score: it adds tests/oracle.rs to the crate, which the crate's
+# Call it after every other score: it adds tests/eval_oracle.rs to the crate, which the crate's
 # own test score, the lint counts and the reviewer must not see.
 oracle_score() {
   local oracle="$EVALS_DIR/tasks/$1/oracle.rs" dir="$2" log="$2.oracle.log"
@@ -154,8 +154,8 @@ oracle_score() {
     return
   fi
   mkdir -p "$dir/tests"
-  cp "$oracle" "$dir/tests/oracle.rs"
-  score_cargo "$dir" test --test oracle >"$log" 2>&1 || true
+  cp "$oracle" "$dir/tests/eval_oracle.rs"
+  score_cargo "$dir" test --test eval_oracle >"$log" 2>&1 || true
   if grep -q '^test result:' "$log"; then
     awk '/^test result:/ { passed += $4; failed += $6 }
       END { print passed "/" passed + failed }' "$log"
@@ -210,6 +210,15 @@ review_counts() {
   fi
 }
 
+# The model the session whose JSON result is $1 ran on, as that session reported it, or ?.
+# The header can only name the model that was asked for, and with none asked for each arm
+# takes its own default: the setup arm from the settings file, the bare arm, which reads no
+# settings, from the CLI. This column is what shows whether two rows used the same one.
+session_model() {
+  jq -r '.modelUsage // {} | keys | if length == 0 then "?" else join("+") end' "$1" \
+    2>/dev/null || echo '?'
+}
+
 # Runs one task and appends its row. A session that wrote no Rust gets a row of dashes:
 # scoring the untouched seed crate would report a clean result for no work.
 run_task() {
@@ -218,7 +227,7 @@ run_task() {
   session "$dir" --output-format json ${arm_args[@]+"${arm_args[@]}"} \
     <"$EVALS_DIR/tasks/$name/prompt.md" >"$dir.agent.json" 2>"$dir.agent.err" || true
   if ! session_wrote_code "$dir" "$seed"; then
-    printf '%s\tno-change\t-\t-\t-\t-\t-\t-\t-\t-\n' "$name" >>"$results"
+    printf '%s\tno-change\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' "$name" >>"$results"
     return
   fi
 
@@ -234,8 +243,9 @@ EOF
   tests="$(test_score "$dir")"
   diagnostics="$(diagnostics_count "$dir")"
   house="$(house_count "$dir")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$tests" \
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$tests" \
     "$(oracle_score "$name" "$dir")" "$diagnostics" "$house" "$blocker" "$major" "$minor" \
+    "$(session_model "$dir.agent.json")" \
     "$(jq -r '.num_turns // "?"' "$dir.agent.json" 2>/dev/null || echo '?')" \
     "$(jq -r '.total_cost_usd // "?"' "$dir.agent.json" 2>/dev/null || echo '?')" >>"$results"
 }
@@ -247,7 +257,7 @@ checkers="$(git -C "$EVALS_DIR" rev-parse --short HEAD 2>/dev/null || echo unkno
 {
   echo "# arm $arm, deployed $deployed, checkers $checkers," \
     "model ${EVALS_MODEL:-default}, effort $effort, $("$claude_bin" --version)"
-  printf 'task\ttests\toracle\tdiagnostics\thouse\tblocker\tmajor\tminor\tturns\tcost_usd\n'
+  printf 'task\ttests\toracle\tdiagnostics\thouse\tblocker\tmajor\tminor\tmodel\tturns\tcost_usd\n'
 } >"$results"
 for task in "${tasks[@]}"; do
   echo "running $task" >&2

@@ -1,5 +1,5 @@
 //! Outside check of the cli-wc task, run against the built `wcount` binary. The harness
-//! copies this file into the crate as `tests/oracle.rs` after the session and the reviewer
+//! copies this file into the crate as `tests/eval_oracle.rs` after the session and the reviewer
 //! are done, so the session never sees it. It asserts only what the task prompt states.
 
 use std::fs;
@@ -101,6 +101,14 @@ fn an_empty_file_counts_zero() {
     write(&dir, "empty.txt", "");
     let output = wcount(&dir, &["empty.txt"], "");
     assert_eq!(lines(&output), [["0", "0", "0", "empty.txt"]]);
+}
+
+#[test]
+fn text_after_the_last_newline_is_no_line() {
+    let dir = scratch("no-newline");
+    write(&dir, "plain.txt", "hello");
+    let output = wcount(&dir, &["plain.txt"], "");
+    assert_eq!(lines(&output), [["0", "1", "5", "plain.txt"]]);
 }
 
 #[test]

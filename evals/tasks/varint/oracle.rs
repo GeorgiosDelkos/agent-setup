@@ -1,5 +1,5 @@
 //! Outside check of the varint task. The harness copies this file into the crate as
-//! `tests/oracle.rs` after the session and the reviewer are done, so the session never sees
+//! `tests/eval_oracle.rs` after the session and the reviewer are done, so the session never sees
 //! it. It asserts only what the task prompt states.
 
 use varint::{decode, encode};
