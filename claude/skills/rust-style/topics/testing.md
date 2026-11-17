@@ -66,9 +66,10 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   The local run is the evidence. `templates/ci/mutants.yml` runs only on a PR labelled
   `mutants`, for a second run: every mutant reruns the suite, and on GitHub's runners that
   costs hours where a laptop takes minutes (Vigil, 2026-11-17: 18 minutes locally, about 2
-  hours per CI shard for the same mutants). Not per edit: a run takes minutes, and only the
-  PR's final diff decides. [house: line coverage passes tests that assert nothing; mutation
-  testing does not]
+  hours per CI shard for the same mutants). While the label stays on a ready PR, each push
+  cancels and restarts that run: remove the label to keep a run going. Not per edit: a run
+  takes minutes, and only the PR's final diff decides. [house: line coverage passes tests
+  that assert nothing; mutation testing does not]
 - **TST-20** Run `cargo mutants` locally with `-j 2` or fewer, and without `--timeout`
   (`-t`) or `--baseline=skip`. A mutant can make a loop unbounded and allocate until the
   machine stalls. The auto test timeout (baseline test time times `timeout_multiplier`,

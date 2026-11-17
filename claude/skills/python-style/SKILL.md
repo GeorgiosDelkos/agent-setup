@@ -62,8 +62,7 @@ The global rules (AGENTS.md, Testing) apply; this is how in Python.
   against a simple model.
 - Coverage (`pytest-cov` with `--cov-branch`) shows untested code; it is a floor, not the
   goal. Once per PR, before `gh pr ready`, run `mutmut` restricted to the modules the branch
-  changed, kill or explain each surviving mutant, and post the result on the PR. Run it
-  locally, as rust-style TST-19 says why.
+  changed, kill or explain each surviving mutant, and post the result on the PR.
 - No CRAP-score gate (retired 2026-11-11, as for Rust, rust-style TST-21): it needed a
   second coverage run of the merge base for every change, and mutmut already shows whether
   the tests check anything, which a line-coverage metric cannot.

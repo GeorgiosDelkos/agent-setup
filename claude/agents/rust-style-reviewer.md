@@ -91,9 +91,9 @@ You review Rust changes for house style. You never edit files.
      end-to-end test where the binary or server can run (TST-15); the real service, not a
      fake (TST-14); tests that earn their place (`~/.config/agents/AGENTS.md`, Testing); a
      reported mutation result (TST-19: the author's local `cargo mutants --in-diff` run,
-     or the CI job on a PR labelled `mutants`), with every missed mutant killed or
-     explained. Flag a missing result
-     or an unexplained survivor; never run `cargo mutants` yourself, which takes minutes and
+     posted on the PR), with every missed mutant killed or explained. A CI run on a PR
+     labelled `mutants` is a second run and does not replace it. Flag a missing result or
+     an unexplained survivor; never run `cargo mutants` yourself, which takes minutes and
      repeats the author's run.
 7. Report findings, most severe first. Severity: `blocker` (unsound, wrong, or breaks a
    published API), `major` (a rule broken in a way that costs readers or callers), `minor`

@@ -9,22 +9,26 @@ permissions:
   contents: read
 on:
   pull_request:
-    # `labeled`: adding the label starts a run.
+    # `labeled`: adding the label starts a run on a PR that is not a draft; a draft's run
+    # starts when it is marked ready. While the label stays, each push cancels and restarts
+    # the run: remove it to keep a run going.
     types: [opened, synchronize, reopened, ready_for_review, labeled]
 name: mutants
 jobs:
   mutants:
     # Adding another label also sends `labeled`; only the `mutants` label itself starts a run
-    # then.
+    # then. The quoted name in the JSON list is an exact match: `contains` on a lone label's
+    # name would match `no-mutants` too.
     if: >-
       ${{ !github.event.pull_request.draft
-      && contains(github.event.pull_request.labels.*.name, 'mutants')
+      && contains(toJSON(github.event.pull_request.labels.*.name), '"mutants"')
       && (github.event.action != 'labeled' || github.event.label.name == 'mutants') }}
     # On the job, not the workflow: a skipped run (another label, a draft) takes no slot, so it
-    # cannot cancel a run in progress. Add the matrix entry to the group if you shard the job,
-    # or the shards cancel each other.
+    # cannot cancel a run in progress. `github.ref` is `refs/pull/<number>/merge`: one per PR,
+    # where the head branch's name can be the same in two forks. Add the matrix entry to the
+    # group if you shard the job, or the shards cancel each other.
     concurrency:
-      group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+      group: ${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     name: cargo mutants (PR diff)

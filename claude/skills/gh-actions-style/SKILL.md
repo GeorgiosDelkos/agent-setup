@@ -31,5 +31,10 @@ Global rules live in `~/.config/agents/AGENTS.md`. This skill adds only CI rules
 - With `cancel-in-progress`, the concurrency group ends in
   `-${{ github.event.pull_request.draft }}`. Otherwise a push to a draft just before
   `gh pr ready` can register its skipped run after the ready run and cancel it.
+- A job that runs only on a PR label (`rust-style/templates/ci/mutants.yml`) adds `labeled`
+  to the types and carries its `concurrency` on the job, grouped by `github.ref`, with no
+  draft suffix: a job its `if` skips never enters the group, so adding another label cannot
+  cancel a run in progress, as a workflow-level group would. Keep that shape when aligning
+  it with the other workflows.
 - Dependabot: a 7-day cooldown and grouped updates for every ecosystem, including
   `github-actions`.
