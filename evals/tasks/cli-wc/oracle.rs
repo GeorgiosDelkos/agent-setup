@@ -16,17 +16,15 @@ fn scratch(test: &str) -> PathBuf {
     dir
 }
 
-/// Writes `contents` to `name` in `dir` and returns the path as the tool will print it.
-fn file(dir: &Path, name: &str, contents: impl AsRef<[u8]>) -> String {
-    let path = dir.join(name);
-    fs::write(&path, contents).expect("the scratch directory is writable");
-    path.to_str()
-        .expect("the temporary path is UTF-8")
-        .to_owned()
+fn write(dir: &Path, name: &str, contents: impl AsRef<[u8]>) {
+    fs::write(dir.join(name), contents).expect("the scratch directory is writable");
 }
 
-fn wcount(args: &[&str], stdin: &str) -> Output {
+/// Runs `wcount` in `dir`, so files are named by a bare file name. The tests split each
+/// output line on whitespace, and the path of `dir` may hold a space.
+fn wcount(dir: &Path, args: &[&str], stdin: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_wcount"))
+        .current_dir(dir)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -51,52 +49,48 @@ fn lines(output: &Output) -> Vec<Vec<String>> {
 #[test]
 fn one_file_prints_lines_words_bytes_and_its_name() {
     let dir = scratch("one");
-    let path = file(&dir, "a.txt", "one two\nthree\n");
-    let output = wcount(&[&path], "");
+    write(&dir, "a.txt", "one two\nthree\n");
+    let output = wcount(&dir, &["a.txt"], "");
     assert!(output.status.success());
-    assert_eq!(lines(&output), [["2", "3", "14", path.as_str()]]);
+    assert_eq!(lines(&output), [["2", "3", "14", "a.txt"]]);
 }
 
 #[test]
 fn bytes_are_counted_not_characters() {
     let dir = scratch("bytes");
-    let path = file(&dir, "utf8.txt", "h\u{e9}llo\n");
-    assert_eq!(
-        lines(&wcount(&[&path], "")),
-        [["1", "1", "7", path.as_str()]]
-    );
+    write(&dir, "utf8.txt", "h\u{e9}llo\n");
+    let output = wcount(&dir, &["utf8.txt"], "");
+    assert_eq!(lines(&output), [["1", "1", "7", "utf8.txt"]]);
 }
 
 #[test]
 fn a_file_that_is_not_utf8_is_counted_by_its_bytes() {
     let dir = scratch("not-utf8");
-    let path = file(&dir, "latin1.txt", [0xFF, b'\n']);
-    assert_eq!(
-        lines(&wcount(&[&path], "")),
-        [["1", "1", "2", path.as_str()]]
-    );
+    write(&dir, "latin1.txt", [0xFF, b'\n']);
+    let output = wcount(&dir, &["latin1.txt"], "");
+    assert_eq!(lines(&output), [["1", "1", "2", "latin1.txt"]]);
 }
 
 #[test]
 fn several_files_end_with_a_total_line() {
     let dir = scratch("total");
-    let first = file(&dir, "a.txt", "one two\nthree\n");
-    let second = file(&dir, "b.txt", "four\n");
-    let output = wcount(&[&first, &second], "");
+    write(&dir, "a.txt", "one two\nthree\n");
+    write(&dir, "b.txt", "four\n");
+    let output = wcount(&dir, &["a.txt", "b.txt"], "");
     assert!(output.status.success());
     assert_eq!(
         lines(&output),
         [
-            vec!["2", "3", "14", first.as_str()],
-            vec!["1", "1", "5", second.as_str()],
-            vec!["3", "4", "19", "total"],
+            ["2", "3", "14", "a.txt"],
+            ["1", "1", "5", "b.txt"],
+            ["3", "4", "19", "total"],
         ]
     );
 }
 
 #[test]
 fn no_files_reads_standard_input() {
-    let output = wcount(&[], "a b c\nd\n");
+    let output = wcount(&scratch("stdin"), &[], "a b c\nd\n");
     assert!(output.status.success());
     assert_eq!(lines(&output), [["2", "4", "8"]]);
 }
@@ -104,29 +98,21 @@ fn no_files_reads_standard_input() {
 #[test]
 fn an_empty_file_counts_zero() {
     let dir = scratch("empty");
-    let path = file(&dir, "empty.txt", "");
-    assert_eq!(
-        lines(&wcount(&[&path], "")),
-        [["0", "0", "0", path.as_str()]]
-    );
+    write(&dir, "empty.txt", "");
+    let output = wcount(&dir, &["empty.txt"], "");
+    assert_eq!(lines(&output), [["0", "0", "0", "empty.txt"]]);
 }
 
 #[test]
 fn an_unreadable_file_is_reported_and_the_rest_still_counted() {
     let dir = scratch("missing");
-    let missing = dir.join("missing.txt");
-    let missing = missing.to_str().expect("the temporary path is UTF-8");
-    let present = file(&dir, "a.txt", "one two\nthree\n");
-    let output = wcount(&[missing, &present], "");
+    write(&dir, "a.txt", "one two\nthree\n");
+    let output = wcount(&dir, &["missing.txt", "a.txt"], "");
     assert!(!output.status.success());
     assert!(
         !output.stderr.is_empty(),
         "the unreadable file is reported on standard error"
     );
-    assert!(lines(&output).contains(&vec![
-        "2".to_owned(),
-        "3".to_owned(),
-        "14".to_owned(),
-        present.clone()
-    ]));
+    let counted: Vec<String> = ["2", "3", "14", "a.txt"].map(str::to_owned).into();
+    assert!(lines(&output).contains(&counted));
 }
