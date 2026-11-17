@@ -3,13 +3,21 @@
 # model can be compared with the run before it. For each task: a headless Claude session
 # writes the code in a fresh crate that has opted in to the house rules, then the crate is
 # scored by its own tests, by rustc and clippy under the house lint table, by house-check.pl,
-# and by a rust-style-reviewer session.
+# by a rust-style-reviewer session, and last by the task's oracle: tests the session never
+# saw, where the task has them.
 #
-# Usage: bash evals/run.sh [task...]      (default: every file in evals/tasks/)
+# Usage: bash evals/run.sh [task...]      (default: every directory in evals/tasks/)
+# A task is evals/tasks/<name>/prompt.md, with an optional oracle.rs beside it.
 # Output: <out>/results.tsv, one row per task, and each crate with its transcripts beside it.
 #   <out> is $EVALS_OUT/<UTC time>, by default under ~/.cache/agent-setup-evals: outside the
 #   repo, because the deployed copy must not get files written into it.
-# Environment: EVALS_MODEL passes --model; CLAUDE_BIN replaces the claude binary (tests).
+# Environment: EVALS_MODEL passes --model; EVALS_EFFORT passes --effort (default high) to
+#   every session; CLAUDE_BIN replaces the claude binary (tests);
+#   EVALS_ARM picks what the task session runs with:
+#     setup  (default) this machine's deployed rules, skills, hooks and plugins;
+#     bare   `claude --safe-mode`: none of them, with the same login and model.
+#   The reviewer session and every other score always run with the setup, so two arms
+#   differ only in who wrote the code.
 #
 # The sessions run with this machine's ~/.claude, so they measure the deployed setup, not
 # the checkout this script is in; the lint table and house-check.pl do come from this
@@ -23,11 +31,13 @@ EVALS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATES="$EVALS_DIR/../claude/skills/rust-style/templates"
 HOUSE_CHECK="$EVALS_DIR/../claude/hooks/rust/house-check.pl"
 claude_bin="${CLAUDE_BIN:-claude}"
-# Expanded as ${model_args[@]+...} below: bash 3.2 (macOS) treats a plain expansion of an
-# empty array as an unset variable under `set -u`.
-model_args=()
+# Every session is given its effort by flag. Left to the settings file, the setup arm ran at
+# the machine's `effortLevel` and the bare arm, which reads no settings, at the default: the
+# first pilot (2026-11-17) compared two efforts as well as two arms. `high` is arbitrary.
+effort="${EVALS_EFFORT:-high}"
+common_args=(--effort "$effort")
 if [[ -n "${EVALS_MODEL:-}" ]]; then
-  model_args=(--model "$EVALS_MODEL")
+  common_args+=(--model "$EVALS_MODEL")
 fi
 # Both arbitrary: an hour is the limit the review scripts give a model session, and fifteen
 # minutes is far beyond what a small crate's build and tests take. Without them one
@@ -35,15 +45,28 @@ fi
 SESSION_LIMIT_SECS=3600
 CARGO_LIMIT_SECS=900
 
+# The task session's extra arguments. The bare arm names its permission mode: safe mode
+# does not read the settings file that sets it, and a headless session in the default mode
+# can approve nothing, so it would write no code.
+arm="${EVALS_ARM:-setup}"
+case "$arm" in
+setup) arm_args=() ;;
+bare) arm_args=(--safe-mode --permission-mode auto) ;;
+*)
+  echo "evals: no arm $arm (EVALS_ARM is setup or bare)" >&2
+  exit 2
+  ;;
+esac
+
 tasks=("$@")
 if [[ ${#tasks[@]} -eq 0 ]]; then
-  for file in "$EVALS_DIR"/tasks/*.md; do
-    tasks+=("$(basename "$file" .md)")
+  for file in "$EVALS_DIR"/tasks/*/prompt.md; do
+    tasks+=("$(basename "$(dirname "$file")")")
   done
 fi
 for task in "${tasks[@]}"; do
-  if [[ ! -f "$EVALS_DIR/tasks/$task.md" ]]; then
-    echo "evals: no task $task (expected $EVALS_DIR/tasks/$task.md)" >&2
+  if [[ ! -f "$EVALS_DIR/tasks/$task/prompt.md" ]]; then
+    echo "evals: no task $task (expected $EVALS_DIR/tasks/$task/prompt.md)" >&2
     exit 2
   fi
 done
@@ -67,7 +90,7 @@ session() {
   local dir="$1"
   shift
   (cd "$dir" && export HIPPIUS_MEM_HOOKS_BYPASS=1 &&
-    limit "$SESSION_LIMIT_SECS" "$claude_bin" -p "$@" ${model_args[@]+"${model_args[@]}"})
+    limit "$SESSION_LIMIT_SECS" "$claude_bin" -p "$@" "${common_args[@]}")
 }
 
 # cargo $2.. in the crate at $1, built in a target directory of the harness's own. The
@@ -119,6 +142,30 @@ test_score() {
   fi
 }
 
+# The oracle of task $1 run in the crate at $2: `passed/total`, `build` when the oracle does
+# not compile against what the session wrote (it missed the entry points the prompt names),
+# `?` when the run gave no result (a hung test), or `-` for a task without an oracle.
+# Call it after every other score: it adds tests/oracle.rs to the crate, which the crate's
+# own test score, the lint counts and the reviewer must not see.
+oracle_score() {
+  local oracle="$EVALS_DIR/tasks/$1/oracle.rs" dir="$2" log="$2.oracle.log"
+  if [[ ! -f "$oracle" ]]; then
+    echo -
+    return
+  fi
+  mkdir -p "$dir/tests"
+  cp "$oracle" "$dir/tests/oracle.rs"
+  score_cargo "$dir" test --test oracle >"$log" 2>&1 || true
+  if grep -q '^test result:' "$log"; then
+    awk '/^test result:/ { passed += $4; failed += $6 }
+      END { print passed "/" passed + failed }' "$log"
+  elif grep -q '^error: could not compile' "$log"; then
+    echo build
+  else
+    echo '?'
+  fi
+}
+
 # Number of distinct rustc and clippy diagnostics in the crate at $1, errors included, or ?
 # when the build did not get as far as reporting. Distinct by lint, file and line:
 # --all-targets checks the library and its test harness separately and reports a finding in
@@ -166,12 +213,12 @@ review_counts() {
 # Runs one task and appends its row. A session that wrote no Rust gets a row of dashes:
 # scoring the untouched seed crate would report a clean result for no work.
 run_task() {
-  local name="$1" dir="$out/$1" seed blocker major minor
+  local name="$1" dir="$out/$1" seed blocker major minor tests diagnostics house
   seed="$(seed_crate "$dir")"
-  session "$dir" --output-format json \
-    <"$EVALS_DIR/tasks/$name.md" >"$dir.agent.json" 2>"$dir.agent.err" || true
+  session "$dir" --output-format json ${arm_args[@]+"${arm_args[@]}"} \
+    <"$EVALS_DIR/tasks/$name/prompt.md" >"$dir.agent.json" 2>"$dir.agent.err" || true
   if ! session_wrote_code "$dir" "$seed"; then
-    printf '%s\tno-change\t-\t-\t-\t-\t-\t-\t-\n' "$name" >>"$results"
+    printf '%s\tno-change\t-\t-\t-\t-\t-\t-\t-\t-\n' "$name" >>"$results"
     return
   fi
 
@@ -182,8 +229,13 @@ when there are none:
 findings: blocker=<n> major=<n> minor=<n>
 EOF
   read -r blocker major minor <<<"$(review_counts "$dir.review.md")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$(test_score "$dir")" \
-    "$(diagnostics_count "$dir")" "$(house_count "$dir")" "$blocker" "$major" "$minor" \
+  # Bound before the row is printed, so the oracle, which printf would otherwise run in
+  # argument order, is copied in only after these three have read the crate.
+  tests="$(test_score "$dir")"
+  diagnostics="$(diagnostics_count "$dir")"
+  house="$(house_count "$dir")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$tests" \
+    "$(oracle_score "$name" "$dir")" "$diagnostics" "$house" "$blocker" "$major" "$minor" \
     "$(jq -r '.num_turns // "?"' "$dir.agent.json" 2>/dev/null || echo '?')" \
     "$(jq -r '.total_cost_usd // "?"' "$dir.agent.json" 2>/dev/null || echo '?')" >>"$results"
 }
@@ -193,9 +245,9 @@ EOF
 deployed="$(git -C "$HOME/.claude/skills" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 checkers="$(git -C "$EVALS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 {
-  echo "# deployed $deployed, checkers $checkers, model ${EVALS_MODEL:-default}," \
-    "$("$claude_bin" --version)"
-  printf 'task\ttests\tdiagnostics\thouse\tblocker\tmajor\tminor\tturns\tcost_usd\n'
+  echo "# arm $arm, deployed $deployed, checkers $checkers," \
+    "model ${EVALS_MODEL:-default}, effort $effort, $("$claude_bin" --version)"
+  printf 'task\ttests\toracle\tdiagnostics\thouse\tblocker\tmajor\tminor\tturns\tcost_usd\n'
 } >"$results"
 for task in "${tasks[@]}"; do
   echo "running $task" >&2
