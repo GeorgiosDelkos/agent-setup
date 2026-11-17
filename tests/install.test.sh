@@ -91,26 +91,86 @@ done
 # (issue #41).
 timed='{"hooks": {"Stop": [{"matcher": "", "hooks": [
   {"type": "command", "command": "a", "timeout": 600}, {"type": "command", "command": "b"}]}]}}'
-trash "$HOME/.local/state/agent-setup"
-printf '{}\n' >"$file"
-merge_json "$timed" "$file" >/dev/null
-jq -c '.hooks.Stop[0].hooks[0].timeout = 900' "$file" >"$file.tmp"
-mv "$file.tmp" "$file"
+# fresh SHARED: an empty file and no record, then SHARED installed.
+fresh() {
+  trash "$HOME/.local/state/agent-setup"
+  printf '{}\n' >"$file"
+  merge_json "$1" "$file" >/dev/null
+}
+# locally JQ_FILTER: the machine's own change to the installed file.
+locally() {
+  jq -c "$1" "$file" >"$file.tmp"
+  mv "$file.tmp" "$file"
+}
+# The Stop groups as [matcher, command...] lists.
+stop_groups() {
+  jq -c '[.hooks.Stop[] | [.matcher] + [.hooks[].command]]' "$file"
+}
+fresh "$timed"
+locally '.hooks.Stop[0].hooks[0].timeout = 900'
 merge_json "$timed" "$file" >/dev/null
 check "a changed timeout on a shared hook: one entry, the shared value" \
   '[["a",600],["b",null]]' "$(jq -c '[.hooks.Stop[].hooks[] | [.command, .timeout]]' "$file")"
-check "a changed timeout: the next install changes nothing" "ok      $file" \
-  "$(merge_json "$timed" "$file")"
+
+# The same when the shared copy then drops that hook: the machine's changed entry is the
+# dropped hook, not a hook of its own, and goes.
+merge_json "$timed" "$file" >/dev/null
+locally '.hooks.Stop[0].hooks[0].timeout = 900'
+merge_json "$(jq -c '.hooks.Stop[0].hooks |= map(select(.command != "a"))' <<<"$timed")" \
+  "$file" >/dev/null
+check "a hook the shared copy dropped, changed on the machine, goes" '[["","b"]]' \
+  "$(stop_groups)"
+
+# A command the machine added twice, with two timeouts, is one hook: it is kept once.
+fresh "$timed"
+locally '.hooks.Stop[0].hooks += [{type: "command", command: "mine", timeout: 1},
+  {type: "command", command: "mine", timeout: 2}]'
+merge_json "$timed" "$file" >/dev/null
+check "a command added twice with different timeouts is kept once" '[["","a","b","mine"]]' \
+  "$(stop_groups)"
 
 # A tool that rewrites the groups without the `matcher` key leaves the same groups: a
 # missing matcher is the empty one. Kept beside the shared group, every command was there
 # twice (issue #41). A command that tool added stays, once.
-jq -c '.hooks.Stop |= map(del(.matcher))
-  | .hooks.Stop[0].hooks += [{type: "command", command: "mine"}]' "$file" >"$file.tmp"
-mv "$file.tmp" "$file"
+fresh "$timed"
+locally '.hooks.Stop |= map(del(.matcher))
+  | .hooks.Stop[0].hooks += [{type: "command", command: "mine"}]'
 merge_json "$timed" "$file" >/dev/null
 check "groups rewritten without a matcher key: one group, every command once" \
-  '[["","a","b","mine"]]' "$(jq -c '[.hooks.Stop[] | [.matcher] + [.hooks[].command]]' "$file")"
+  '[["","a","b","mine"]]' "$(stop_groups)"
+
+# The other way round: the shared copy and the record have no matcher key, the machine's
+# file has the empty one. The recorded hooks are found under the same key, so only the
+# machine's command is new.
+keyless="$(jq -c '.hooks.Stop |= map(del(.matcher))' <<<"$timed")"
+fresh "$keyless"
+locally '.hooks.Stop[0].matcher = "" | .hooks.Stop[0].hooks += [{type: "command", command: "mine"}]'
+merge_json "$keyless" "$file" >/dev/null
+check "a shared group without a matcher key takes the machine's empty-matcher group" \
+  '[[null,"a","b","mine"]]' "$(stop_groups)"
+# The shared copy then gains the key and drops a hook. The record is still keyless, and its
+# hooks must be found under the same key: read by the raw matcher, the dropped hook would
+# look like the machine's own and stay.
+merge_json "$(jq -c '.hooks.Stop[0].hooks |= map(select(.command != "a"))' <<<"$timed")" \
+  "$file" >/dev/null
+check "a keyless record is read under the empty matcher: its dropped hook goes" \
+  '[["","b","mine"]]' "$(stop_groups)"
+
+# The shared copy changes a group's matcher while the machine had changed a field in that
+# group. The old group is the recorded one, so it goes; kept whole, its hooks stayed
+# registered beside the renamed group. A command the machine added there stays, alone.
+renamed="$(jq -c '.hooks.Stop[0].matcher = "x"' <<<"$timed")"
+fresh "$timed"
+locally '.hooks.Stop[0].hooks[0].timeout = 900'
+merge_json "$renamed" "$file" >/dev/null
+check "a group the shared copy renamed, changed on the machine, goes" '[["x","a","b"]]' \
+  "$(stop_groups)"
+fresh "$timed"
+locally '.hooks.Stop[0].hooks[0].timeout = 900
+  | .hooks.Stop[0].hooks += [{type: "command", command: "mine"}]'
+merge_json "$renamed" "$file" >/dev/null
+check "the machine's own command stays under the old matcher" '[["x","a","b"],["","mine"]]' \
+  "$(stop_groups)"
 
 # Keys keep the local file's order, so a file Claude Code wrote in its own order is unchanged.
 printf '{"zeta": 1, "model": "x"}\n' >"$file"

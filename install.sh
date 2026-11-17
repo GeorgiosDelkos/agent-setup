@@ -58,12 +58,18 @@ link() {
 # (with three `Stop` groups it was written into all three, issue #39). The hook tests fail
 # on a second group with a matcher. A command the local groups hold more than once is
 # added once: a machine that merge already reached has it in every old group. A hook
-# is the same hook when its `type` and `command` are, whatever else it carries: a machine
-# that changed the `timeout` of a shared hook holds that hook, not a new one, and gets the
-# shared entry back (the shared value wins, as for any key the shared copy sets; before, both
-# entries stayed in the group, issue #41). A group without a `matcher` key counts as the
+# with a `command` is the same hook when the command is, whatever else it carries: a
+# machine that changed the `timeout` of a shared hook holds that hook, not a new one, and
+# gets the shared entry back (the shared value wins, as for any key the shared copy sets;
+# before, both entries stayed in the group, issue #41). No machine is known to need a field
+# of its own on a shared hook; one that does can set it again in install.local.sh, which
+# runs after this merge. Hooks without a command (prompt, http and agent types) are still
+# compared whole: the shared copy has none. A group without a `matcher` key counts as the
 # group with the empty matcher, so a tool that rewrites the groups without the key does not
-# leave them beside the shared ones. Without $p,
+# leave them beside the shared ones. A local group whose matcher the shared copy no longer
+# has keeps only the hooks the record did not hold under that matcher, and goes when none
+# is left: kept whole, a machine that had changed one field in it went on running the hooks
+# of a group the shared copy had renamed or dropped. Without $p,
 # arrays are taken from the shared copy whole, as before this record existed, because no
 # local entry can be told apart yet. Keys keep the local file's order, then the shared
 # copy's new keys: sorting them would differ from the order Claude Code writes, and every
@@ -71,7 +77,7 @@ link() {
 # shellcheck disable=SC2016 # jq variables, not shell ones
 MERGE_JQ='
 def id($x): if ($x | type) == "object" and ($x | has("command"))
-  then [$x.type, $x.command] else $x end;
+  then {command: $x.command} else $x end;
 def holds($a; $x): any($a[]; id(.) == id($x));
 def new_in($a; $s; $p): [$a[] | select(. as $x | (holds($s; $x) or holds($p; $x)) | not)];
 def once($a): reduce $a[] as $x ([]; if holds(.; $x) then . else . + [$x] end);
@@ -96,8 +102,13 @@ def merge($l; $s; $p):
             | [$p[] | select(group(.) and matcher(.) == matcher($g)) | .hooks[]] as $old
             | .hooks += once(new_in($more; $g.hooks; $old))
           else . end]
-      + [$extra[] | select(. as $x | group($x)
-          and any($s[]; group(.) and matcher(.) == matcher($x)) | not)]
+      + [$extra[] | . as $x
+          | select((group($x) and any($s[]; group(.) and matcher(.) == matcher($x))) | not)
+          | if group($x) then
+              [$p[] | select(group(.) and matcher(.) == matcher($x)) | .hooks[]] as $old
+              | .hooks = once(new_in($x.hooks; []; $old))
+              | select(.hooks | length > 0)
+            else . end]
   else $s
   end;
 merge($l; $s; $p)'
