@@ -172,9 +172,9 @@ between the lines* (Rust Munich 2026).
 - Cover edges and errors.
 - Break the code once to confirm the test fails. Once per PR with logic changes, before
   `gh pr ready`, run the language's mutation tool over the PR's changed code, kill or
-  explain survivors, and post the result on the PR. Run it locally, and not per edit: the
-  language skill names the tool, where one exists, and says how to run it (Rust:
-  `rust-style` TST-19 and TST-20).
+  explain survivors, and post the result on the PR. The language skill names the tool,
+  where one exists. Run it locally, and not per edit: a run takes minutes on a laptop and
+  hours on CI runners, so a repo's CI job for it runs only on a PR labelled `mutants`.
 - Property tests for parsers, serialization, and algorithms.
 - Docs, formatting, and pure renames need no new tests.
 
@@ -275,7 +275,8 @@ above.
   library API, testing, repo setup, the low-level profile) before editing those areas; the
   edit hook blocks until you do. Load the matching `rfr-*` chapter skill when designing in
   its area or when stuck there, not for every change.
-- Clean `cargo fmt --check`, in rustfmt's default style, and
+- Default `cargo fmt`, no `rustfmt.toml` style options (a low-level crate may keep the
+  stable-options template, `rust-style` LLV-9). Clean `cargo fmt --check` and
   `cargo clippy --all-targets -- -D warnings` (with the repo's feature set) before any
   commit.
 - Before calling Rust work done, review it against the `rust-style` rules: use the
