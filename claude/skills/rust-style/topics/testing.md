@@ -61,8 +61,9 @@ Read before writing tests, benches, or test-only code. Core rules TST-1 to TST-3
   line ran, not that a wrong result would fail a test. Once per PR, before `gh pr ready`, run
   `cargo mutants --in-diff <diff>` over the branch's logic changes, the diff of the working
   tree against its base (`git diff "$(git merge-base origin/main HEAD)" >"$TMPDIR/pr.diff"`,
-  which includes uncommitted work), and kill or explain every missed mutant: add the
-  assertion that fails, or say why the mutant is equivalent. Report the result in the PR.
+  which includes uncommitted work; on a stacked PR, its base branch in place of
+  `origin/main`), and kill or explain every missed mutant: add the assertion that fails, or
+  say why the mutant is equivalent. Report the result in the PR.
   The local run is the evidence. `templates/ci/mutants.yml` runs only on a PR labelled
   `mutants`, for a second run: every mutant reruns the suite, and on GitHub's runners that
   costs hours where a laptop takes minutes (Vigil, 2026-11-17: 18 minutes locally, about 2
