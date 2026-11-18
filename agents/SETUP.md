@@ -299,10 +299,11 @@ runs fixed Rust tasks through headless Claude sessions on this machine and score
 result, so a rules change or a new model can be compared with the run before it.
 
 ```sh
-bash evals/run.sh            # all ten tasks; about 20 sessions of usage
+bash evals/run.sh            # all ten tasks; about 23 sessions of usage
 bash evals/run.sh varint     # one task
 EVALS_MODEL=opus bash evals/run.sh
 EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
+EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with the setup
 ```
 
 - A task is `evals/tasks/<name>/prompt.md`, written as a user would ask, with no hint at
@@ -314,11 +315,22 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
   format), never an error type or anything else about the design. `varint`, `kv-parse` and
   `cli-wc` have one. `evals/tests/fixtures/` holds a solution for each, and the harness
   tests fail when an oracle and its solution disagree.
+- A task may also have a follow-up, `followup.md` and `followup-oracle.rs`: a change a user
+  would ask for next, and the tests of the crate after it. Once the first session's work is
+  scored, the harness removes the first oracle from the crate, commits the crate, gives
+  `followup.md` to a second session, and scores the result with the follow-up oracle. The
+  follow-up columns score the first session's code by what a later change to it takes, so
+  the second session is the same in every arm: `claude --safe-mode`, which has no hooks,
+  rules or reviewer of its own to add turns and cost. `varint`, `kv-parse` and `cli-wc`
+  have one, each with a solution in `evals/tests/fixtures/` that pins its oracle.
 - `EVALS_ARM` picks what the task session runs with: `setup` (the default) is the deployed
   rules, skills, hooks and plugins; `bare` is `claude --safe-mode`, none of them, with the
-  same login. The reviewer and every other score run with the setup in both, so two runs
-  that differ only in the arm show what the setup changes in the code. The header line
-  names the arm.
+  same login; `grok` is Grok Build (`grok --prompt-file`, in `auto` mode) with the same
+  deployed rules, skills and hooks, which Grok reads from the same files. The reviewer, the
+  follow-up and every other score are the same in every arm, so two runs that differ only
+  in the arm show what the arm changes in the code. The header line names the arm, and for
+  `grok` Grok's version and the model `EVALS_GROK_MODEL` asked for. `EVALS_MODEL` and the
+  Claude Code version in the header then describe the reviewer and the follow-up only.
 - Every session is given its effort by flag, `EVALS_EFFORT` (default `high`), and the
   header names it. The bare arm reads no settings file, so an `effortLevel` set there
   would apply to the setup arm only. Compare two runs only when, arm aside, their headers
@@ -336,7 +348,14 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
   - `blocker`, `major`, `minor`: the `rust-style-reviewer` counts;
   - `model`: the model the task session reported using. The header names only the model
     that was asked for, and with none asked for each arm takes its own default;
-  - `turns`, `cost_usd`: the task session's.
+  - `turns`, `cost_usd`: the task session's;
+  - `followup`: the follow-up oracle, read as `oracle` is, or `no-change` when the second
+    session changed no Rust;
+  - `followup_lines`: the Rust lines the second session added and removed, `+a/-r`, tests
+    included. A removed line is first-session code that did not survive the change;
+  - `followup_turns`, `followup_cost_usd`: the second session's.
+
+  The four follow-up cells are `-` for a task without one.
 
   `no-change` means the session wrote no Rust, committed or not; `?` means a score could
   not be read. Neither is a zero.

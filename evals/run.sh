@@ -7,7 +7,9 @@
 # saw, where the task has them.
 #
 # Usage: bash evals/run.sh [task...]      (default: every directory in evals/tasks/)
-# A task is evals/tasks/<name>/prompt.md, with an optional oracle.rs beside it.
+# A task is evals/tasks/<name>/prompt.md, with an optional oracle.rs beside it, and an
+# optional follow-up: followup.md, a change asked of the finished crate, and
+# followup-oracle.rs, the tests of the crate after that change.
 # Output: <out>/results.tsv, one row per task, and each crate with its transcripts beside it.
 #   <out> is $EVALS_OUT/<UTC time>, by default under ~/.cache/agent-setup-evals: outside the
 #   repo, because the deployed copy must not get files written into it.
@@ -15,9 +17,11 @@
 #   every session; CLAUDE_BIN replaces the claude binary (tests);
 #   EVALS_ARM picks what the task session runs with:
 #     setup  (default) this machine's deployed rules, skills, hooks and plugins;
-#     bare   `claude --safe-mode`: none of them, with the same login and model.
-#   The reviewer session and every other score always run with the setup, so two arms
-#   differ only in who wrote the code.
+#     bare   `claude --safe-mode`: none of them, with the same login and model;
+#     grok   Grok Build with the same deployed setup (GROK_BIN replaces the binary,
+#            EVALS_GROK_MODEL passes --model to it).
+#   The reviewer session, the follow-up session and every other score are the same in
+#   every arm, so two arms differ only in who wrote the code.
 #
 # The sessions run with this machine's ~/.claude, so they measure the deployed setup, not
 # the checkout this script is in; the lint table and house-check.pl do come from this
@@ -48,12 +52,26 @@ CARGO_LIMIT_SECS=900
 # The task session's extra arguments. The bare arm names its permission mode: safe mode
 # does not read the settings file that sets it, and a headless session in the default mode
 # can approve nothing, so it would write no code.
+BARE_ARGS=(--safe-mode --permission-mode auto)
 arm="${EVALS_ARM:-setup}"
+grok_bin="${GROK_BIN:-grok}"
 case "$arm" in
 setup) arm_args=() ;;
-bare) arm_args=(--safe-mode --permission-mode auto) ;;
+bare) arm_args=("${BARE_ARGS[@]}") ;;
+grok)
+  if ! command -v "$grok_bin" >/dev/null; then
+    echo "evals: the grok arm needs $grok_bin on PATH (or GROK_BIN)" >&2
+    exit 2
+  fi
+  # Auto, as the Claude arms run: a headless Grok session in the default mode can approve
+  # nothing. The effort is given by flag for the reason common_args gives.
+  arm_args=(--output-format json --permission-mode auto --effort "$effort")
+  if [[ -n "${EVALS_GROK_MODEL:-}" ]]; then
+    arm_args+=(--model "$EVALS_GROK_MODEL")
+  fi
+  ;;
 *)
-  echo "evals: no arm $arm (EVALS_ARM is setup or bare)" >&2
+  echo "evals: no arm $arm (EVALS_ARM is setup, bare or grok)" >&2
   exit 2
   ;;
 esac
@@ -83,14 +101,30 @@ limit() {
   perl -e 'alarm shift; exec @ARGV or die "exec: $!\n"' "$@"
 }
 
-# One headless session in the crate at $1, with $2.. as extra arguments and the prompt on
-# stdin. The memory hooks are off: an eval session would otherwise be asked, at its stop, to
-# write what it learned into the team's shared memory.
+# The memory hooks are off in every session this script starts: an eval session would
+# otherwise be asked, at its stop, to write what it learned into the team's shared memory.
+export HIPPIUS_MEM_HOOKS_BYPASS=1
+
+# One headless Claude session in the crate at $1, with $2.. as extra arguments and the
+# prompt on stdin.
 session() {
   local dir="$1"
   shift
-  (cd "$dir" && export HIPPIUS_MEM_HOOKS_BYPASS=1 &&
-    limit "$SESSION_LIMIT_SECS" "$claude_bin" -p "$@" "${common_args[@]}")
+  (cd "$dir" && limit "$SESSION_LIMIT_SECS" "$claude_bin" -p "$@" "${common_args[@]}")
+}
+
+# The task session of this run's arm in the crate at $1, given the prompt file $2. Prints the
+# session's JSON result, which has the same spend fields from both tools. Grok takes the
+# prompt as a file, so $2 is a copy outside evals/tasks/: the path is on the command line,
+# and the task's oracle lies beside the original.
+task_session() {
+  local dir="$1" prompt="$2"
+  if [[ "$arm" == grok ]]; then
+    (cd "$dir" && limit "$SESSION_LIMIT_SECS" "$grok_bin" --prompt-file "$prompt" \
+      "${arm_args[@]}" </dev/null)
+  else
+    session "$dir" --output-format json ${arm_args[@]+"${arm_args[@]}"} <"$prompt"
+  fi
 }
 
 # cargo $2.. in the crate at $1, built in a target directory of the harness's own. The
@@ -142,20 +176,21 @@ test_score() {
   fi
 }
 
-# The oracle of task $1 run in the crate at $2: `passed/total`, `build` when the oracle does
-# not compile against what the session wrote (it missed the entry points the prompt names),
-# `?` when the run gave no result (a hung test), or `-` for a task without an oracle.
-# Call it after every other score: it adds tests/eval_oracle.rs to the crate, which the crate's
-# own test score, the lint counts and the reviewer must not see.
+# The oracle file $1 run in the crate at $3 as the integration test $2: `passed/total`,
+# `build` when the oracle does not compile against what the session wrote (it missed the
+# entry points the prompt names), `?` when the run gave no result (a hung test), or `-`
+# when there is no such file. The log is $3.$2.log.
+# Call it after every other score of that session: it adds tests/$2.rs to the crate, which
+# the crate's own test score, the lint counts and the reviewer must not see.
 oracle_score() {
-  local oracle="$EVALS_DIR/tasks/$1/oracle.rs" dir="$2" log="$2.oracle.log"
+  local oracle="$1" name="$2" dir="$3" log="$3.$2.log"
   if [[ ! -f "$oracle" ]]; then
     echo -
     return
   fi
   mkdir -p "$dir/tests"
-  cp "$oracle" "$dir/tests/eval_oracle.rs"
-  score_cargo "$dir" test --test eval_oracle >"$log" 2>&1 || true
+  cp "$oracle" "$dir/tests/$name.rs"
+  score_cargo "$dir" test --test "$name" >"$log" 2>&1 || true
   if grep -q '^test result:' "$log"; then
     awk '/^test result:/ { passed += $4; failed += $6 }
       END { print passed "/" passed + failed }' "$log"
@@ -219,15 +254,62 @@ session_model() {
     2>/dev/null || echo '?'
 }
 
+# Field $2 of the session result file $1, or ? when the session left none.
+session_field() {
+  jq -r --arg field "$2" '.[$field] // "?"' "$1" 2>/dev/null || echo '?'
+}
+
+# The follow-up of the task directory $1 in the crate at $2: a second session is asked for
+# the change in followup.md, and followup-oracle.rs scores the result. Prints four fields,
+# "oracle lines turns cost", or four dashes for a task without a follow-up.
+#
+# These score the first session's code, by what a later change to it takes, not the second
+# session. So the second session is the same in every arm, and it is the bare one: it has
+# no hooks, reviewer or rules of its own, so its turns and cost follow the code it was
+# given. Running it in the run's own arm was the alternative; the arm's own overhead (the
+# setup arm's sessions cost about six times the bare arm's on 2026-11-17) would then sit
+# on top of the number.
+# `lines` is the Rust it added and removed, `+a/-r`, tests included: a removed line is
+# first-session code that did not survive the change.
+followup_scores() {
+  local task="$1" dir="$2" base lines
+  if [[ ! -f "$task/followup.md" ]]; then
+    echo '- - - -'
+    return
+  fi
+  # The second session must not find the first oracle in the crate: it would read the
+  # hidden tests of the code it is about to change.
+  rm -f "$dir/tests/eval_oracle.rs"
+  rmdir "$dir/tests" 2>/dev/null || true
+  git -C "$dir" add -A
+  git -C "$dir" -c user.name=evals -c user.email=evals@localhost commit -q --allow-empty \
+    -m first
+  base="$(git -C "$dir" rev-parse HEAD)"
+  session "$dir" --output-format json "${BARE_ARGS[@]}" <"$task/followup.md" \
+    >"$dir.followup.json" 2>"$dir.followup.err" || true
+  if ! session_wrote_code "$dir" "$base"; then
+    echo 'no-change - - -'
+    return
+  fi
+  # Intent to add, so that a file the session created counts in the diff.
+  git -C "$dir" add -A -N
+  lines="$(git -C "$dir" diff --numstat "$base" -- '*.rs' |
+    awk '{ added += $1; removed += $2 } END { printf "+%d/-%d", added, removed }')"
+  echo "$(oracle_score "$task/followup-oracle.rs" eval_followup "$dir") $lines" \
+    "$(session_field "$dir.followup.json" num_turns)" \
+    "$(session_field "$dir.followup.json" total_cost_usd)"
+}
+
 # Runs one task and appends its row. A session that wrote no Rust gets a row of dashes:
 # scoring the untouched seed crate would report a clean result for no work.
 run_task() {
-  local name="$1" dir="$out/$1" seed blocker major minor tests diagnostics house
+  local name="$1" dir="$out/$1" task="$EVALS_DIR/tasks/$1" seed blocker major minor
+  local tests diagnostics house oracle followup lines followup_turns followup_cost
   seed="$(seed_crate "$dir")"
-  session "$dir" --output-format json ${arm_args[@]+"${arm_args[@]}"} \
-    <"$EVALS_DIR/tasks/$name/prompt.md" >"$dir.agent.json" 2>"$dir.agent.err" || true
+  cp "$task/prompt.md" "$dir.prompt.md"
+  task_session "$dir" "$dir.prompt.md" >"$dir.agent.json" 2>"$dir.agent.err" || true
   if ! session_wrote_code "$dir" "$seed"; then
-    printf '%s\tno-change\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' "$name" >>"$results"
+    printf '%s\tno-change\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\t-\n' "$name" >>"$results"
     return
   fi
 
@@ -238,26 +320,33 @@ when there are none:
 findings: blocker=<n> major=<n> minor=<n>
 EOF
   read -r blocker major minor <<<"$(review_counts "$dir.review.md")"
-  # Bound before the row is printed, so the oracle, which printf would otherwise run in
-  # argument order, is copied in only after these three have read the crate.
+  # In this order: the oracle is copied in only after these three have read the crate, and
+  # the follow-up changes the crate only after everything else has scored it.
   tests="$(test_score "$dir")"
   diagnostics="$(diagnostics_count "$dir")"
   house="$(house_count "$dir")"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$tests" \
-    "$(oracle_score "$name" "$dir")" "$diagnostics" "$house" "$blocker" "$major" "$minor" \
-    "$(session_model "$dir.agent.json")" \
-    "$(jq -r '.num_turns // "?"' "$dir.agent.json" 2>/dev/null || echo '?')" \
-    "$(jq -r '.total_cost_usd // "?"' "$dir.agent.json" 2>/dev/null || echo '?')" >>"$results"
+  oracle="$(oracle_score "$task/oracle.rs" eval_oracle "$dir")"
+  read -r followup lines followup_turns followup_cost <<<"$(followup_scores "$task" "$dir")"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$tests" \
+    "$oracle" "$diagnostics" "$house" "$blocker" "$major" "$minor" \
+    "$(session_model "$dir.agent.json")" "$(session_field "$dir.agent.json" num_turns)" \
+    "$(session_field "$dir.agent.json" total_cost_usd)" \
+    "$followup" "$lines" "$followup_turns" "$followup_cost" >>"$results"
 }
 
 # HEAD of the deployed checkout and of this one. In a synced folder the files can be ahead
 # of HEAD (agents/SETUP.md, Version control), so a commit names what git knows, no more.
 deployed="$(git -C "$HOME/.claude/skills" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 checkers="$(git -C "$EVALS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+header="# arm $arm, deployed $deployed, checkers $checkers,"
+header+=" model ${EVALS_MODEL:-default}, effort $effort, $("$claude_bin" --version)"
+if [[ "$arm" == grok ]]; then
+  header+=", grok model ${EVALS_GROK_MODEL:-default}, $("$grok_bin" --version)"
+fi
 {
-  echo "# arm $arm, deployed $deployed, checkers $checkers," \
-    "model ${EVALS_MODEL:-default}, effort $effort, $("$claude_bin" --version)"
-  printf 'task\ttests\toracle\tdiagnostics\thouse\tblocker\tmajor\tminor\tmodel\tturns\tcost_usd\n'
+  echo "$header"
+  printf 'task\ttests\toracle\tdiagnostics\thouse\tblocker\tmajor\tminor\tmodel\tturns\tcost_usd'
+  printf '\tfollowup\tfollowup_lines\tfollowup_turns\tfollowup_cost_usd\n'
 } >"$results"
 for task in "${tasks[@]}"; do
   echo "running $task" >&2
