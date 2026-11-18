@@ -4,7 +4,6 @@
       "command": "@GROK@",
       "args": [
         "agent",
-        "--always-approve",
         "stdio"
       ],
       "env": {}

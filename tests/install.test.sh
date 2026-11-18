@@ -233,5 +233,34 @@ check "review profile: second run is current" "ok      $profile" \
   "$(setup_grok_review | grep -F "$profile")"
 check "review profile: no scratch copy left" no "$([[ -e "$profile.new" ]] && echo yes || echo no)"
 
+# Grok's own config can keep Grok on always-approve; install.sh says so and writes nothing.
+mkdir -p "$HOME/.grok"
+check "grok mode: no config file, no warning" "" "$(check_grok_mode)"
+printf '[ui]\npermission_mode = "auto"\n# permission_mode = "always-approve"\n' \
+  >"$HOME/.grok/config.toml"
+check "grok mode: auto, with the old line commented out: no warning" "" "$(check_grok_mode)"
+printf '[ui]\n  permission_mode="always-approve"\n' >"$HOME/.grok/config.toml"
+before="$(cat "$HOME/.grok/config.toml")"
+check "grok mode: always-approve is reported" 1 \
+  "$(check_grok_mode | grep -c "^warning: $HOME/.grok/config.toml sets permission_mode")"
+check "grok mode: the config file is left as it was" "$before" \
+  "$(cat "$HOME/.grok/config.toml")"
+
+# The shared sandbox block. Worktrees, the Grok review and a headless session cannot run
+# inside the sandbox (agents/SETUP.md, Sandbox), so the retry outside it must stay allowed.
+shared="$(dirname "$INSTALL")/claude/settings.json"
+check "sandbox: on, and a blocked command may still be retried outside it" "true true" \
+  "$(jq -r '.sandbox | "\(.enabled) \(.allowUnsandboxedCommands != false)"' "$shared")"
+# A machine's own folders and sockets are local entries, which the merge must keep.
+merge_json "$(cat "$shared")" "$file" >/dev/null
+jq '.sandbox.filesystem.allowWrite += ["~/work"]
+  | .sandbox.network.allowUnixSockets = ["~/run/tool.sock"]' "$file" >"$file.new"
+mv "$file.new" "$file"
+merge_json "$(cat "$shared")" "$file" >/dev/null
+check "sandbox: a machine's own folder and socket survive the next install" \
+  '["~/work",["~/run/tool.sock"]]' \
+  "$(jq -c '[(.sandbox.filesystem.allowWrite[] | select(. == "~/work")),
+    .sandbox.network.allowUnixSockets]' "$file")"
+
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

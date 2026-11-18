@@ -94,19 +94,60 @@ Claude Code runs in `auto` permission mode on every machine (changed from
   Claude-compatible `defaultMode`, `auto` included, and that `[ui] permission_mode` in
   `~/.grok/config.toml` sets it too, with always-approve winning when both it and auto are
   requested. So a machine whose `~/.grok/config.toml` says `permission_mode =
-  "always-approve"` keeps Grok on always-approve; `install.sh` does not manage that file.
-  Remove that line for Grok to follow `auto`. This is from Grok's docs (grok 1.0.70), not
-  from a live session: check the mode Grok shows at startup.
-- `$SETUP/air/acp.json` still starts Grok with `--always-approve`, so Grok in Air approves
-  every call and does not match the mode above.
+  "always-approve"` keeps Grok on always-approve. `install.sh` does not write that file: it
+  warns when the line is there. Remove the line for Grok to follow `auto`. This is from
+  Grok's docs (grok 1.0.77), not from a live session: check the mode Grok shows at startup.
+- `$SETUP/air/acp.json` starts Grok without `--always-approve` (dropped 2026-11-18), so
+  Grok in Air follows the same mode and asks through Air.
 
 Hooks run in every mode: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
 git commands that discard uncommitted work, pushes that update `main`/`master`,
 `gh pr merge --admin`, `cargo mutants` runs that can exhaust memory, force pushes, and
-`git stash drop` and `clear` (the Hooks table has each rule). These are guardrails, not a
-sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the Read tool only, and any
-Bash command can still read those files. Only Claude Code's sandbox settings would close
-that.
+`git stash drop` and `clear` (the Hooks table has each rule). These are guardrails that read
+the command's text, not containment: that is the sandbox.
+
+### Sandbox
+
+Claude Code runs every Bash command in its sandbox (`sandbox.enabled` in the shared
+settings, since 2026-11-18; Seatbelt on macOS). What it buys: code that a build or a test
+runs (a dependency's `build.rs`, a proc macro, a test binary, an install script) cannot
+write outside the folders below, read the denied paths, or reach another host. The hooks,
+the MCP servers and the Read, Edit and Write tools run outside it, under the permission
+rules.
+
+- **Writes** reach the session's working directory, `~/Documents/Github` (the clones and
+  worktrees beside it), `~/.cargo`, `~/.cache`, `~/.Trash` and the temporary directories.
+  Nothing else: not the shell profiles, not `~/.claude`. A machine that keeps its repos
+  elsewhere adds that folder to `sandbox.filesystem.allowWrite` in its own
+  `~/.claude/settings.json`, and a tool that talks over a Unix socket adds the socket to
+  `sandbox.network.allowUnixSockets`; the merge keeps both.
+- **Reads** reach everything except the `Read(...)` deny rules of the shared settings,
+  which the sandbox enforces for Bash too. Three of them are opened again, `~/.ssh`,
+  `~/.config/gh` and `~/Library/Keychains`: git over SSH and `gh` cannot run without them.
+  So the sandbox does not protect the credentials the agent itself works with. A command
+  inside it can read the SSH keys and the GitHub token, and GitHub is a host it can reach.
+- **Network** reaches GitHub, crates.io and the loopback. In `auto` mode any other host is
+  refused unless the command names it and the classifier approves.
+- **Leaving the sandbox.** A command the sandbox blocks can be retried outside it, and the
+  `auto` classifier approves or refuses that retry per command. These need it:
+  `git worktree add` and `remove` (the sandbox protects `.git/worktrees`), a sandbox inside
+  the sandbox (`grok-review.sh`, a headless `claude`, so `evals/run.sh` too), Docker, and
+  `install.sh`. Never set `allowUnsandboxedCommands` to `false`: those stop working.
+  `excludedCommands` is not used: it matches the start of a command only. Measured on one
+  long session (2026-11-18), 88 of 259 commands needed something the default sandbox
+  denies, and none of them began with the tool's name (190 began with `cd`).
+
+Measured on 2026-11-18 (Claude Code 2.1.327, macOS 27) with headless sessions running the
+commands agents run here. With the sandbox at its defaults, `gh`, git over SSH, a worktree
+beside the repo, `trash`, `/tmp`, crates.io and a loopback server all failed. With this
+block they pass, except the ones under Leaving the sandbox, whose retry was approved.
+On Linux the sandbox needs `bubblewrap` and `socat`; without them Claude Code says so at
+startup and runs commands unsandboxed.
+
+Grok runs without a sandbox. Its own (`--sandbox`, which the Grok review uses) wraps the
+whole process, with no way out for one command, and under a profile extending `workspace`
+`gh` could not read its token from the keychain (grok 1.0.77, 2026-11-18), so `review-pr`
+and `fix-issue` could not run under it.
 
 ## Hooks
 
@@ -220,7 +261,7 @@ channel.
 
 ## JetBrains Air (ACP agents)
 
-Air runs Grok (`grok agent --always-approve stdio`) and Claude Code as ACP agents.
+Air runs Grok (`grok agent stdio`) and Claude Code as ACP agents.
 
 - Claude Code runs through `@agentclientprotocol/claude-agent-acp`.
 - `install.sh` installs that adapter globally at the version pinned in `setup_air`.

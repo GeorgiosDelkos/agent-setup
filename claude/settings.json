@@ -49,6 +49,37 @@
     ],
     "defaultMode": "auto"
   },
+  "sandbox": {
+    "enabled": true,
+    "enableWeakerNetworkIsolation": true,
+    "filesystem": {
+      "allowWrite": [
+        "~/Documents/Github",
+        "~/.cargo",
+        "~/.cache",
+        "~/.Trash",
+        "/tmp",
+        "/private/tmp"
+      ],
+      "allowRead": [
+        "~/.ssh",
+        "~/.config/gh",
+        "~/Library/Keychains"
+      ]
+    },
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "*.github.com",
+        "*.githubusercontent.com",
+        "crates.io",
+        "*.crates.io",
+        "127.0.0.1",
+        "localhost"
+      ],
+      "allowLocalBinding": true
+    }
+  },
   "enableAllProjectMcpServers": false,
   "hooks": {
     "Notification": [

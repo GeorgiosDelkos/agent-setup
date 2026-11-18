@@ -319,6 +319,18 @@ check_sync() {
   fi
 }
 
+# Grok's own config can keep it on always-approve whatever the shared settings say
+# (agents/SETUP.md, Permissions). That file is the machine's and install.sh does not write
+# it, so this only reports.
+check_grok_mode() {
+  local config="$HOME/.grok/config.toml"
+  if grep -Eq '^[[:space:]]*permission_mode[[:space:]]*=[[:space:]]*"always-approve"' \
+    "$config" 2>/dev/null; then
+    echo "warning: $config sets permission_mode = \"always-approve\", so Grok approves" \
+      "every tool call; remove that line for Grok to follow the shared auto mode"
+  fi
+}
+
 check_tools() {
   local tool missing=()
   # The Rust hooks need jq, git, perl, shasum, cargo, rustfmt and clippy; without one they
@@ -536,6 +548,7 @@ main() {
   setup_air
   setup_git
   check_sync
+  check_grok_mode
   # Sync drops the executable bit, so restore it on everything that is run directly.
   chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh \
     "$SETUP_DIR/claude/statusline.sh" "$SETUP_DIR"/claude/scripts/*.sh
