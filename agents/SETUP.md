@@ -402,18 +402,25 @@ commit. `install.sh` checks this at the end of every run, against the last fetch
 `origin/main`. It warns when `$SETUP` is off `main`, has changed or untracked files, or has
 commits that are not on `origin/main`, and it notes when `$SETUP` is behind. A tool that
 installs into `~/.claude/skills/` writes into the deployed copy too: such a skill shows up
-as untracked until it is committed through a PR, added to the local layer's ignore list, or
-removed.
+as untracked until it is committed through a PR, listed in that clone's
+`.git/info/exclude` (per machine, and no PR names it), or removed.
 
 Until 2026-11-18 the folder could also be carried between machines by a file-sync service,
 with its git directory outside the folder. A machine still set up that way has a `.git`
 file in `$SETUP`, not a directory, and it holds `gitdir: … .local/share/agent-setup.git`.
 Convert it once:
 
-1. Take `$SETUP` out of the file sync.
+1. Take `$SETUP` out of the file sync, and check in the sync tool that it is out. A folder
+   still synced carries the moves below to the other machines as deletions. If the tool
+   removes local files when a folder leaves it, copy the folder elsewhere first and work
+   from the copy.
 2. `gh repo clone GeorgiosDelkos/agent-setup "$SETUP.new"`.
-3. Copy the local layer across, to the same paths: in the old folder,
-   `git status --short --ignored` lists its files with `!!`.
+3. Copy the local layer across, to the same paths. `diff -rq "$SETUP" "$SETUP.new"` lists
+   it: every `Only in $SETUP` line other than `.git` is a file the repo does not have (a
+   rule file, a company skill, a skill a tool installed), and every `differ` line is an
+   edit made in place that was never merged. Do not go by `git status` in the old folder:
+   an old git directory still tracks some of these files and does not list them. Repeat
+   until the only lines left are files you mean to leave behind.
 4. Move the old folder aside, move `$SETUP.new` to `$SETUP`, and run
    `bash "$SETUP/install.sh"`. Once the links work, trash the old folder and
    `~/.local/share/agent-setup.git`.

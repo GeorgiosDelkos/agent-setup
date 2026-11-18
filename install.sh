@@ -209,38 +209,60 @@ setup_air() {
 # here runs before any review or test. Read-only and offline: it compares against the last
 # fetched origin/main, so a merge made since that fetch is not seen.
 check_deployed() {
-  local top branch changed counts ahead behind
+  local top branch status changed counts ahead behind
+  # The layout from before 2026-11-18: no git command is safe to suggest there.
+  if [[ -f "$SETUP_DIR/.git" ]] && grep -q 'agent-setup\.git' "$SETUP_DIR/.git"; then
+    echo "warning: $SETUP_DIR still has the file-sync layout (its .git is a file that names" \
+      "agent-setup.git): convert it once (SETUP.md, Version control)"
+    return 0
+  fi
   top="$(git -C "$SETUP_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
   if [[ -z "$top" || "$(cd "$top" && pwd -P)" != "$(cd "$SETUP_DIR" && pwd -P)" ]]; then
     echo "note: $SETUP_DIR is not a git clone, so it cannot be updated with git pull" \
       "(SETUP.md, Version control)"
     return 0
   fi
-  if ! git -C "$SETUP_DIR" rev-parse -q --verify origin/main >/dev/null; then
-    echo "note: $SETUP_DIR has no origin/main to compare with (git fetch)"
-    return 0
-  fi
+  # The branch and the changed files need no origin/main, so they come before that check.
   branch="$(git -C "$SETUP_DIR" symbolic-ref -q --short HEAD || echo "a detached HEAD")"
   if [[ "$branch" != main ]]; then
-    echo "warning: $SETUP_DIR is on $branch, not main"
+    echo "warning: $SETUP_DIR is on $branch, not main: git -C \"$SETUP_DIR\" switch main"
   fi
-
-  changed="$(git -C "$SETUP_DIR" status --porcelain | wc -l | tr -d ' ')"
+  # No git call below may end install.sh, which still has its tool check to print: an
+  # unreadable index fails this one, a clone with no commit checked out the rev-list.
+  if ! status="$(git -C "$SETUP_DIR" status --porcelain)"; then
+    echo "warning: cannot read the state of $SETUP_DIR (git's message above)"
+    return 0
+  fi
+  changed="$(grep -c . <<<"$status" || true)"
   if ((changed > 0)); then
-    echo "warning: $SETUP_DIR has $changed changed or untracked files; they are live in" \
+    echo "warning: $SETUP_DIR has $changed changed or untracked path(s); they are live in" \
       "every session on this machine, unreviewed. Move them to a separate clone and open a" \
       "PR (SETUP.md, Version control)."
   fi
 
-  counts="$(git -C "$SETUP_DIR" rev-list --left-right --count HEAD...origin/main)"
+  if ! git -C "$SETUP_DIR" rev-parse -q --verify origin/main >/dev/null; then
+    echo "note: $SETUP_DIR has no origin/main to compare with: it needs a remote named" \
+      "origin that has main, fetched"
+    return 0
+  fi
+  if ! counts="$(git -C "$SETUP_DIR" rev-list --left-right --count HEAD...origin/main)"; then
+    echo "warning: cannot compare $SETUP_DIR with origin/main (git's message above)"
+    return 0
+  fi
   read -r ahead behind <<<"$counts"
   if ((ahead > 0)); then
-    echo "warning: $SETUP_DIR has $ahead commits that are not on origin/main; they are" \
-      "live on this machine, unreviewed"
+    echo "warning: $SETUP_DIR has $ahead commit(s) that are not on origin/main; they are" \
+      "live on this machine, unreviewed. Move them to a branch in a separate clone and" \
+      "open a PR."
   fi
   if ((behind > 0)); then
-    echo "note: $SETUP_DIR is $behind commits behind origin/main: git -C $SETUP_DIR pull" \
-      "--ff-only, then run install.sh again"
+    # The pull is named only where it works: on main, with no commit or change of its own.
+    if [[ "$branch" == main ]] && ((ahead == 0 && changed == 0)); then
+      echo "note: $SETUP_DIR is $behind commit(s) behind origin/main:" \
+        "git -C \"$SETUP_DIR\" pull --ff-only, then run install.sh again"
+    else
+      echo "note: $SETUP_DIR is $behind commit(s) behind origin/main"
+    fi
   fi
 }
 
@@ -464,7 +486,7 @@ main() {
   echo "Done. Start new Claude Code and Grok sessions to pick up the changes."
 }
 
-# Run unless sourced: tests/install.test.sh sources this file to test merge_json.
+# Run unless sourced: tests/install.test.sh sources this file to test its functions.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   main "$@"
 fi

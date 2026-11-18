@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Tests for install.sh's merge_json, in a throwaway HOME: shared keys win, local-only keys
-# and another tool's array entries stay, and what the shared copy drops leaves the machine.
+# Tests for install.sh's functions, in a throwaway HOME. merge_json: shared keys win,
+# local-only keys and another tool's array entries stay, and what the shared copy drops
+# leaves the machine. check_deployed and the review profile have their cases further down.
 set -euo pipefail
 
 INSTALL="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/install.sh"
@@ -239,33 +240,67 @@ check "deployed: clean, current, with an ignored local file: nothing" "" "$(depl
 # Behind: a merge the machine has fetched and not pulled. Silent, it runs old hooks unnoticed.
 commit "$origin" two
 git -C "$deployed" fetch -q
+behind="note: $deployed is 1 commit(s) behind origin/main: git -C \"$deployed\" pull --ff-only,"
 check "deployed: behind origin/main is noted with the commit count and the pull" 1 \
-  "$(deployed_check | grep -c "^note: $deployed is 1 commits behind origin/main: git -C .* pull")"
+  "$(deployed_check | grep -cF "$behind")"
 check "deployed: behind alone is one message, not also a warning about changed files" 1 \
   "$(deployed_check | wc -l | tr -d ' ')"
 git -C "$deployed" merge -q --ff-only origin/main
 # An edit in place and a file a tool dropped in: both are live and unreviewed.
 echo edited >"$deployed/file"
 check "deployed: a changed tracked file is warned about" 1 \
-  "$(deployed_check | grep -c "^warning: $deployed has 1 changed or untracked files")"
+  "$(deployed_check | grep -c "^warning: $deployed has 1 changed or untracked path(s)")"
 echo new >"$deployed/untracked"
 check "deployed: an untracked file counts too" 1 \
-  "$(deployed_check | grep -c "^warning: $deployed has 2 changed or untracked files")"
+  "$(deployed_check | grep -c "^warning: $deployed has 2 changed or untracked path(s)")"
 git -C "$deployed" checkout -q -- file
 trash "$deployed/untracked"
 # A commit made in place: the tree is clean, so only the comparison with origin shows it.
 commit "$deployed" local-only
-expected="warning: $deployed has 1 commits that are not on origin/main;"
-expected+=" they are live on this machine, unreviewed"
 check "deployed: a commit that is not on origin/main is warned about, and nothing else" \
-  "$expected" \
-  "$(deployed_check)"
+  "1 1" "$(deployed_check | wc -l | tr -d ' ') $(deployed_check |
+    grep -c "^warning: $deployed has 1 commit(s) that are not on origin/main; ")"
+# Diverged: origin moved too. A pull cannot fast-forward, so naming it would mislead.
+commit "$origin" three
+git -C "$deployed" fetch -q
+check "deployed: diverged: ahead is warned about, and behind is noted without the pull" \
+  "warning note 0" "$(deployed_check | cut -d : -f 1 | tr '\n' ' ')$(deployed_check |
+    grep -c 'pull --ff-only' || true)"
 git -C "$deployed" reset -q --keep origin/main
 # Another branch at the same commit: files and history match, the next pull would not.
 git -C "$deployed" checkout -q -b side
-check "deployed: off main is warned about" "warning: $deployed is on side, not main" \
-  "$(deployed_check)"
+check "deployed: off main is warned about, with the way back" \
+  "warning: $deployed is on side, not main: git -C \"$deployed\" switch main" "$(deployed_check)"
+# A side branch that is behind has no upstream to pull from.
+commit "$origin" four
+git -C "$deployed" fetch -q
+check "deployed: behind on a side branch is noted without the pull" 0 \
+  "$(deployed_check | grep -c 'pull --ff-only' || true)"
 git -C "$deployed" checkout -q main
+git -C "$deployed" merge -q --ff-only origin/main
+# A checked-out commit: the same files as main, and no branch for a pull to move.
+git -C "$deployed" checkout -q --detach
+check "deployed: a detached HEAD is named" 1 \
+  "$(deployed_check | grep -c "^warning: $deployed is on a detached HEAD, not main")"
+git -C "$deployed" checkout -q main
+# Reached through a symlink, as ~/.claude/hooks reaches it: still the same clone.
+ln -s "$deployed" "$WORK/link"
+check "deployed: a symlink to the clone is the clone" "" \
+  "$(SETUP_DIR="$WORK/link" check_deployed)"
+# A git failure must not end install.sh before its tool check: run as install.sh runs it.
+git init -q -b main "$WORK/unborn"
+git -C "$WORK/unborn" remote add origin "$origin"
+git -C "$WORK/unborn" fetch -q
+code=0
+said="$(set -e && SETUP_DIR="$WORK/unborn" check_deployed 2>/dev/null)" || code=$?
+check "deployed: a clone with no commit checked out is reported, and install.sh goes on" \
+  "0 warning: cannot compare $WORK/unborn with origin/main (git's message above)" \
+  "$code $(tail -n 1 <<<"$said")"
+# The layout from before 2026-11-18: a pull there can delete local-layer files.
+mkdir -p "$WORK/synced"
+echo "gitdir: $HOME/.local/share/agent-setup.git" >"$WORK/synced/.git"
+check "deployed: the file-sync layout gets the conversion pointer and no git advice" 1 \
+  "$(SETUP_DIR="$WORK/synced" check_deployed | grep -c 'convert it once')"
 # A copy without git (an unpacked archive) cannot be pulled; a silent return hid that. The
 # same for a folder that only sits inside some other repository.
 mkdir -p "$WORK/plain" "$deployed/inner"
@@ -276,8 +311,22 @@ check "deployed: a folder inside another clone is not that clone" 1 \
 # A clone that never fetched main has nothing to compare with.
 git init -q -b main "$WORK/no-origin"
 check "deployed: no origin/main is noted, and the checks that need it are skipped" \
-  "note: $WORK/no-origin has no origin/main to compare with (git fetch)" \
-  "$(SETUP_DIR="$WORK/no-origin" check_deployed)"
+  "note: $WORK/no-origin has no origin/main to compare with: it needs a remote named" \
+  "$(SETUP_DIR="$WORK/no-origin" check_deployed 2>&1 | cut -d ' ' -f 1-13)"
+# Without a remote the live edits and the branch are still there to report.
+git -C "$WORK/no-origin" checkout -q -b experiment
+echo stray >"$WORK/no-origin/stray"
+check "deployed: no origin/main: the branch and the changed path are still warned about" \
+  "warning warning note" \
+  "$(SETUP_DIR="$WORK/no-origin" check_deployed 2>&1 | cut -d : -f 1 | tr '\n' ' ' | sed 's/ $//')"
+# Behind with an edit in place: the pull could refuse or merge over the edit.
+commit "$origin" five
+git -C "$deployed" fetch -q
+echo edited >"$deployed/file"
+check "deployed: behind with a changed file: the pull is not named" 0 \
+  "$(deployed_check | grep -c 'pull --ff-only' || true)"
+git -C "$deployed" checkout -q -- file
+git -C "$deployed" merge -q --ff-only origin/main
 
 # The review profile's `~/` paths are expanded to this HOME, since the review runs with its
 # own empty HOME; a second run finds the copy current and changes nothing.
