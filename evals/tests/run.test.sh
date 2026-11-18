@@ -268,11 +268,13 @@ EVALS_ARM=grok EVALS_GROK_MODEL=g1 GROK_BIN="$WORK/grok" bash "$RUN" kv-parse \
 grok="$(find "$EVALS_OUT" -name results.tsv -newer "$bare")"
 check "grok arm: the header names the arm, Grok's model and its version" 1 \
   "$(head -n 1 "$grok" | grep -c '^# arm grok, .*, stub 0.0.0, grok model g1, grok-stub 9.9$')"
+grok_prompt="$(dirname "$grok")/kv-parse.prompt.md"
+grok_flags="--output-format json --permission-mode auto --effort high --model g1"
 check "grok arm: Grok gets the prompt file, auto mode, the effort and its model" \
-  "--prompt-file $(dirname "$grok")/kv-parse.prompt.md --output-format json --permission-mode auto --effort high --model g1" \
+  "--prompt-file $grok_prompt $grok_flags" \
   "$(awk -F '\t' '$2 == "grok" { print $3 }' "$STUB_ARGS")"
 check "grok arm: the prompt file is the task's prompt" "" \
-  "$(diff "$(dirname "$grok")/kv-parse.prompt.md" "$(dirname "$RUN")/tasks/kv-parse/prompt.md")"
+  "$(diff "$grok_prompt" "$(dirname "$RUN")/tasks/kv-parse/prompt.md")"
 check "grok arm: Claude runs no task session, and does review and follow up" \
   "followup review" \
   "$(awk -F '\t' '{ print $2 }' "$STUB_ARGS" | grep -v grok | sort | tr '\n' ' ' | sed 's/ $//')"

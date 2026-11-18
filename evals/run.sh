@@ -7,8 +7,8 @@
 # saw, where the task has them.
 #
 # Usage: bash evals/run.sh [task...]      (default: every directory in evals/tasks/)
-# A task is evals/tasks/<name>/prompt.md, with an optional oracle.rs beside it, and an
-# optional follow-up: followup.md, a change asked of the finished crate, and
+# A task is evals/tasks/<name>/prompt.md with its oracle.rs beside it, and an optional
+# follow-up: followup.md, a change asked of the finished crate, and
 # followup-oracle.rs, the tests of the crate after that change.
 # Output: <out>/results.tsv, one row per task, and each crate with its transcripts beside it.
 #   <out> is $EVALS_OUT/<UTC time>, by default under ~/.cache/agent-setup-evals: outside the
