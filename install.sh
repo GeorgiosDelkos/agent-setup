@@ -319,6 +319,52 @@ check_sync() {
   fi
 }
 
+# Grok's own config can keep it on always-approve whatever the shared settings say
+# (agents/SETUP.md, Permissions): `permission_mode = "always-approve"` or the older
+# `yolo = true`, both in the [ui] table. That file is the machine's and install.sh does not
+# write it, so this only reports. Read by table, as setup_memory reads its own: the same
+# key under another table is not Grok's mode. The dotted key `ui.permission_mode` and the
+# inline table `ui = { ... }`, both written before any table, are the same setting.
+check_grok_mode() {
+  local config="$HOME/.grok/config.toml" setting
+  if [[ ! -r "$config" || ! -f "$config" ]]; then
+    return 0
+  fi
+  setting="$(awk '
+    BEGIN {
+      top = 1
+      mode = "permission_mode[[:space:]]*=[[:space:]]*[\"\047]always-approve[\"\047]"
+    }
+    /^[[:space:]]*\[/ { top = 0; in_ui = /^[[:space:]]*\[ui\]/ }
+    (in_ui && $0 ~ "^[[:space:]]*" mode) || (top && $0 ~ "^[[:space:]]*ui\\." mode) ||
+      (top && $0 ~ "^[[:space:]]*ui[[:space:]]*=[[:space:]]*\\{.*" mode) {
+      print "permission_mode = \"always-approve\""; exit
+    }
+    in_ui && /^[[:space:]]*yolo[[:space:]]*=[[:space:]]*true/ { print "yolo = true"; exit }
+  ' "$config")"
+  if [[ -n "$setting" ]]; then
+    echo "warning: $config sets $setting, so Grok approves every tool call;" \
+      "remove that line for Grok to follow the shared auto mode"
+  fi
+}
+
+# The deployed copy holds the hooks, rules and scripts that every session runs outside the
+# sandbox, and it lies inside a folder the sandbox may write to (agents/SETUP.md, Sandbox).
+# This adds it to the machine's denied writes. The path is the machine's, so it cannot be
+# in the shared copy; the merge keeps it as a local entry.
+protect_setup_dir() {
+  local file="$HOME/.claude/settings.json" dir
+  dir="$(cd "$SETUP_DIR" && pwd -P)"
+  if jq -e --arg dir "$dir" '.sandbox.filesystem.denyWrite // [] | index($dir)' "$file" \
+    >/dev/null; then
+    echo "ok      sandbox: no writes to $dir"
+    return 0
+  fi
+  jq --arg dir "$dir" '.sandbox.filesystem.denyWrite += [$dir]' "$file" >"$file.new"
+  mv "$file.new" "$file"
+  echo "wrote   $file (sandbox: no writes to $dir)"
+}
+
 check_tools() {
   local tool missing=()
   # The Rust hooks need jq, git, perl, shasum, cargo, rustfmt and clippy; without one they
@@ -527,6 +573,7 @@ main() {
   fi
 
   merge_json "$(cat "$SETUP_DIR/claude/settings.json")" "$HOME/.claude/settings.json"
+  protect_setup_dir
   if [[ -f "$SETUP_DIR/install.local.sh" ]]; then
     bash "$SETUP_DIR/install.local.sh"
   fi
@@ -536,6 +583,7 @@ main() {
   setup_air
   setup_git
   check_sync
+  check_grok_mode
   # Sync drops the executable bit, so restore it on everything that is run directly.
   chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh \
     "$SETUP_DIR/claude/statusline.sh" "$SETUP_DIR"/claude/scripts/*.sh
