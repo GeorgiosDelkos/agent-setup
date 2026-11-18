@@ -1,15 +1,16 @@
 # AgentSetup
 
 Shared Claude Code and Grok configuration: global rules, skills, agents, hooks, and
-settings. One folder, kept in step across machines by a file-sync service, so every machine
-uses the same setup.
+settings. One folder, a clone of this repo on each machine, so every machine uses the same
+setup.
 
-On a new machine, once the folder is there (synced, or cloned from this repo):
+On a new machine:
 
 ```sh
+gh repo clone GeorgiosDelkos/agent-setup <folder>
 bash <folder>/install.sh
 ```
 
-Run it through `bash`: file sync can drop the executable bit, which `install.sh` restores.
+To update a machine after a merge: `git -C <folder> pull --ff-only`, then `install.sh` again.
 
 Full layout, prerequisites, and verification: `agents/SETUP.md`.
