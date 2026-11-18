@@ -308,13 +308,16 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
 
 - A task is `evals/tasks/<name>/prompt.md`, written as a user would ask, with no hint at
   the rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
-- A task may have an oracle beside its prompt, `oracle.rs`: tests of the behaviour the
+- Every task has an oracle beside its prompt, `oracle.rs`: tests of the behaviour the
   prompt states, which the session never sees. The harness copies it into the crate as
   `tests/eval_oracle.rs` after the reviewer and every other score. Such a prompt names the entry
   points the oracle calls (a function and its success type, a binary and its output
-  format), never an error type or anything else about the design. `varint`, `kv-parse` and
-  `cli-wc` have one. `evals/tests/fixtures/` holds a solution for each, and the harness
-  tests fail when an oracle and its solution disagree.
+  format), never an error type or anything else about the design. `evals/tests/fixtures/` holds a
+  solution for each, and the harness tests fail when an oracle and its solution disagree.
+  The `actor-counter` solution depends on Tokio, so those tests need crates.io or a Cargo
+  cache that has it. Two oracles test less than their prompt asks: `rate-limiter` names no
+  way to set the clock, so its refill tests run on real time and assert a refusal only
+  when too little time has passed, and `actor-counter` has no test of the memory bound.
 - A task may also have a follow-up, `followup.md` and `followup-oracle.rs`: a change a user
   would ask for next, and the tests of the crate after it. Once the first session's work is
   scored, the harness removes the first oracle from the crate, commits the crate, gives
@@ -376,8 +379,7 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
 - One run is one sample per task from a model. Read a difference between two runs only
   when several tasks move the same way.
 - `tests` is the crate's own suite, which the session wrote, so it checks no fixed
-  behaviour: only `oracle` does, and only for the tasks that have one. The other seven
-  tasks have none yet.
+  behaviour: only `oracle` does.
 - The oracles are files in this checkout, and a session has the user's permissions: one
   that searched the disk could read them. Nothing in the crate or the prompt points at
   them, and the session's transcript would show the search.

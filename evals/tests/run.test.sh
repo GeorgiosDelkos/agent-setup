@@ -54,6 +54,22 @@ mod tests {
 }
 RS
 }
+# A reference solution as the session's work (STUB_SOLUTION=correct), or one with the defect
+# a session is likely to write (broken): an interner that copies the string to look it up,
+# a log that leaves a torn tail in the file.
+solution() {
+  local fixture="${crate//-/_}"
+  cp "$FIXTURES/$fixture.rs" src/lib.rs
+  if [[ "$crate" == actor-counter ]]; then
+    printf '\n[dependencies.tokio]\nversion = "1"\nfeatures = ["rt", "sync"]\n' >>Cargo.toml
+  fi
+  case "$STUB_SOLUTION:$crate" in
+  broken:interner)
+    perl -pi -e 's/symbols\.get\(string\)/symbols.get(&Box::<str>::from(string))/' src/lib.rs
+    ;;
+  broken:wal) perl -ni -e 'print unless /file\.set_len\(/' src/lib.rs ;;
+  esac
+}
 if [[ "$*" == *--version* ]]; then
   echo "stub 0.0.0"
   exit 0
@@ -91,12 +107,16 @@ elif [[ "$role" == followup ]]; then
   cli-wc) cp "$FIXTURES/wcount_flags.rs" src/main.rs ;;
   esac
   echo '{"num_turns": 2, "total_cost_usd": 0.25, "modelUsage": {"stub-model": {}}}'
+elif [[ -n "${STUB_SOLUTION:-}" ]]; then
+  solution
+  echo '{"num_turns": 3, "total_cost_usd": 0.5, "modelUsage": {"stub-model": {}}}'
 else
   case "$crate" in
   rate-limiter) ;;
   lru-cache) touch Cargo.lock ;;
-  # The three tasks with an oracle. In the bare arm the varint session misses the entry
-  # points its prompt names, so the oracle cannot compile.
+  # Three tasks whose session writes a solution. Every other session here writes a crate
+  # without its task's entry points, so its oracle does not compile, as the varint session
+  # does in the bare arm.
   varint)
     if [[ "$*" == *--safe-mode* ]]; then
       good_lib
@@ -169,14 +189,14 @@ check "header names the arm, both commits and the claude version" 1 "$(head -n 1
   grep -c '^# arm setup, deployed .*, checkers .*, model default, effort high, stub 0.0.0$')"
 check "every row has fifteen fields" "" \
   "$(awk -F '\t' 'NR > 1 && NF != 15 { print NR ": " $0 }' "$results")"
-check "scored: tests, no oracle, no diagnostics, one house finding, review, turns, cost" \
-  "ring-buffer pass - 0 1 1 2 0 stub-model 3 0.5 - - - -" "$(row ring-buffer)"
+check "scored: tests, oracle, no diagnostics, one house finding, review, turns, cost" \
+  "ring-buffer pass build 0 1 1 2 0 stub-model 3 0.5 - - - -" "$(row ring-buffer)"
 check "a session that wrote nothing: dashes, not a clean score" \
   "rate-limiter no-change - - - - - - - - - - - - -" "$(row rate-limiter)"
 check "a session that left only Cargo.lock: dashes" \
   "lru-cache no-change - - - - - - - - - - - - -" "$(row lru-cache)"
 check "a session that committed its work is scored, and has no follow-up to run" \
-  "wal pass - 0 1 1 2 0 stub-model 3 0.5 - - - -" "$(row wal)"
+  "wal pass build 0 1 1 2 0 stub-model 3 0.5 - - - -" "$(row wal)"
 # The oracle column, and with it each oracle against a reference solution.
 check "a correct solution without tests of its own: none, and the whole oracle passes" \
   "varint none 7/7" "$(row varint | cut -d ' ' -f 1-3)"
@@ -192,7 +212,7 @@ check "the oracle test that fails against the fixture is the one for its defect"
 check "the oracle adds no diagnostics or house findings to the crate's counts" \
   "0 0" "$(row varint | cut -d ' ' -f 4,5)"
 check "a deny lint and a warn lint: two diagnostics, each counted once, in one cell" \
-  "interner pass - 2" "$(row interner | cut -d ' ' -f 1-4)"
+  "interner pass build 2" "$(row interner | cut -d ' ' -f 1-4)"
 check "a review without the findings line: unknown, not zero" "? ? ?" \
   "$(row array-vec | cut -d ' ' -f 6-8)"
 check "the last findings line wins over an example before it" "2 1 0" \
@@ -269,6 +289,39 @@ bash "$RUN" no-such-task >/dev/null 2>&1 || code=$?
 check "unknown task: exit 2" 2 "$code"
 check "unknown task, arm or binary: no output directory beyond the three runs above" 3 \
   "$(find "$EVALS_OUT" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
+
+# The other seven oracles, each against its reference solution. The actor-counter crate
+# depends on Tokio, so this run needs crates.io or a Cargo cache that has it.
+STUB_SOLUTION=correct bash "$RUN" actor-counter array-vec interner lru-cache rate-limiter \
+  ring-buffer wal >/dev/null 2>"$WORK/run.err"
+solved="$(find "$EVALS_OUT" -name results.tsv -newer "$grok")"
+while read -r task total; do
+  # Zero diagnostics and house findings too: the solutions are committed Rust.
+  check "the $task oracle passes against a correct solution" "$task none $total/$total 0 0" \
+    "$(awk -F '\t' -v task="$task" '$1 == task { print $1, $2, $3, $4, $5 }' "$solved")"
+done <<'EOF'
+actor-counter 5
+array-vec 9
+interner 7
+lru-cache 8
+rate-limiter 7
+ring-buffer 8
+wal 8
+EOF
+
+# The defect a session is most likely to write, in two of them. By name, as for cli-wc.
+STUB_SOLUTION=broken bash "$RUN" interner wal >/dev/null 2>"$WORK/run.err"
+broken="$(find "$EVALS_OUT" -name results.tsv -newer "$solved")"
+check "an interner that allocates to look a string up fails one oracle test" "6/7" \
+  "$(awk -F '\t' '$1 == "interner" { print $3 }' "$broken")"
+check "which is the one that counts allocations" \
+  "test looking_up_an_interned_string_does_not_allocate ... FAILED" \
+  "$(grep -E '^test .* FAILED$' "$(dirname "$broken")/interner.eval_oracle.log")"
+check "a log that keeps its torn tail fails one oracle test" "7/8" \
+  "$(awk -F '\t' '$1 == "wal" { print $3 }' "$broken")"
+check "which is the one that appends after the torn tail" \
+  "test a_record_appended_after_a_torn_tail_is_kept ... FAILED" \
+  "$(grep -E '^test .* FAILED$' "$(dirname "$broken")/wal.eval_oracle.log")"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
