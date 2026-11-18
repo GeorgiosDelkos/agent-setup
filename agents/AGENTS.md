@@ -171,11 +171,10 @@ between the lines* (Rust Munich 2026).
   both in the PR. A unit test that an end-to-end test fully covers is deleted that way.
 - Cover edges and errors.
 - Break the code once to confirm the test fails. Once per PR with logic changes, before
-  `gh pr ready`, run the language's mutation tool over the PR's changed code (the language
-  skill names it, where one exists), kill or explain survivors, and post the result on the
-  PR. Run it locally: CI runners run a suite several times slower, so a CI mutation job
-  costs hours where the local run takes minutes. A repo's CI job runs only on a PR labelled
-  `mutants`, when a second run is wanted. Not per edit: a run takes minutes.
+  `gh pr ready`, run the language's mutation tool over the PR's changed code, kill or
+  explain survivors, and post the result on the PR. Run it locally, and not per edit: the
+  language skill names the tool, where one exists, and says how to run it (Rust:
+  `rust-style` TST-19 and TST-20).
 - Property tests for parsers, serialization, and algorithms.
 - Docs, formatting, and pure renames need no new tests.
 
@@ -268,22 +267,17 @@ that edit until the skill is in context (Claude: the Skill tool; Grok: `read_fil
 
 ## Rust
 
-The bar: code that would pass review in Jon Gjengset's crates, Tokio, or Cranelift. Order of
-authority, all under the design principles above:
-
-1. The house decisions in `rust-style`.
-2. Where those three codebases agree, together with *Rust for Rustaceans*.
-3. Canonical's *Rust best practices*, only where 1 and 2 are silent.
+The bar: code that would pass review in Jon Gjengset's crates, Tokio, or Cranelift.
+`rust-style` holds the rules and their order of authority, all under the design principles
+above.
 
 - Load `rust-style` first, and the topic files it names (unsafe, concurrency, async,
   library API, testing, repo setup, the low-level profile) before editing those areas; the
   edit hook blocks until you do. Load the matching `rfr-*` chapter skill when designing in
   its area or when stuck there, not for every change.
-- Use ownership and the type system as safety rails: make invalid states unrepresentable.
-- Formatting is not optional: default `cargo fmt`, no `rustfmt.toml` style options (a
-  low-level crate may keep the stable-options template, `rust-style` LLV-9). Clean
-  `cargo fmt --check` and `cargo clippy --all-targets -- -D warnings` (with the repo's
-  feature set) before any commit.
+- Clean `cargo fmt --check`, in rustfmt's default style, and
+  `cargo clippy --all-targets -- -D warnings` (with the repo's feature set) before any
+  commit.
 - Before calling Rust work done, review it against the `rust-style` rules: use the
   `rust-style-reviewer` agent where it exists, otherwise self-review. Fix every blocker and
   major finding, and a minor one only when it makes the code smaller or clearer: findings on
