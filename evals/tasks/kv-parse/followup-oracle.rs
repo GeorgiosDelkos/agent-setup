@@ -80,6 +80,14 @@ fn any_other_escape_is_an_error_that_names_its_line() {
 }
 
 #[test]
+fn keys_are_checked_as_before_when_values_are_quoted() {
+    assert_eq!(value("snake_case = \"x\"\n"), "x");
+    assert!(error("ok = \"x\"\nnot-ok = \"y\"\n").contains('2'));
+    assert!(error(" = \"x\"\n").contains('1'));
+    assert!(error("a = \"x\"\nb = \"y\"\na = \"z\"\n").contains('3'));
+}
+
+#[test]
 fn a_value_that_does_not_start_with_a_quote_works_as_before() {
     assert_eq!(value("a = say \"hi\" \\ there\n"), "say \"hi\" \\ there");
 }

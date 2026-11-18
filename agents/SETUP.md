@@ -315,9 +315,11 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
   format), never an error type or anything else about the design. `evals/tests/fixtures/` holds a
   solution for each, and the harness tests fail when an oracle and its solution disagree.
   The `actor-counter` solution depends on Tokio, so those tests need crates.io or a Cargo
-  cache that has it. Two oracles test less than their prompt asks: `rate-limiter` names no
+  cache that has it. Three oracles test less than their prompt asks: `rate-limiter` names no
   way to set the clock, so its refill tests run on real time and assert a refusal only
-  when too little time has passed, and `actor-counter` has no test of the memory bound.
+  when too little time has passed, `actor-counter` has no test of the memory bound, and
+  `lru-cache` has no test that `get` and `insert` are O(1): counting comparisons needs a key
+  type whose bounds the prompt does not fix.
 - A task may also have a follow-up, `followup.md` and `followup-oracle.rs`: a change a user
   would ask for next, and the tests of the crate after it. Once the first session's work is
   scored, the harness removes the first oracle from the crate, commits the crate, gives

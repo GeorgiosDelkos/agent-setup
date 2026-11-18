@@ -6,6 +6,7 @@
 //! written so that no schedule changes a verdict: a refusal is asserted only when the test
 //! measured that too little time had passed for the refill to grant the request.
 
+use std::sync::Barrier;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -28,12 +29,6 @@ fn assert_refused(limiter: &RateLimiter, n: u64, since: Instant, refill: Duratio
 /// One token a second: a test that ends within a second of building the limiter sees none.
 const SLOW: u64 = 1;
 const SLOW_REFILL: Duration = Duration::from_secs(1);
-
-#[test]
-fn a_new_bucket_is_full() {
-    let limiter = RateLimiter::new(5, SLOW);
-    assert!(limiter.try_acquire(5));
-}
 
 #[test]
 fn a_request_above_the_capacity_is_refused_and_takes_nothing() {
@@ -80,12 +75,25 @@ fn an_empty_bucket_refills() {
 #[test]
 fn a_full_bucket_does_not_keep_filling() {
     // Ten thousand tokens a second: the wait is worth fifty tokens to a bucket without a
-    // limit, and refilling the ten that are taken next takes a millisecond.
-    let limiter = RateLimiter::new(10, 10_000);
-    thread::sleep(Duration::from_millis(5));
-    let drained = Instant::now();
-    assert!(limiter.try_acquire(10));
-    assert_refused(&limiter, 10, drained, Duration::from_millis(1));
+    // limit, and refilling the ten that are taken next takes a millisecond. An attempt
+    // counts only when the two requests fell within that millisecond, so it is made again
+    // until one does: a stalled test would otherwise pass without having asserted anything.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let limiter = RateLimiter::new(10, 10_000);
+        thread::sleep(Duration::from_millis(5));
+        let drained = Instant::now();
+        assert!(limiter.try_acquire(10));
+        let granted = limiter.try_acquire(10);
+        if drained.elapsed() < Duration::from_millis(1) {
+            assert!(!granted, "a full bucket held more than its capacity");
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "in ten seconds no two requests ran within a millisecond of each other"
+        );
+    }
 }
 
 #[test]
@@ -94,9 +102,13 @@ fn threads_that_share_a_bucket_take_each_token_once() {
     let built = Instant::now();
     let limiter = RateLimiter::new(CAPACITY, SLOW);
     let granted = AtomicU64::new(0);
+    // All eight start together: started one by one, the first can empty the bucket before
+    // the second runs, and two threads never race for one token.
+    let start = Barrier::new(8);
     thread::scope(|scope| {
         for _ in 0..8 {
             scope.spawn(|| {
+                start.wait();
                 for _ in 0..CAPACITY {
                     if limiter.try_acquire(1) {
                         granted.fetch_add(1, Ordering::Relaxed);

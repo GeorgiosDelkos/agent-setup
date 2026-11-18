@@ -54,9 +54,10 @@ mod tests {
 }
 RS
 }
-# A reference solution as the session's work (STUB_SOLUTION=correct), or one with the defect
-# a session is likely to write (broken): an interner that copies the string to look it up,
-# a log that leaves a torn tail in the file.
+# A reference solution as the session's work (STUB_SOLUTION=correct), one with the defect a
+# session is likely to write (broken): an interner that copies the string to look it up, a
+# log that leaves a torn tail in the file; or the correct one in a crate that forbids
+# unsafe code (strict), as the rules tell a session to in a crate without any.
 solution() {
   local fixture="${crate//-/_}"
   cp "$FIXTURES/$fixture.rs" src/lib.rs
@@ -68,6 +69,7 @@ solution() {
     perl -pi -e 's/symbols\.get\(string\)/symbols.get(&Box::<str>::from(string))/' src/lib.rs
     ;;
   broken:wal) perl -ni -e 'print unless /file\.set_len\(/' src/lib.rs ;;
+  strict:*) perl -pi -e 's/^\[lints\.rust\]$/[lints.rust]\nunsafe_code = "forbid"/' Cargo.toml ;;
   esac
 }
 if [[ "$*" == *--version* ]]; then
@@ -226,7 +228,7 @@ check "the setup arm adds only the effort to the task session" \
 check "follow-up: its oracle, the Rust lines added and removed, the session's turns and cost" \
   "7/7 +26/-2 2 0.25" "$(row varint | cut -d ' ' -f 12-15)"
 check "the kv-parse follow-up oracle passes against a correct solution" \
-  "9/9" "$(row kv-parse | cut -d ' ' -f 12)"
+  "10/10" "$(row kv-parse | cut -d ' ' -f 12)"
 check "the cli-wc follow-up oracle passes against a correct solution" \
   "7/7" "$(row cli-wc | cut -d ' ' -f 12)"
 check "the follow-up leaves the first session's scores as they were" \
@@ -302,13 +304,13 @@ while read -r task total; do
   check "the $task oracle passes against a correct solution" "$task none $total/$total 0 0" \
     "$(awk -F '\t' -v task="$task" '$1 == task { print $1, $2, $3, $4, $5 }' "$solved")"
 done <<'EOF'
-actor-counter 5
+actor-counter 6
 array-vec 9
 interner 7
-lru-cache 8
-rate-limiter 7
+lru-cache 7
+rate-limiter 6
 ring-buffer 8
-wal 8
+wal 10
 EOF
 
 # The defect a session is most likely to write, in two of them. By name, as for cli-wc.
@@ -319,11 +321,22 @@ check "an interner that allocates to look a string up fails one oracle test" "6/
 check "which is the one that counts allocations" \
   "test looking_up_an_interned_string_does_not_allocate ... FAILED" \
   "$(grep -E '^test .* FAILED$' "$(dirname "$broken")/interner.eval_oracle.log")"
-check "a log that keeps its torn tail fails one oracle test" "7/8" \
+check "a log that keeps its torn tail fails two oracle tests" "8/10" \
   "$(awk -F '\t' '$1 == "wal" { print $3 }' "$broken")"
-check "which is the one that appends after the torn tail" \
-  "test a_record_appended_after_a_torn_tail_is_kept ... FAILED" \
-  "$(grep -E '^test .* FAILED$' "$(dirname "$broken")/wal.eval_oracle.log")"
+check "which are the two that append after a tail the open should have removed" \
+  "a_record_appended_after_a_torn_tail_is_kept a_tail_of_zeros_holds_no_records" \
+  "$(grep -E '^test .* FAILED$' "$(dirname "$broken")/wal.eval_oracle.log" |
+    awk '{ print $2 }' | sort | tr '\n' ' ' | sed 's/ $//')"
+
+# The oracle is built under the session's lint table, and the interner oracle's counting
+# allocator is unsafe code. A crate that forbids unsafe code must still get its score, not
+# `build`, which reads as a session that missed the entry points.
+STUB_SOLUTION=strict bash "$RUN" interner >/dev/null 2>"$WORK/run.err"
+strict="$(find "$EVALS_OUT" -name results.tsv -newer "$broken")"
+check "the stub's crate does forbid unsafe code" 1 \
+  "$(grep -c '^unsafe_code = "forbid"$' "$(dirname "$strict")/interner/Cargo.toml")"
+check "a crate that forbids unsafe code still gets its oracle score" "7/7" \
+  "$(awk -F '\t' '$1 == "interner" { print $3 }' "$strict")"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]

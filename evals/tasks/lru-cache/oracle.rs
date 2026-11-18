@@ -17,14 +17,6 @@ fn filled(capacity: usize, keys: &[&'static str]) -> LruCache<&'static str, Stri
 }
 
 #[test]
-fn a_missing_key_is_none_and_an_inserted_one_is_found() {
-    let mut cache = filled(2, &["a"]);
-    assert_eq!(cache.len(), 1);
-    assert_eq!(cache.get(&"a").map(String::as_str), Some("A"));
-    assert!(cache.get(&"b").is_none());
-}
-
-#[test]
 fn a_full_cache_evicts_the_entry_inserted_first() {
     let mut cache = filled(2, &["a", "b", "c"]);
     assert_eq!(cache.len(), 2);

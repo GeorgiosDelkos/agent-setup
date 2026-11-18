@@ -13,11 +13,16 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct Log {
     file: File,
+    /// Set when a write or a sync failed. The tail of the file is then unknown, and a record
+    /// written behind torn bytes would be cut off with them at the next open.
+    failed: bool,
 }
 
 impl Log {
     /// Opens the log at `path`, creating it when missing, and returns it with its intact
     /// records, oldest first. Bytes after the last intact record are removed from the file.
+    /// The directory is not synced: after a crash, a log this call created may be missing,
+    /// with the records appended to it.
     ///
     /// # Errors
     ///
@@ -40,7 +45,11 @@ impl Log {
         // Without this an append would land behind the torn bytes and be read as part of them.
         file.set_len(intact as u64)?;
         file.sync_all()?;
-        Ok((Self { file }, records))
+        let log = Self {
+            file,
+            failed: false,
+        };
+        Ok((log, records))
     }
 
     /// Appends `record` and returns once it is on disk.
@@ -48,9 +57,14 @@ impl Log {
     /// # Errors
     ///
     /// Returns an error when `record` is longer than `u32::MAX` bytes, or the error of the
-    /// write or the sync. After a failed write the tail of the file is unknown: open the log
-    /// again before appending more.
+    /// write or the sync. After such a failure every later append is refused: open the log
+    /// again, which removes what the failed write left.
     pub fn append(&mut self, record: &[u8]) -> io::Result<()> {
+        if self.failed {
+            return Err(io::Error::other(
+                "an earlier append failed: open the log again",
+            ));
+        }
         let len = u32::try_from(record.len())
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "record over 4 GiB"))?
             .to_le_bytes();
@@ -58,8 +72,12 @@ impl Log {
         framed.extend_from_slice(&len);
         framed.extend_from_slice(&checksum(len, record).to_le_bytes());
         framed.extend_from_slice(record);
-        self.file.write_all(&framed)?;
-        self.file.sync_data()
+        let written = self
+            .file
+            .write_all(&framed)
+            .and_then(|()| self.file.sync_data());
+        self.failed = written.is_err();
+        written
     }
 }
 

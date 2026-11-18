@@ -76,11 +76,8 @@ impl<T, const N: usize> Default for ArrayVec<T, N> {
 impl<T, const N: usize> Drop for ArrayVec<T, N> {
     fn drop(&mut self) {
         let live = ptr::slice_from_raw_parts_mut(self.slots.as_mut_ptr().cast::<T>(), self.len);
-        // If an element's `Drop` panics, the rest leak: `len` is zero before any runs, so
-        // none is dropped twice.
-        self.len = 0;
-        // SAFETY: `live` covers the initialised prefix (the invariant, read before `len` was
-        // cleared), exclusively borrowed through `&mut self`, and nothing uses it afterwards.
+        // SAFETY: `live` covers the initialised prefix (the invariant), exclusively borrowed
+        // through `&mut self`. `self` is being dropped, so nothing reads it afterwards.
         unsafe { ptr::drop_in_place(live) }
     }
 }

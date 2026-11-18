@@ -94,25 +94,44 @@ fn a_clone_reaches_the_same_service_and_outlives_the_first_handle() {
 }
 
 #[test]
+fn a_handle_gets_an_error_once_the_service_is_gone() {
+    // The service is a task of the runtime `spawn` was called in, so it ends with that
+    // runtime. The handle outlives both.
+    let counter = run(async {
+        let counter = spawn();
+        increment(&counter, "a", 1).await;
+        counter
+    });
+    run(async {
+        assert!(counter.increment("a").await.is_err());
+        assert!(counter.get("a").await.is_err());
+        assert!(counter.snapshot().await.is_err());
+    });
+}
+
+#[test]
 fn no_increment_is_lost_when_many_tasks_send_at_once() {
-    const TASKS: u64 = 200;
+    // A multiple of the number of keys, so every key gets the same number of tasks.
+    const TASKS: usize = 200;
     const EACH: u64 = 100;
     let keys = ["a", "b", "c", "d"];
     run(async {
         let counter = spawn();
         // Twenty thousand requests from tasks that take turns on one thread: far more than
         // any mailbox holds, so senders that must wait for room do wait, and all must finish.
-        let tasks: Vec<_> = (0..TASKS)
-            .map(|task| {
+        let tasks: Vec<_> = keys
+            .iter()
+            .cycle()
+            .take(TASKS)
+            .map(|&key| {
                 let counter = counter.clone();
-                let key = keys[usize::try_from(task).expect("a small index") % keys.len()];
                 tokio::spawn(async move { increment(&counter, key, EACH).await })
             })
             .collect();
         for task in tasks {
             assert!(task.await.is_ok(), "no sending task panicked");
         }
-        let per_key = TASKS / 4 * EACH;
+        let per_key = (TASKS / keys.len()) as u64 * EACH;
         let expected: HashMap<String, u64> = keys
             .iter()
             .map(|key| ((*key).to_owned(), per_key))

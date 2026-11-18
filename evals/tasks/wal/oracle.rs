@@ -84,10 +84,43 @@ fn records_come_back_in_order_from_one_open_and_from_several() {
 #[test]
 fn a_record_is_any_bytes_of_any_length() {
     let path = fresh_log("bytes");
-    let large: Vec<u8> = (0..100_000_u32).map(|n| n.to_le_bytes()[0]).collect();
+    let large: Vec<u8> = (0..=u8::MAX).cycle().take(100_000).collect();
     let all: [&[u8]; 5] = [b"", &[0, 0, 0, 0], &[0xFF; 9], &large, b""];
     write_log(&path, &all);
     assert_eq!(records(&path), all.map(<[u8]>::to_vec));
+}
+
+#[test]
+fn a_record_is_in_the_file_when_append_returns() {
+    let path = fresh_log("durable");
+    let copy = path.with_extension("copy");
+    let (mut log, _) = open(&path);
+    append(&mut log, b"one");
+    // Copied while the log is still open: a log that keeps the record in memory until it is
+    // closed has nothing in the file yet. A copy, so that no second open touches a file the
+    // log may hold a lock on.
+    fs::copy(&path, &copy).expect("the log file can be copied");
+    assert_eq!(records(&copy), [b"one".to_vec()]);
+    drop(log);
+}
+
+#[test]
+fn a_tail_of_zeros_holds_no_records() {
+    let path = fresh_log("zero-tail");
+    write_log(&path, &[b"first", b"second"]);
+    // A crash can leave the file extended with zeros where the record's bytes never arrived.
+    let mut bytes = fs::read(&path).expect("the log file is readable");
+    bytes.extend_from_slice(&[0; 4096]);
+    fs::write(&path, &bytes).expect("the log file is writable");
+
+    let (mut log, found) = open(&path);
+    assert_eq!(found, [b"first".to_vec(), b"second".to_vec()]);
+    append(&mut log, b"third");
+    drop(log);
+    assert_eq!(
+        records(&path),
+        [b"first".to_vec(), b"second".to_vec(), b"third".to_vec()]
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 /// The name of one interned string, valid for the [`Interner`] that returned it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Symbol(u32);
 
 /// Maps each distinct string to one [`Symbol`].

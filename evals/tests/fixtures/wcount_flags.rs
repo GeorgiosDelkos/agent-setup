@@ -19,7 +19,7 @@ fn count(bytes: &[u8]) -> [usize; 3] {
 }
 
 /// Which of the three counts the flags at the start of `args` select, and how many arguments
-/// those flags take up. All three when there is no flag.
+/// those flags take up. All three when there is no flag. A lone `-` is a file name.
 ///
 /// # Errors
 ///
@@ -27,7 +27,10 @@ fn count(bytes: &[u8]) -> [usize; 3] {
 fn selection(args: &[String]) -> Result<([bool; 3], usize), char> {
     let mut selected = [false; 3];
     let mut flag_args = 0;
-    for flags in args.iter().map_while(|arg| arg.strip_prefix('-')) {
+    let leading_flags = args
+        .iter()
+        .map_while(|arg| arg.strip_prefix('-').filter(|flags| !flags.is_empty()));
+    for flags in leading_flags {
         for flag in flags.chars() {
             let index = match flag {
                 'l' => 0,
@@ -74,7 +77,8 @@ fn main() -> ExitCode {
     let paths = &args[flag_args..];
     if paths.is_empty() {
         let mut input = Vec::new();
-        if std::io::stdin().read_to_end(&mut input).is_err() {
+        if let Err(error) = std::io::stdin().read_to_end(&mut input) {
+            eprintln!("wcount: standard input: {error}");
             return ExitCode::FAILURE;
         }
         println!("{}", line(count(&input), selected, None));

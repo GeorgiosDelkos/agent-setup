@@ -190,7 +190,14 @@ oracle_score() {
   fi
   mkdir -p "$dir/tests"
   cp "$oracle" "$dir/tests/$name.rs"
-  score_cargo "$dir" test --test "$name" >"$log" 2>&1 || true
+  # The oracle is the harness's code, built under the session's lint table: a crate that
+  # forbids `unsafe_code`, as the rules tell a crate without unsafe to, would refuse the
+  # interner oracle's counting allocator and read `build`. Capped, no lint level of the
+  # crate can fail this build. Given as config, which adds to a machine's own
+  # `build.rustflags` (a linker flag); the RUSTFLAGS variable would replace them. Cargo
+  # ignores it where RUSTFLAGS or a `target.*.rustflags` is set.
+  score_cargo "$dir" test --config 'build.rustflags=["--cap-lints=warn"]' --test "$name" \
+    >"$log" 2>&1 || true
   if grep -q '^test result:' "$log"; then
     awk '/^test result:/ { passed += $4; failed += $6 }
       END { print passed "/" passed + failed }' "$log"
