@@ -118,4 +118,11 @@ fn no_flag_prints_all_three_counts_as_before() {
             ["3", "4", "19", "total"],
         ]
     );
+    // Bytes, as the first prompt says: this file has six characters in seven bytes.
+    fs::write(dir.join("utf8.txt"), "h\u{e9}llo\n").expect("the scratch directory is writable");
+    assert_eq!(
+        lines(&wcount(&dir, &["utf8.txt"], "")),
+        [["1", "1", "7", "utf8.txt"]]
+    );
+    assert_eq!(lines(&wcount(&dir, &["-c", "utf8.txt"], "")), [["7", "utf8.txt"]]);
 }

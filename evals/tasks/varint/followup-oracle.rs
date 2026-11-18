@@ -93,4 +93,9 @@ fn the_unsigned_functions_are_unchanged() {
     assert_eq!(buf[..2], [0xAC, 0x02]);
     // The same byte is 1 unsigned and -1 signed.
     assert!(matches!(decode(&[0x01]), Ok((1, 1))));
+    // What the first prompt asks `decode` to reject, it still rejects.
+    assert!(decode(&[0x80]).is_err());
+    let mut overflowing = [0xFF_u8; 10];
+    overflowing[9] = 0x02;
+    assert!(decode(&overflowing).is_err());
 }

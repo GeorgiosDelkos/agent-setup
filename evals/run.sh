@@ -298,8 +298,14 @@ followup_scores() {
     echo 'no-change - - -'
     return
   fi
-  # Intent to add, so that a file the session created counts in the diff.
-  git -C "$dir" add -A -N
+  # Intent to add, so that a file the session created counts in the diff. It fails when the
+  # session destroyed the crate's repository: there is then nothing to compare with, and
+  # that is no result, not a count of zero lines (errexit is off in this substitution on
+  # bash 3.2, so the failure would otherwise pass unseen).
+  if ! git -C "$dir" add -A -N 2>/dev/null; then
+    echo '? ? ? ?'
+    return
+  fi
   lines="$(git -C "$dir" diff --numstat "$base" -- '*.rs' |
     awk '{ added += $1; removed += $2 } END { printf "+%d/-%d", added, removed }')"
   echo "$(oracle_score "$task/followup-oracle.rs" eval_followup "$dir") $lines" \

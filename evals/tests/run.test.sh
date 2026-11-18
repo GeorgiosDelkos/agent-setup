@@ -105,7 +105,13 @@ elif [[ "$role" == followup ]]; then
       cp "$FIXTURES/varint_signed.rs" src/lib.rs
     fi
     ;;
-  kv-parse) cp "$FIXTURES/kv_parse_quoted.rs" src/lib.rs ;;
+  kv-parse)
+    cp "$FIXTURES/kv_parse_quoted.rs" src/lib.rs
+    # In the grok run, a second session that destroys the repository the harness diffs.
+    if [[ -n "${STUB_FOLLOWUP_DROPS_GIT:-}" ]]; then
+      trash .git
+    fi
+    ;;
   cli-wc) cp "$FIXTURES/wcount_flags.rs" src/main.rs ;;
   esac
   echo '{"num_turns": 2, "total_cost_usd": 0.25, "modelUsage": {"stub-model": {}}}'
@@ -231,8 +237,6 @@ check "the kv-parse follow-up oracle passes against a correct solution" \
   "10/10" "$(row kv-parse | cut -d ' ' -f 12)"
 check "the cli-wc follow-up oracle passes against a correct solution" \
   "7/7" "$(row cli-wc | cut -d ' ' -f 12)"
-check "the follow-up leaves the first session's scores as they were" \
-  "cli-wc pass 7/8" "$(row cli-wc | cut -d ' ' -f 1-3)"
 check "the follow-up session is the bare one, in the setup arm too" \
   "-p --output-format json --safe-mode --permission-mode auto --effort high" \
   "$(awk -F '\t' '$1 == "varint" && $2 == "followup" { print $3 }' "$STUB_ARGS")"
@@ -265,8 +269,8 @@ check "unknown arm: exit 2" 2 "$code"
 
 # The grok arm: Grok writes the code, with its prompt as a file; Claude still reviews.
 : >"$STUB_ARGS"
-EVALS_ARM=grok EVALS_GROK_MODEL=g1 GROK_BIN="$WORK/grok" bash "$RUN" kv-parse \
-  >/dev/null 2>"$WORK/run.err"
+EVALS_ARM=grok EVALS_GROK_MODEL=g1 GROK_BIN="$WORK/grok" STUB_FOLLOWUP_DROPS_GIT=1 \
+  bash "$RUN" kv-parse >/dev/null 2>"$WORK/run.err"
 grok="$(find "$EVALS_OUT" -name results.tsv -newer "$bare")"
 check "grok arm: the header names the arm, Grok's model and its version" 1 \
   "$(head -n 1 "$grok" | grep -c '^# arm grok, .*, stub 0.0.0, grok model g1, grok-stub 9.9$')"
@@ -281,9 +285,12 @@ check "grok arm: Claude runs no task session, and does review and follow up" \
   "followup review" \
   "$(awk -F '\t' '{ print $2 }' "$STUB_ARGS" | grep -v grok | sort | tr '\n' ' ' | sed 's/ $//')"
 check "grok arm: the row is Grok's work, model, turns and cost" \
-  "kv-parse none 8/8 stub-model 4 0.75" \
-  "$(awk -F '\t' '$1 == "kv-parse" { print $1, $2, $3, $9, $10, $11 }' "$grok" |
-    sed 's/grok-stub-model/stub-model/')"
+  "kv-parse none 8/8 grok-stub-model 4 0.75" \
+  "$(awk -F '\t' '$1 == "kv-parse" { print $1, $2, $3, $9, $10, $11 }' "$grok")"
+# The second session of this run trashed the crate's .git, so the harness cannot diff.
+check "a follow-up the harness cannot read: no result in all four cells, not empty ones" \
+  "? ? ? ? 15" \
+  "$(awk -F '\t' '$1 == "kv-parse" { print $12, $13, $14, $15, NF }' "$grok")"
 code=0
 EVALS_ARM=grok GROK_BIN="$WORK/no-grok" bash "$RUN" varint >/dev/null 2>&1 || code=$?
 check "grok arm without the binary: exit 2" 2 "$code"

@@ -4,8 +4,11 @@
 //!
 //! The prompt fixes no file format, so the crash cases are made from the outside: the tests
 //! note the file's length after each record and cut or change the file at those offsets.
+//! The bytes one append adds may hold more than the prompt asks to protect (padding, say),
+//! so a test that needs the record itself damaged looks for the payload's bytes in the file.
 
 use std::fs;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 
 use wal::Log;
@@ -52,6 +55,48 @@ fn write_log(path: &Path, records: &[&[u8]]) -> Vec<usize> {
         ends.push(fs::read(path).expect("the log file is readable").len());
     }
     ends
+}
+
+/// A payload whose bytes occur nowhere else in a small log: no length, checksum or padding
+/// a format puts around it is likely to hold the same 23 bytes. An odd length, so that a
+/// format that pads its records has padding to write after it.
+const MARKED: &[u8; 23] = b"\xA5payload-of-the-oracle\xC3";
+
+/// Where `payload` lies in the bytes `added` of `file`, when the format stores it as it is.
+/// `None` for a format that encodes its payloads: such a log is held only to what can be
+/// asked without knowing where the record's bytes are.
+fn payload_in(file: &[u8], added: Range<usize>, payload: &[u8]) -> Option<Range<usize>> {
+    let start = added.start
+        + file[added]
+            .windows(payload.len())
+            .position(|window| window == payload)?;
+    Some(start..start + payload.len())
+}
+
+/// Asserts what a log holding `earlier` and then one more append of `MARKED` returns when
+/// that append is cut short at every byte: `added` is the range of the file the append
+/// wrote. A cut that leaves part of the payload out loses the record. A cut after the
+/// payload may keep it, when what follows is not needed to trust it, or lose it.
+fn assert_cuts_lose_at_most_the_last_record(path: &Path, added: Range<usize>, earlier: &[&[u8]]) {
+    let whole = fs::read(path).expect("the log file is readable");
+    let payload_end = payload_in(&whole, added.clone(), MARKED).map(|payload| payload.end);
+    let earlier: Vec<Vec<u8>> = earlier.iter().map(|record| record.to_vec()).collect();
+    let mut complete = earlier.clone();
+    complete.push(MARKED.to_vec());
+    for cut in added {
+        fs::write(path, &whole[..cut]).expect("the log file is writable");
+        let found = records(path);
+        if payload_end.is_some_and(|end| cut < end) {
+            assert_eq!(found, earlier, "file cut at byte {cut}, inside the record");
+        } else {
+            assert!(
+                found == earlier || found == complete,
+                "file cut at byte {cut} of {}: {} records",
+                whole.len(),
+                found.len()
+            );
+        }
+    }
 }
 
 #[test]
@@ -126,32 +171,16 @@ fn a_tail_of_zeros_holds_no_records() {
 #[test]
 fn an_append_cut_short_at_any_byte_loses_only_that_record() {
     let path = fresh_log("torn-last");
-    let ends = write_log(&path, &[b"first", b"second", b"the third record"]);
-    let whole = fs::read(&path).expect("the log file is readable");
-    for cut in ends[1] + 1..ends[2] {
-        fs::write(&path, &whole[..cut]).expect("the log file is writable");
-        assert_eq!(
-            records(&path),
-            [b"first".to_vec(), b"second".to_vec()],
-            "file cut at byte {cut} of {}",
-            whole.len()
-        );
-    }
+    let ends = write_log(&path, &[b"first", b"second", MARKED]);
+    assert_cuts_lose_at_most_the_last_record(&path, ends[1]..ends[2], &[b"first", b"second"]);
 }
 
 #[test]
 fn a_first_append_cut_short_leaves_an_empty_log() {
     let path = fresh_log("torn-first");
-    let ends = write_log(&path, &[b"the only record"]);
-    let whole = fs::read(&path).expect("the log file is readable");
-    for cut in 0..ends[0] {
-        fs::write(&path, &whole[..cut]).expect("the log file is writable");
-        assert!(
-            records(&path).is_empty(),
-            "file cut at byte {cut} of {}",
-            whole.len()
-        );
-    }
+    // From byte 0: a log that writes a header before its first record is cut inside it too.
+    let ends = write_log(&path, &[MARKED]);
+    assert_cuts_lose_at_most_the_last_record(&path, 0..ends[0], &[]);
 }
 
 #[test]
@@ -172,11 +201,16 @@ fn a_record_appended_after_a_torn_tail_is_kept() {
 }
 
 #[test]
-fn a_changed_bit_anywhere_in_the_last_record_drops_it() {
+fn a_changed_bit_anywhere_in_the_last_payload_drops_the_record() {
     let path = fresh_log("flipped-last");
-    let ends = write_log(&path, &[b"first", b"the second record"]);
+    let ends = write_log(&path, &[b"first", MARKED]);
     let whole = fs::read(&path).expect("the log file is readable");
-    for at in ends[0]..ends[1] {
+    // Only the payload's own bytes: the prompt asks for a checksum of the record, not of
+    // every byte a format writes with it.
+    let Some(payload) = payload_in(&whole, ends[0]..ends[1], MARKED) else {
+        return;
+    };
+    for at in payload {
         let mut changed = whole.clone();
         changed[at] ^= 0x01;
         fs::write(&path, &changed).expect("the log file is writable");

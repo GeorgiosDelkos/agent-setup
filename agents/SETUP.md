@@ -323,17 +323,20 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
 - A task may also have a follow-up, `followup.md` and `followup-oracle.rs`: a change a user
   would ask for next, and the tests of the crate after it. Once the first session's work is
   scored, the harness removes the first oracle from the crate, commits the crate, gives
-  `followup.md` to a second session, and scores the result with the follow-up oracle. The
-  follow-up columns score the first session's code by what a later change to it takes, so
-  the second session is the same in every arm: `claude --safe-mode`, which has no hooks,
-  rules or reviewer of its own to add turns and cost. `varint`, `kv-parse` and `cli-wc`
-  have one, each with a solution in `evals/tests/fixtures/` that pins its oracle.
+  `followup.md` to a second session, and scores the result with the follow-up oracle,
+  copied in as `tests/eval_followup.rs`. The follow-up columns score the first session's
+  code by what a later change to it takes, so the second session is the same in every arm:
+  `claude --safe-mode --permission-mode auto`, which has no hooks, rules or reviewer of its
+  own to add turns and cost. `varint`, `kv-parse` and `cli-wc` have one, each with a
+  solution in `evals/tests/fixtures/` that pins its oracle.
 - `EVALS_ARM` picks what the task session runs with: `setup` (the default) is the deployed
-  rules, skills, hooks and plugins; `bare` is `claude --safe-mode`, none of them, with the
-  same login; `grok` is Grok Build (`grok --prompt-file`, in `auto` mode) with the same
-  deployed rules, skills and hooks, which Grok reads from the same files. The reviewer, the
-  follow-up and every other score are the same in every arm, so two runs that differ only
-  in the arm show what the arm changes in the code. The header line names the arm, and for
+  rules, skills, hooks and plugins; `bare` is `claude --safe-mode --permission-mode auto`,
+  none of them, with the same login (safe mode reads no settings file, and a headless
+  session in the default mode can approve nothing); `grok` is Grok Build
+  (`grok --prompt-file`, in `auto` mode) with the same deployed rules, skills and hooks,
+  which Grok reads from the same files. The reviewer, the follow-up and every other score
+  are the same in every arm, so two runs that differ only in the arm show what the arm
+  changes in the code. The header line names the arm, and for
   `grok` Grok's version and the model `EVALS_GROK_MODEL` asked for. `EVALS_MODEL` and the
   Claude Code version in the header then describe the reviewer and the follow-up only.
 - Every session is given its effort by flag, `EVALS_EFFORT` (default `high`), and the
@@ -346,7 +349,8 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
   - `tests`: `pass`, `fail`, or `none` when the crate has no test;
   - `oracle`: `passed/total` of the oracle's tests, `build` when the crate does not compile
     with the oracle in it (usually the session missed an entry point or a type the prompt
-    names), or `-` for a task without one;
+    names), `?` when the oracle's run gave no result (a test that hung until the time
+    limit), or `-` for a task without one;
   - `diagnostics`: the distinct rustc and clippy diagnostics with the house lint table on,
     errors included, each counted once though clippy reports it per build target;
   - `house`: the number of `house-check.pl` findings;
@@ -360,7 +364,8 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
     included. A removed line is first-session code that did not survive the change;
   - `followup_turns`, `followup_cost_usd`: the second session's.
 
-  The four follow-up cells are `-` for a task without one.
+  The four follow-up cells are `-` for a task without one, and `?` when the second session
+  left the crate without the git repository the harness compares with.
 
   `no-change` means the session wrote no Rust, committed or not; `?` means a score could
   not be read. Neither is a zero.

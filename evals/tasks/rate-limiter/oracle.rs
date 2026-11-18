@@ -48,11 +48,27 @@ fn tokens_are_counted_across_requests() {
 
 #[test]
 fn a_refused_request_takes_no_tokens() {
-    let built = Instant::now();
-    let limiter = RateLimiter::new(5, SLOW);
-    assert!(limiter.try_acquire(3));
-    assert_refused(&limiter, 3, built, SLOW_REFILL);
-    assert!(limiter.try_acquire(2));
+    // Three of five taken, three more asked for, then the two that are left. An attempt
+    // counts only when all of it ran within the limiter's first second, in which no token
+    // arrives: a stalled test would see a correct limiter grant the second request and take
+    // the tokens the third one asks for. So it is made again until one attempt is that fast.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let built = Instant::now();
+        let limiter = RateLimiter::new(5, SLOW);
+        assert!(limiter.try_acquire(3));
+        let refused = !limiter.try_acquire(3);
+        let rest = limiter.try_acquire(2);
+        if built.elapsed() < SLOW_REFILL {
+            assert!(refused, "3 tokens granted by a bucket that held 2");
+            assert!(rest, "the refused request took tokens");
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "in ten seconds no three requests ran within a second of each other"
+        );
+    }
 }
 
 #[test]
