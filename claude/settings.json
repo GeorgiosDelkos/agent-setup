@@ -61,6 +61,14 @@
         "/tmp",
         "/private/tmp"
       ],
+      "denyWrite": [
+        "~/.cargo/bin",
+        "~/.cargo/env",
+        "~/.cargo/config.toml",
+        "~/.cargo/config",
+        "~/.cargo/credentials.toml",
+        "~/Documents/Github/**/.git/hooks"
+      ],
       "allowRead": [
         "~/.ssh",
         "~/.config/gh",

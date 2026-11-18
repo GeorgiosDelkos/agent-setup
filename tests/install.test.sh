@@ -234,15 +234,35 @@ check "review profile: second run is current" "ok      $profile" \
 check "review profile: no scratch copy left" no "$([[ -e "$profile.new" ]] && echo yes || echo no)"
 
 # Grok's own config can keep Grok on always-approve; install.sh says so and writes nothing.
+# $1 is the config file's text; prints what check_grok_mode says about it.
+grok_mode() {
+  printf '%s\n' "$1" >"$HOME/.grok/config.toml"
+  check_grok_mode
+}
 mkdir -p "$HOME/.grok"
-check "grok mode: no config file, no warning" "" "$(check_grok_mode)"
-printf '[ui]\npermission_mode = "auto"\n# permission_mode = "always-approve"\n' \
-  >"$HOME/.grok/config.toml"
-check "grok mode: auto, with the old line commented out: no warning" "" "$(check_grok_mode)"
-printf '[ui]\n  permission_mode="always-approve"\n' >"$HOME/.grok/config.toml"
-before="$(cat "$HOME/.grok/config.toml")"
+code=0
+said="$(check_grok_mode)" || code=$?
+check "grok mode: no config file: no warning, and install.sh goes on" "0:" "$code:$said"
+check "grok mode: auto, with the old line commented out: no warning" "" \
+  "$(grok_mode $'[ui]\npermission_mode = "auto"\n# permission_mode = "always-approve"')"
+check "grok mode: the same key under another table is not Grok's mode" "" \
+  "$(grok_mode $'[ui]\ncompact_mode = false\n[profiles.ci]\npermission_mode = "always-approve"')"
 check "grok mode: always-approve is reported" 1 \
-  "$(check_grok_mode | grep -c "^warning: $HOME/.grok/config.toml sets permission_mode")"
+  "$(grok_mode $'[ui]\n  permission_mode="always-approve"  # for now' |
+    grep -c "^warning: $HOME/.grok/config.toml sets permission_mode")"
+check "grok mode: single quotes are the same setting" 1 \
+  "$(grok_mode $'[ui]\npermission_mode = \'always-approve\'' | grep -c '^warning: ')"
+check "grok mode: a dotted key before any table is the same setting" 1 \
+  "$(grok_mode $'ui.permission_mode = "always-approve"\n[plugins]' | grep -c '^warning: ')"
+check "grok mode: so is an inline table" 1 \
+  "$(grok_mode $'ui = { compact_mode = false, permission_mode = "always-approve" }' |
+    grep -c '^warning: ')"
+check "grok mode: a longer value that starts the same way is not the mode" "" \
+  "$(grok_mode $'[ui]\npermission_mode = "always-approve-not"')"
+check "grok mode: the older yolo switch is reported too" 1 \
+  "$(grok_mode $'[plugins]\nenabled = []\n\n[ui]\nyolo = true' | grep -c 'sets yolo = true')"
+before="$(cat "$HOME/.grok/config.toml")"
+check_grok_mode >/dev/null
 check "grok mode: the config file is left as it was" "$before" \
   "$(cat "$HOME/.grok/config.toml")"
 
@@ -251,16 +271,27 @@ check "grok mode: the config file is left as it was" "$before" \
 shared="$(dirname "$INSTALL")/claude/settings.json"
 check "sandbox: on, and a blocked command may still be retried outside it" "true true" \
   "$(jq -r '.sandbox | "\(.enabled) \(.allowUnsandboxedCommands != false)"' "$shared")"
-# A machine's own folders and sockets are local entries, which the merge must keep.
+
+# A machine that had sandbox entries of its own before the shared copy had the block: the
+# record knows no such array, so the shared one replaces the machine's, as SETUP.md says.
+# From the next install on, the machine's entries are kept.
+printf '{"sandbox":{"filesystem":{"allowWrite":["~/work"]}}}\n' >"$file"
+merge_json '{"other":1}' "$file" >/dev/null
 merge_json "$(cat "$shared")" "$file" >/dev/null
-jq '.sandbox.filesystem.allowWrite += ["~/work"]
-  | .sandbox.network.allowUnixSockets = ["~/run/tool.sock"]' "$file" >"$file.new"
-mv "$file.new" "$file"
+check "sandbox: entries a machine had before the shared block are replaced by it" 0 \
+  "$(jq '[.sandbox.filesystem.allowWrite[] | select(. == "~/work")] | length' "$file")"
+
+# The deployed copy is denied to sandboxed writes, by its real path, once.
+dir="$(cd "$SETUP_DIR" && pwd -P)"
+check "protect: the deployed copy is added to the denied writes" "wrote   $file" \
+  "$(protect_setup_dir | cut -d ' ' -f 1-4)"
+check "protect: a second run adds nothing" "ok      sandbox: no writes to $dir" \
+  "$(protect_setup_dir)"
 merge_json "$(cat "$shared")" "$file" >/dev/null
-check "sandbox: a machine's own folder and socket survive the next install" \
-  '["~/work",["~/run/tool.sock"]]' \
-  "$(jq -c '[(.sandbox.filesystem.allowWrite[] | select(. == "~/work")),
-    .sandbox.network.allowUnixSockets]' "$file")"
+check "protect: the entry survives the next install, beside the shared ones" \
+  "1 $(jq '.sandbox.filesystem.denyWrite | length + 1' "$shared")" \
+  "$(jq -r --arg dir "$dir" '.sandbox.filesystem.denyWrite
+    | "\(map(select(. == $dir)) | length) \(length)"' "$file")"
 
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [[ "$fail" -eq 0 ]]
