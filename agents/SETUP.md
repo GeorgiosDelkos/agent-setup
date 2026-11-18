@@ -94,19 +94,84 @@ Claude Code runs in `auto` permission mode on every machine (changed from
   Claude-compatible `defaultMode`, `auto` included, and that `[ui] permission_mode` in
   `~/.grok/config.toml` sets it too, with always-approve winning when both it and auto are
   requested. So a machine whose `~/.grok/config.toml` says `permission_mode =
-  "always-approve"` keeps Grok on always-approve; `install.sh` does not manage that file.
-  Remove that line for Grok to follow `auto`. This is from Grok's docs (grok 1.0.70), not
-  from a live session: check the mode Grok shows at startup.
-- `$SETUP/air/acp.json` still starts Grok with `--always-approve`, so Grok in Air approves
-  every call and does not match the mode above.
+  "always-approve"` keeps Grok on always-approve. `install.sh` does not write that file: it
+  warns when the line is there. Remove the line for Grok to follow `auto`. This is from
+  Grok's docs (grok 1.0.77), not from a live session: check the mode Grok shows at startup.
+- `$SETUP/air/acp.json` starts Grok without `--always-approve` (dropped 2026-11-18), so
+  Grok in Air takes its mode from the same two sources. Not checked in a live Air session.
 
 Hooks run in every mode: `bash-guard.sh` keeps blocking recursive `rm`, `find -delete`,
 git commands that discard uncommitted work, pushes that update `main`/`master`,
 `gh pr merge --admin`, `cargo mutants` runs that can exhaust memory, force pushes, and
-`git stash drop` and `clear` (the Hooks table has each rule). These are guardrails, not a
-sandbox: the deny rules for `Read(~/.ssh/**)` and the like cover the Read tool only, and any
-Bash command can still read those files. Only Claude Code's sandbox settings would close
-that.
+`git stash drop` and `clear` (the Hooks table has each rule). These are guardrails that read
+the command's text, not containment: that is the sandbox.
+
+### Sandbox
+
+Claude Code runs Bash commands in its sandbox (`sandbox.enabled` in the shared settings,
+since 2026-11-18; Seatbelt on macOS), except a command it retries outside (below). What it
+buys: code that a build or a test runs (a dependency's `build.rs`, a proc macro, a test
+binary, an install script) cannot write outside the folders below, read the denied paths,
+or reach another host. The hooks, the MCP servers and the Read, Edit and Write tools run
+outside it, under the permission rules.
+
+- **Writes** reach the session's working directory, `~/Documents/Github` (the clones and
+  worktrees beside it), `~/.cargo`, `~/.cache` (where prek and uv keep theirs, and
+  `evals/run.sh` its output), `~/.Trash`, `/tmp` and the per-user temporary directory. A
+  session started in the home folder makes all of it the working directory: start
+  sessions in a repo.
+  Inside those, what runs outside the sandbox later is denied again:
+  - `~/.cargo/bin`, `~/.cargo/env`, and Cargo's config and credentials files: a shell
+    sources the first two and the stop hook runs `cargo`. So `cargo install` and `rustup`
+    need the retry;
+  - every `.git/hooks` under `~/Documents/Github`;
+  - the deployed copy of this setup, whose hooks and rules every session runs. Its path is
+    the machine's, so `install.sh` adds it to that machine's `denyWrite`. The update steps
+    of Version control (`git pull` there, then `install.sh`) need the retry.
+
+  Still writable: the files and the `.git/config` of every repo under `~/Documents/Github`,
+  the one a session is not working in included.
+- **A machine's own entries.** A machine that keeps its repos elsewhere adds that folder to
+  `sandbox.filesystem.allowWrite` in its own `~/.claude/settings.json`, and a tool that
+  talks over a Unix socket adds the socket to `sandbox.network.allowUnixSockets`. The merge
+  keeps both. One exception, on the install that first brings this block to a machine:
+  sandbox arrays the machine already had are replaced by the shared ones (the record has no
+  earlier copy to tell its entries from; the backup has them).
+- **Reads** reach everything except the `Read(...)` deny rules of the shared settings,
+  which the sandbox enforces for Bash too. Three of them are opened again, `~/.ssh`,
+  `~/.config/gh` and `~/Library/Keychains`: git over SSH and `gh` cannot run without them.
+  So the sandbox does not protect the credentials the agent itself works with. A command
+  inside it can read the SSH keys and the GitHub token, and GitHub is a host it can reach.
+- **Network** reaches GitHub, crates.io and the loopback on every port: a test that starts
+  a server needs that, and it also reaches every other local service, the memory daemon
+  included. A command may listen on a port (`allowLocalBinding`). In `auto` mode any other
+  host is refused unless the command names it and the classifier approves.
+  `enableWeakerNetworkIsolation` is on because `gh` cannot verify a TLS certificate without
+  it (measured: `x509: OSStatus -26276`). It lets sandboxed commands reach the system's
+  trust service, which Claude Code's documentation calls a possible path for data to leave.
+- **Leaving the sandbox.** A command the sandbox blocks can be retried outside it, and the
+  `auto` classifier approves or refuses that retry per command. These need it:
+  `git worktree add` and `remove` (the sandbox protects `.git/worktrees`), a sandbox inside
+  the sandbox (`grok-review.sh`, a headless `claude`, so `evals/run.sh` too), Docker, and
+  `install.sh`. Never set `allowUnsandboxedCommands` to `false`: those stop working.
+  `excludedCommands` is not used: it takes a call out of the sandbox only when every
+  command in the call matches, and agents here start most calls with `cd`. Measured on one
+  long session (2026-11-18), 88 of 259 calls needed something the default sandbox denies,
+  and none of them began with the tool's name (190 began with `cd`).
+
+Measured on 2026-11-18 (Claude Code 2.1.327, macOS 27) with headless sessions running the
+commands agents run here. With the sandbox at its defaults, `gh`, git over SSH, a worktree
+beside the repo, `trash`, `/tmp`, crates.io and a loopback server all failed. With this
+block they pass, except the ones under Leaving the sandbox, whose retry was approved. Git
+over SSH passes inside the sandbox with `~/.ssh` readable, though Claude Code's
+documentation says it fails on macOS: check it again after an upgrade.
+On Linux the sandbox needs `bubblewrap` and `socat`; without them Claude Code says so at
+startup and runs commands unsandboxed.
+
+Grok runs without a sandbox. Its own (`--sandbox`, which the Grok review uses) wraps the
+whole process, with no way out for one command, and under a profile extending `workspace`
+`gh` could not read its token from the keychain (grok 1.0.77, 2026-11-18), so `review-pr`
+and `fix-issue` could not run under it.
 
 ## Hooks
 
@@ -217,7 +282,7 @@ copy it to each machine over a secure channel.
 
 ## JetBrains Air (ACP agents)
 
-Air runs Grok (`grok agent --always-approve stdio`) and Claude Code as ACP agents.
+Air runs Grok (`grok agent stdio`) and Claude Code as ACP agents.
 
 - Claude Code runs through `@agentclientprotocol/claude-agent-acp`.
 - `install.sh` installs that adapter globally at the version pinned in `setup_air`.
@@ -296,26 +361,46 @@ runs fixed Rust tasks through headless Claude sessions on this machine and score
 result, so a rules change or a new model can be compared with the run before it.
 
 ```sh
-bash evals/run.sh            # all ten tasks; about 20 sessions of usage
+bash evals/run.sh            # all ten tasks; about 23 sessions of usage
 bash evals/run.sh varint     # one task
 EVALS_MODEL=opus bash evals/run.sh
 EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
+EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with the setup
 ```
 
 - A task is `evals/tasks/<name>/prompt.md`, written as a user would ask, with no hint at
   the rules. Each runs in a fresh crate that has opted in to the house rules (REPO-1).
-- A task may have an oracle beside its prompt, `oracle.rs`: tests of the behaviour the
+- Every task has an oracle beside its prompt, `oracle.rs`: tests of the behaviour the
   prompt states, which the session never sees. The harness copies it into the crate as
   `tests/eval_oracle.rs` after the reviewer and every other score. Such a prompt names the entry
   points the oracle calls (a function and its success type, a binary and its output
-  format), never an error type or anything else about the design. `varint`, `kv-parse` and
-  `cli-wc` have one. `evals/tests/fixtures/` holds a solution for each, and the harness
-  tests fail when an oracle and its solution disagree.
+  format), never an error type or anything else about the design. `evals/tests/fixtures/` holds a
+  solution for each, and the harness tests fail when an oracle and its solution disagree.
+  The `actor-counter` solution depends on Tokio, so those tests need crates.io or a Cargo
+  cache that has it. Three oracles test less than their prompt asks: `rate-limiter` names no
+  way to set the clock, so its refill tests run on real time and assert a refusal only
+  when too little time has passed, `actor-counter` has no test of the memory bound, and
+  `lru-cache` has no test that `get` and `insert` are O(1): counting comparisons needs a key
+  type whose bounds the prompt does not fix.
+- A task may also have a follow-up, `followup.md` and `followup-oracle.rs`: a change a user
+  would ask for next, and the tests of the crate after it. Once the first session's work is
+  scored, the harness removes the first oracle from the crate, commits the crate, gives
+  `followup.md` to a second session, and scores the result with the follow-up oracle,
+  copied in as `tests/eval_followup.rs`. The follow-up columns score the first session's
+  code by what a later change to it takes, so the second session is the same in every arm:
+  `claude --safe-mode --permission-mode auto`, which has no hooks, rules or reviewer of its
+  own to add turns and cost. `varint`, `kv-parse` and `cli-wc` have one, each with a
+  solution in `evals/tests/fixtures/` that pins its oracle.
 - `EVALS_ARM` picks what the task session runs with: `setup` (the default) is the deployed
-  rules, skills, hooks and plugins; `bare` is `claude --safe-mode`, none of them, with the
-  same login. The reviewer and every other score run with the setup in both, so two runs
-  that differ only in the arm show what the setup changes in the code. The header line
-  names the arm.
+  rules, skills, hooks and plugins; `bare` is `claude --safe-mode --permission-mode auto`,
+  none of them, with the same login (safe mode reads no settings file, and a headless
+  session in the default mode can approve nothing); `grok` is Grok Build
+  (`grok --prompt-file`, in `auto` mode) with the same deployed rules, skills and hooks,
+  which Grok reads from the same files. The reviewer, the follow-up and every other score
+  are the same in every arm, so two runs that differ only in the arm show what the arm
+  changes in the code. The header line names the arm, and for
+  `grok` Grok's version and the model `EVALS_GROK_MODEL` asked for. `EVALS_MODEL` and the
+  Claude Code version in the header then describe the reviewer and the follow-up only.
 - Every session is given its effort by flag, `EVALS_EFFORT` (default `high`), and the
   header names it. The bare arm reads no settings file, so an `effortLevel` set there
   would apply to the setup arm only. Compare two runs only when, arm aside, their headers
@@ -326,14 +411,23 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
   - `tests`: `pass`, `fail`, or `none` when the crate has no test;
   - `oracle`: `passed/total` of the oracle's tests, `build` when the crate does not compile
     with the oracle in it (usually the session missed an entry point or a type the prompt
-    names), or `-` for a task without one;
+    names), `?` when the oracle's run gave no result (a test that hung until the time
+    limit), or `-` for a task without one;
   - `diagnostics`: the distinct rustc and clippy diagnostics with the house lint table on,
     errors included, each counted once though clippy reports it per build target;
   - `house`: the number of `house-check.pl` findings;
   - `blocker`, `major`, `minor`: the `rust-style-reviewer` counts;
   - `model`: the model the task session reported using. The header names only the model
     that was asked for, and with none asked for each arm takes its own default;
-  - `turns`, `cost_usd`: the task session's.
+  - `turns`, `cost_usd`: the task session's;
+  - `followup`: the follow-up oracle, read as `oracle` is, or `no-change` when the second
+    session changed no Rust;
+  - `followup_lines`: the Rust lines the second session added and removed, `+a/-r`, tests
+    included. A removed line is first-session code that did not survive the change;
+  - `followup_turns`, `followup_cost_usd`: the second session's.
+
+  The four follow-up cells are `-` for a task without one, and `?` when the second session
+  left the crate without the git repository the harness compares with.
 
   `no-change` means the session wrote no Rust, committed or not; `?` means a score could
   not be read. Neither is a zero.
@@ -354,8 +448,7 @@ EVALS_ARM=bare bash evals/run.sh varint   # the same task without the setup
 - One run is one sample per task from a model. Read a difference between two runs only
   when several tasks move the same way.
 - `tests` is the crate's own suite, which the session wrote, so it checks no fixed
-  behaviour: only `oracle` does, and only for the tasks that have one. The other seven
-  tasks have none yet.
+  behaviour: only `oracle` does.
 - The oracles are files in this checkout, and a session has the user's permissions: one
   that searched the disk could read them. Nothing in the crate or the prompt points at
   them, and the session's transcript would show the search.
