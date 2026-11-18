@@ -254,6 +254,8 @@ check "grok mode: single quotes are the same setting" 1 \
   "$(grok_mode $'[ui]\npermission_mode = \'always-approve\'' | grep -c '^warning: ')"
 check "grok mode: a dotted key before any table is the same setting" 1 \
   "$(grok_mode $'ui.permission_mode = "always-approve"\n[plugins]' | grep -c '^warning: ')"
+check "grok mode: a dotted key under a table belongs to that table" "" \
+  "$(grok_mode $'[plugins]\nui.permission_mode = "always-approve"')"
 check "grok mode: so is an inline table" 1 \
   "$(grok_mode $'ui = { compact_mode = false, permission_mode = "always-approve" }' |
     grep -c '^warning: ')"
@@ -285,6 +287,9 @@ check "sandbox: entries a machine had before the shared block are replaced by it
 dir="$(cd "$SETUP_DIR" && pwd -P)"
 check "protect: the deployed copy is added to the denied writes" "wrote   $file" \
   "$(protect_setup_dir | cut -d ' ' -f 1-4)"
+check "protect: the shared denied writes stay beside it" \
+  "$(jq '.sandbox.filesystem.denyWrite | length + 1' "$shared")" \
+  "$(jq '.sandbox.filesystem.denyWrite | length' "$file")"
 check "protect: a second run adds nothing" "ok      sandbox: no writes to $dir" \
   "$(protect_setup_dir)"
 merge_json "$(cat "$shared")" "$file" >/dev/null
