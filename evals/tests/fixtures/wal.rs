@@ -58,7 +58,8 @@ impl Log {
     ///
     /// Returns an error when `record` is longer than `u32::MAX` bytes, or the error of the
     /// write or the sync. After such a failure every later append is refused: open the log
-    /// again, which removes what the failed write left.
+    /// again, which removes a partly written record. After a failed sync the record may
+    /// still be returned, though it may not be on disk.
     pub fn append(&mut self, record: &[u8]) -> io::Result<()> {
         if self.failed {
             return Err(io::Error::other(

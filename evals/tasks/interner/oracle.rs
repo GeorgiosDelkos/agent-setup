@@ -120,6 +120,6 @@ fn looking_up_an_interned_string_does_not_allocate() {
 fn a_symbol_is_small_copyable_and_comparable() {
     fn assert_copy_and_eq<T: Copy + Eq>() {}
     assert_copy_and_eq::<Symbol>();
-    // An index or a span of two words; not an owned or shared string.
+    // Two words hold an index or a span; a `String` is three.
     assert!(size_of::<Symbol>() <= 2 * size_of::<usize>());
 }

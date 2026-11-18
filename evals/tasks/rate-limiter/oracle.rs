@@ -3,8 +3,9 @@
 //! it. It asserts only what the task prompt states.
 //!
 //! The prompt names no way to set the limiter's clock, so these tests run on real time and are
-//! written so that no schedule changes a verdict: a refusal is asserted only when the test
-//! measured that too little time had passed for the refill to grant the request.
+//! written so that a stalled test never blames the limiter for a grant: a refusal is asserted
+//! only when the test measured that too little time had passed, and the two tests that need
+//! a fast attempt retry for ten seconds and then fail as stalled.
 
 use std::sync::Barrier;
 use std::sync::atomic::{AtomicU64, Ordering};
