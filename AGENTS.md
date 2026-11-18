@@ -10,8 +10,8 @@ and install: `agents/SETUP.md`.
   on the machine runs its hooks and reads its rules from that checkout's working files.
   Never edit a file, switch a branch, or check out a commit there: a branch switch swaps
   the hooks under running sessions. The only writes there are the update steps of
-  `agents/SETUP.md`, Version control, after a merge: the pull or the fetch and mixed reset
-  it names for that machine, then `install.sh` when it says to.
+  `agents/SETUP.md`, Version control, after a merge:
+  `git pull --ff-only`, then `install.sh`.
 - **Work in a separate clone**, on a branch. When the current directory is the deployed
   copy, clone the repo beside it first. The global rule on commits still decides when:
   asked only to change something here, make the change in the clone and say where it is.

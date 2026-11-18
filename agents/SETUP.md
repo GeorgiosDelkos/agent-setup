@@ -28,10 +28,10 @@ goes in a template or a hook.
 
 ## Inventory
 
-Everything lives in one folder kept in step across machines by a file-sync service (`$SETUP`
-below; any location works).
-The usual locations are symlinks into it, created by `$SETUP/install.sh`, so an edit on one
-machine reaches every machine.
+Everything lives in one folder, a clone of https://github.com/GeorgiosDelkos/agent-setup on
+its `main` branch (`$SETUP` below; any location works). The usual locations are symlinks into
+it, created by `$SETUP/install.sh`, so a `git pull` there updates the machine (Version
+control).
 
 | Path on the machine | Links to | Purpose |
 |---|---|---|
@@ -51,7 +51,7 @@ machine reaches every machine.
 | `~/.cargo/config.toml` | (file, holds a marked copy of `$SETUP/cargo/config.toml`) | Shared Cargo settings: no dependency debug info in dev builds, which keeps each worktree's `target/` small. Local linkers and rustflags stay outside the markers. Re-run `install.sh` after editing the shared file. |
 | `~/Library/Application Support/JetBrains/Air/acp.json` | (file, merged from `$SETUP/air/acp.json`) | Grok and Claude Code as ACP agents in JetBrains Air. |
 | `~/Library/Application Support/JetBrains/Air/review/review-prompt.md` | `$SETUP/air/review-prompt.md` | Air's code-review task list, aligned with the review order in `AGENTS.md`. Air sends it as the user turn, so it outranks `AGENTS.md`. If Air replaces the link with a plain file, re-run `install.sh`. |
-| `~/Library/Application Support/JetBrains/Air/themes/` | `$SETUP/air/themes/` | `Dark-Blue.json`: Air's Dark theme with loud comments (code comments orange, doc comments green, TODOs yellow), per the Comments section of `AGENTS.md`. Edit it in Air with Edit Color Theme…; the save lands in the synced folder. `install.sh` moves an existing local `themes/` folder to the backup dir; to keep a theme from it, copy the file into `$SETUP/air/themes/`, which shares it with every machine. |
+| `~/Library/Application Support/JetBrains/Air/themes/` | `$SETUP/air/themes/` | `Dark-Blue.json`: Air's Dark theme with loud comments (code comments orange, doc comments green, TODOs yellow), per the Comments section of `AGENTS.md`. Edit it in Air with Edit Color Theme…; the save lands in `$SETUP` as an uncommitted change, which `install.sh` then warns about: copy the file into a separate clone, land it through a PR, and `git -C "$SETUP" restore air/themes` before the pull. `install.sh` moves an existing local `themes/` folder to the backup dir; to keep a theme from it, add the file to `air/themes/` in a separate clone and land it through a PR, which shares it with every machine. |
 | `~/Library/Application Support/JetBrains/Air/settings.json` | (file, merged from `$SETUP/air/settings.json`) | Selects the `Dark-Blue` theme. Other Air settings stay local. |
 
 `settings.json` is merged, not linked: Claude Code rewrites it in place, which would
@@ -244,20 +244,16 @@ read those first.
    `GROK_HOME=~/.grok-review grok login`. A dedicated, revocable key is best. Without
    that login, `review-pr` falls back to a Claude agent and says so on the PR.
 
-2. Let the file sync bring `$SETUP` to the machine, then run:
+2. Clone the repo to where it will stay, then run `install.sh` from it:
 
    ```sh
+   gh repo clone GeorgiosDelkos/agent-setup "$SETUP"
    bash "$SETUP/install.sh"
    ```
 
-   Run it through `bash`: file sync can drop the executable bit, which `install.sh` then
-   restores on itself, the hooks, and the status line. settings.json also calls every hook and
-   the status line through `bash`, so a file that a later sync rewrites without the bit
-   still runs.
-
    This creates every link in the inventory, writes `~/.claude/CLAUDE.md`, merges
-   `settings.json`, copies `cargo/config.toml` into `~/.cargo/config.toml`, and makes the
-   hooks executable. Anything it replaces is moved to
+   `settings.json`, and copies `cargo/config.toml` into `~/.cargo/config.toml`. Anything it
+   replaces is moved to
    `~/.agent-setup-backup/<timestamp>/`. It is safe to re-run, and it reports missing tools.
 
 3. Done by `install.sh`: it merges the `hooks` section of `$SETUP/claude/settings.json` into
@@ -269,7 +265,7 @@ read those first.
 ## Local layer
 
 This repo is public, so anything company-specific or machine-specific stays out of it but
-still lives in `$SETUP`, synced to every machine like the rest. `.gitignore` lists it:
+still lives in `$SETUP`, as files `.gitignore` lists:
 
 - `agents/AGENTS.local.md`: rules loaded with `AGENTS.md` (Claude imports it after; Grok
   reads every file in `~/.grok/rules/`, in its own order). `install.sh` adds it to
@@ -279,9 +275,10 @@ still lives in `$SETUP`, synced to every machine like the rest. `.gitignore` lis
 - `install.local.sh`: extra install steps, run by `install.sh` when it exists.
 - Company skills under `claude/skills/`, and skills other tools install there.
 
-The local layer has no history: the sync carries its current state only. Keep anything
-that holds a secret out of `$SETUP` entirely, and copy it to each machine over a secure
-channel.
+The local layer is per machine and has no history: git does not carry it, so a `git pull`
+never changes it and a new machine starts without it. Copy the files to a new machine by
+hand, to the same paths. Keep anything that holds a secret out of `$SETUP` entirely, and
+copy it to each machine over a secure channel.
 
 ## JetBrains Air (ACP agents)
 
@@ -436,9 +433,9 @@ EVALS_ARM=grok bash evals/run.sh varint   # the same task written by Grok, with 
   not be read. Neither is a zero.
 - The sessions use this machine's `~/.claude`, so a run measures the deployed setup, not
   the checkout the script is in. The lint table and `house-check.pl` do come from the
-  script's checkout. The header line names both commits (in a synced folder, a commit is
-  what git knows; the files can be ahead of it). To measure a rules change, merge and
-  deploy it, then run from the deployed commit.
+  script's checkout. The header line names both commits (a commit is what git knows; a
+  deployed copy with uncommitted changes, which `install.sh` warns about, is ahead of it).
+  To measure a rules change, merge and deploy it, then run from the deployed commit.
 - A session has the user's permissions and the machine's whole setup, and the scoring runs
   the code it wrote. Run the harness only where you would let an agent work on such a
   task. The memory hooks are off in these sessions (`HIPPIUS_MEM_HOOKS_BYPASS=1`), so an
@@ -480,47 +477,51 @@ The steps are rule REPO-1 in `rust-style/topics/repo.md`. In short:
 
 ## Version control
 
-History lives in the repo https://github.com/GeorgiosDelkos/agent-setup; the file sync
-only carries the working files between machines. The git directory is outside the synced
-folder, at `~/.local/share/agent-setup.git`, because a `.git` directory synced between
-machines can be corrupted by concurrent writes. `$SETUP/.git` is a one-line file,
-`gitdir: <home>/.local/share/agent-setup.git` (machines set up earlier keep the relative
-`../../.local/share/agent-setup.git`, which still resolves), so plain `git` works in the
-folder. The sync must exclude `.git`: the path in it is per machine. Since the sync does not
-carry it, `install.sh` (`setup_git`) writes it on each machine, clones the git directory
-where there is none, and leaves the synced files as they are. A run that
-stopped after the clone is finished by the next one.
+History lives in the repo https://github.com/GeorgiosDelkos/agent-setup, and `$SETUP` on
+each machine is a plain clone of it on `main`: the deployed copy. Its working files are
+live, because the links in the inventory point into it: an edit made there runs in every
+session on that machine before any review or test, which is how unreviewed changes piled up
+before. So:
 
-A machine without the file sync can use a plain clone as `$SETUP` instead: `setup_git`
-sees its `.git` directory and leaves it alone. That clone is then the deployed copy on that
-machine. The first rule below holds for it (edit in a separate clone, land through a PR), and
-it updates with `git pull --ff-only`. The fetch and mixed reset further down are for synced
-folders only: in a plain clone a mixed reset moves `HEAD` and leaves the old files live.
+1. Edit in a separate clone (`gh repo clone GeorgiosDelkos/agent-setup`), on a branch.
+2. `bash check.sh`, commit, open a draft PR; review, fix, `gh pr ready`, CI green, merge.
+3. On every machine: `git -C "$SETUP" pull --ff-only`, then `bash "$SETUP/install.sh"`.
+   The pull updates everything that is linked. `install.sh` updates what is copied or
+   merged (`settings.json`, `grok/`, `cargo/config.toml`, `air/acp.json`), and it is safe
+   to run when nothing changed.
 
-- The synced folder is the deployed copy: it should match `origin/main`. An edit made in it
-  is live on every machine at the next sync, before any review or test, which is how
-  unreviewed changes piled up there before. So:
-  1. Edit in a separate clone (`gh repo clone GeorgiosDelkos/agent-setup`), on a branch.
-  2. `bash check.sh`, commit, open a draft PR; review, fix, `gh pr ready`, CI green, merge.
-  3. On one machine: `git -C "$SETUP" pull --ff-only`, then `bash "$SETUP/install.sh"` when
-     `settings.json` or a hook registration changed. The sync carries the files to the
-     other machines. A file `install.sh` copies or merges outside the synced folder
-     (`grok/`, `cargo/config.toml`, `air/acp.json`) does not travel that way: run
-     `install.sh` on every machine after it changes.
-- `install.sh` warns when the synced folder is off `main`, has changes not in git, or is
-  behind the last fetched `origin/main`. Tools that install into `~/.claude/skills/` write
-  into the synced folder too; such a skill shows up there as untracked until it is committed
-  or removed.
-- On every other machine the files arrive through the sync while its git directory still
-  points at the old commit, and `git pull` refuses to overwrite them. Sync the git directory
-  without touching the files: `git -C "$SETUP" fetch`, then
-  `git -C "$SETUP" reset -q origin/main` (a mixed reset: index and
-  HEAD only). `install.sh` says when this is needed.
-- The history was rewritten once, on 2026-10-29, to take company content out of the public
-  repo. A git directory from before that has unrelated history: run the same `fetch` and
-  mixed `reset`. Never `pull` (it fails, or stops in a conflicted rebase), and never
-  `reset --hard` or `checkout`, which delete the files tracked before the rewrite (the
-  company skills, now in the local layer) from the synced folder and so from every machine.
+Nothing else writes to the deployed copy: no edit, no branch switch, no checkout of another
+commit. `install.sh` checks this at the end of every run, against the last fetched
+`origin/main`. It warns when `$SETUP` is off `main`, has changed or untracked files, or has
+commits that are not on `origin/main`, and it notes when `$SETUP` is behind. A tool that
+installs into `~/.claude/skills/` writes into the deployed copy too: such a skill shows up
+as untracked until it is committed through a PR, listed in that clone's
+`.git/info/exclude` (per machine, and no PR names it), or removed.
+
+Until 2026-11-18 the folder could also be carried between machines by a file-sync service,
+with its git directory outside the folder. A machine still set up that way has a `.git`
+file in `$SETUP`, not a directory, and it holds `gitdir: … .local/share/agent-setup.git`.
+Convert it once:
+
+1. Take `$SETUP` out of the file sync, and check in the sync tool that it is out. A folder
+   still synced carries the moves below to the other machines as deletions. If the tool
+   removes local files when a folder leaves it, copy the folder elsewhere first and work
+   from the copy.
+2. `gh repo clone GeorgiosDelkos/agent-setup "$SETUP.new"`.
+3. Copy the local layer across, to the same paths. `diff -rq "$SETUP" "$SETUP.new"` lists
+   it: every `Only in $SETUP` line other than `.git` is a file the repo does not have (a
+   rule file, a company skill, a skill a tool installed), and every `differ` line is an
+   edit made in place that was never merged. Do not go by `git status` in the old folder:
+   an old git directory still tracks some of these files and does not list them. Repeat
+   until the only lines left are files you mean to leave behind.
+4. Move the old folder aside, move `$SETUP.new` to `$SETUP`, and run
+   `bash "$SETUP/install.sh"`. Once the links work, trash the old folder and
+   `~/.local/share/agent-setup.git`.
+
+Do not run `git pull`, `git reset --hard` or `git checkout` in the old folder first. Its
+git directory may predate 2026-10-29, when the history was rewritten to take company
+content out of the public repo, and those commands then fail or delete the files that
+moved to the local layer.
 
 ## Maintenance
 
@@ -551,7 +552,7 @@ folders only: in a plain clone a mixed reset moves `HEAD` and leaves the old fil
   agent budget with the user first, and fixes the output path. The rename keeps a second
   `SKILL.md` out of the tree, so no skill scanner (Grok's walks directories) can find the
   upstream file and its broad trigger. Vendored rather than installed with
-  `npx skills add`: pinned, reviewed in a PR, synced with history; updates are by hand.
+  `npx skills add`: pinned, reviewed in a PR, kept in git history; updates are by hand.
   `UPSTREAM.sha256` lists every upstream file, and `check.sh` fails on any difference, any
   extra file, or a failing validator test.
   - The two validators agents run, `validate-findings.cjs` and

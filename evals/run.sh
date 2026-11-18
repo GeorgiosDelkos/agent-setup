@@ -347,8 +347,8 @@ EOF
     "$followup" "$lines" "$followup_turns" "$followup_cost" >>"$results"
 }
 
-# HEAD of the deployed checkout and of this one. In a synced folder the files can be ahead
-# of HEAD (agents/SETUP.md, Version control), so a commit names what git knows, no more.
+# HEAD of the deployed checkout and of this one. A deployed copy with uncommitted changes is
+# ahead of HEAD (agents/SETUP.md, Version control), so a commit names what git knows, no more.
 deployed="$(git -C "$HOME/.claude/skills" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 checkers="$(git -C "$EVALS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 header="# arm $arm, deployed $deployed, checkers $checkers,"

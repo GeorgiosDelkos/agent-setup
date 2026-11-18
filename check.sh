@@ -24,11 +24,11 @@ step() {
   fi
 }
 
-# Every tracked shell script. git, not a glob: the synced folder also holds ignored local files
+# Every tracked shell script. git, not a glob: a deployed copy also holds ignored local files
 # (the local layer), which are not this repo's to lint, and a glob that matches nothing in CI
 # would pass its own pattern to shellcheck as a file name.
 if ! tracked="$(git -C "$SETUP_DIR" ls-files '*.sh')"; then
-  echo "check.sh needs a git work tree (in the synced folder, install.sh sets one up)" >&2
+  echo "check.sh needs a git work tree: run it in a clone of the repo" >&2
   exit 1
 fi
 shell_files=()

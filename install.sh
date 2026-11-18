@@ -204,118 +204,65 @@ setup_air() {
   merge_json "$shared" "$air_dir/acp.json"
 }
 
-# True when the folder's `.git` pointer file names git directory $1. Read from the file, not
-# from git, so it holds before that directory exists (a first run, or one trashed to start
-# over), and compared as physical paths, since a symlink in $HOME would make equal paths
-# differ as strings.
-points_to() {
-  local want="$1" pointer here there
-  pointer="$(sed -n 's/^gitdir: //p' "$SETUP_DIR/.git")"
-  if [[ "$pointer" != /* ]]; then
-    pointer="$SETUP_DIR/$pointer"
-  fi
-  mkdir -p "$(dirname "$want")"
-  # A pointer into a missing directory resolves to nothing, which matches no git directory.
-  here="$(cd "$(dirname "$pointer")" 2>/dev/null && pwd -P || true)/$(basename "$pointer")"
-  there="$(cd "$(dirname "$want")" && pwd -P)/$(basename "$want")"
-  [[ "$here" == "$there" ]]
-}
-
-# History lives in GitHub. The git directory stays outside this synced folder, because a .git
-# directory synced between machines can be corrupted by concurrent writes. The folder's `.git`
-# file points to ~/.local/share/agent-setup.git by absolute path: the sync never carries that
-# file, so each machine writes its own. Create that git directory where it is missing. The
-# synced working files are left as they are: only the index is built from HEAD.
-setup_git() {
-  local git_dir="$HOME/.local/share/agent-setup.git"
-  local remote="https://github.com/GeorgiosDelkos/agent-setup.git"
-  if ! command -v git >/dev/null; then
-    echo "skip    git history (git not found)"
+# This checkout is the deployed copy and should be origin/main (agents/SETUP.md, Version
+# control): its working files are live in every session on this machine, so a change made
+# here runs before any review or test. Read-only and offline: it compares against the last
+# fetched origin/main, so a merge made since that fetch is not seen.
+check_deployed() {
+  local top branch status changed counts ahead behind
+  # The layout from before 2026-11-18: no git command is safe to suggest there.
+  if [[ -f "$SETUP_DIR/.git" ]] && grep -q 'agent-setup\.git' "$SETUP_DIR/.git"; then
+    echo "warning: $SETUP_DIR still has the file-sync layout (its .git is a file that names" \
+      "agent-setup.git): convert it once (SETUP.md, Version control)"
     return 0
   fi
-  # A regular clone (a .git directory, or a pointer to another git directory) already has
-  # its history; setting up the shared git directory there would reset the clone's index.
-  if [[ -d "$SETUP_DIR/.git" ]] || { [[ -f "$SETUP_DIR/.git" ]] && ! points_to "$git_dir"; }; then
-    echo "skip    git history ($SETUP_DIR is a clone with its own git directory)"
-    return 0
-  fi
-
-  if [[ ! -d "$git_dir" ]]; then
-    mkdir -p "$(dirname "$git_dir")"
-    if ! git clone -q --bare "$remote" "$git_dir"; then
-      echo "skip    git history (cannot clone $remote: check \`gh auth status\`)"
-      return 0
-    fi
-  fi
-
-  # The sync does not carry the .git file to other machines, so it is written here, once the
-  # git directory it points to exists.
-  if [[ ! -e "$SETUP_DIR/.git" ]]; then
-    printf 'gitdir: %s\n' "$git_dir" >"$SETUP_DIR/.git"
-    echo "wrote   $SETUP_DIR/.git"
-  fi
-
-  # The sync drops executable bits, so file modes say nothing here; tracked, they would show
-  # every hook as changed until the chmod below runs.
-  git --git-dir="$git_dir" config core.fileMode false
-
-  # The index is the last thing written below, so it marks a finished setup. A run that
-  # stopped after the clone resumes from here.
-  if [[ -f "$git_dir/index" ]]; then
-    echo "ok      $git_dir"
-    return 0
-  fi
-  git --git-dir="$git_dir" config core.bare false
-  git --git-dir="$git_dir" config remote.origin.fetch '+refs/heads/*:refs/remotes/origin/*'
-  if ! git -C "$SETUP_DIR" fetch -q origin; then
-    echo "skip    git history (cannot fetch $remote: check \`gh auth status\`, then re-run)"
-    return 0
-  fi
-  git -C "$SETUP_DIR" branch -q --set-upstream-to=origin/main main
-  git -C "$SETUP_DIR" reset -q
-  echo "cloned  $git_dir"
-}
-
-# The synced folder is the deployed copy and should match origin/main (agents/SETUP.md,
-# Version control): an edit made in it is live on every machine before any review or test.
-# Read-only and offline: it compares against the last fetched origin/main. The files are
-# compared, not HEAD: on every machine but the one that pulled, the files arrive through the
-# sync while that machine's git directory still points at the old commit.
-check_sync() {
-  local top branch changed counts ahead behind
   top="$(git -C "$SETUP_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
   if [[ -z "$top" || "$(cd "$top" && pwd -P)" != "$(cd "$SETUP_DIR" && pwd -P)" ]]; then
+    echo "note: $SETUP_DIR is not a git clone, so it cannot be updated with git pull" \
+      "(SETUP.md, Version control)"
     return 0
   fi
-  if ! git -C "$SETUP_DIR" rev-parse -q --verify origin/main >/dev/null; then
-    echo "note: $SETUP_DIR has no origin/main to compare with (git fetch)"
-    return 0
-  fi
+  # The branch and the changed files need no origin/main, so they come before that check.
   branch="$(git -C "$SETUP_DIR" symbolic-ref -q --short HEAD || echo "a detached HEAD")"
   if [[ "$branch" != main ]]; then
-    echo "warning: $SETUP_DIR is on $branch, not main"
+    echo "warning: $SETUP_DIR is on $branch, not main: git -C \"$SETUP_DIR\" switch main"
   fi
-
-  if ! changed="$({
-    git -C "$SETUP_DIR" diff --name-only origin/main --
-    git -C "$SETUP_DIR" ls-files --others --exclude-standard
-  } | wc -l | tr -d ' ')"; then
-    echo "warning: cannot compare $SETUP_DIR with origin/main (see git's message above)"
+  # No git call below may end install.sh, which still has its tool check to print: an
+  # unreadable index fails this one, a clone with no commit checked out the rev-list.
+  if ! status="$(git -C "$SETUP_DIR" status --porcelain)"; then
+    echo "warning: cannot read the state of $SETUP_DIR (git's message above)"
     return 0
   fi
+  changed="$(grep -c . <<<"$status" || true)"
   if ((changed > 0)); then
-    echo "warning: $SETUP_DIR has $changed files that differ from origin/main; they are live" \
-      "on every machine, unreviewed. Move them to a clone and open a PR, or git pull if this" \
-      "machine is behind (SETUP.md, Version control)."
-    return 0
+    echo "warning: $SETUP_DIR has $changed changed or untracked path(s); they are live in" \
+      "every session on this machine, unreviewed. Move them to a separate clone and open a" \
+      "PR (SETUP.md, Version control)."
   fi
 
-  # The files match origin/main. A HEAD elsewhere is only this git directory lagging.
-  counts="$(git -C "$SETUP_DIR" rev-list --left-right --count HEAD...origin/main)"
+  if ! git -C "$SETUP_DIR" rev-parse -q --verify origin/main >/dev/null; then
+    echo "note: $SETUP_DIR has no origin/main to compare with: it needs a remote named" \
+      "origin that has main, fetched"
+    return 0
+  fi
+  if ! counts="$(git -C "$SETUP_DIR" rev-list --left-right --count HEAD...origin/main)"; then
+    echo "warning: cannot compare $SETUP_DIR with origin/main (git's message above)"
+    return 0
+  fi
   read -r ahead behind <<<"$counts"
-  if ((ahead > 0 || behind > 0)); then
-    echo "note: $SETUP_DIR matches origin/main but its git directory does not; sync it" \
-      "without touching the files: git -C $SETUP_DIR reset -q origin/main"
+  if ((ahead > 0)); then
+    echo "warning: $SETUP_DIR has $ahead commit(s) that are not on origin/main; they are" \
+      "live on this machine, unreviewed. Move them to a branch in a separate clone and" \
+      "open a PR."
+  fi
+  if ((behind > 0)); then
+    # The pull is named only where it works: on main, with no commit or change of its own.
+    if [[ "$branch" == main ]] && ((ahead == 0 && changed == 0)); then
+      echo "note: $SETUP_DIR is $behind commit(s) behind origin/main:" \
+        "git -C \"$SETUP_DIR\" pull --ff-only, then run install.sh again"
+    else
+      echo "note: $SETUP_DIR is $behind commit(s) behind origin/main"
+    fi
   fi
 }
 
@@ -396,7 +343,7 @@ check_tools() {
 # Copy the shared Cargo settings into ~/.cargo/config.toml, between marker lines, replacing an
 # older copy. The file is not linked or merged: it also holds per-machine linkers and
 # rustflags, and there is no TOML counterpart to jq here. Cargo's `include` was tried and
-# dropped: a missing included file (a moved or unsynced folder) makes every cargo command
+# dropped: a missing included file (a moved folder) makes every cargo command
 # fail, and toolchain 1.88 ignores the key. A copy has neither problem; the cost is that an
 # edit to cargo/config.toml reaches a machine only when install.sh runs there.
 setup_cargo() {
@@ -581,17 +528,13 @@ main() {
   setup_grok_review
   setup_memory
   setup_air
-  setup_git
-  check_sync
+  check_deployed
   check_grok_mode
-  # Sync drops the executable bit, so restore it on everything that is run directly.
-  chmod +x "$SETUP_DIR/install.sh" "$SETUP_DIR"/claude/hooks/*/*.sh \
-    "$SETUP_DIR/claude/statusline.sh" "$SETUP_DIR"/claude/scripts/*.sh
   check_tools
   echo "Done. Start new Claude Code and Grok sessions to pick up the changes."
 }
 
-# Run unless sourced: tests/install.test.sh sources this file to test merge_json.
+# Run unless sourced: tests/install.test.sh sources this file to test its functions.
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
   main "$@"
 fi
